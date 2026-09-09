@@ -19,6 +19,7 @@ if(DAS_DEVICE STREQUAL "nucleo_h755zi_q")
     set(DAS_MCU_BACKEND "cortex_m")
     set(DAS_DEVICE_BACKEND "stm32h755")
     set(DAS_BOARD_BACKEND "nucleo_h755zi_q")
+    set(DAS_CMSIS_DEVICE_HEADER_NAME "stm32h755xx.h")
 
     if(DAS_CORE STREQUAL "cm7")
         set(DAS_CORE_HEADER "core_cm7.h")
@@ -36,10 +37,12 @@ if(DAS_DEVICE STREQUAL "nucleo_h755zi_q")
     endif()
 
     set(DAS_MCU_SOURCES
-        src/mcu/cortex_m/startup.c)
+        src/mcu/cortex_m/startup.c
+        src/mcu/cortex_m/irq.c)
 
     set(DAS_DEVICE_SOURCES
-        src/device/stm32h755/gpio.c)
+        src/device/stm32h755/gpio.c
+        src/device/stm32h755/gpio_irq.c)
 
     set(DAS_BOARD_SOURCES
         src/board/nucleo_h755zi_q/board.c)
@@ -80,7 +83,7 @@ if(NOT DAS_CMSIS_CORE_INCLUDE)
     message(FATAL_ERROR
         "CMSIS ${DAS_CORE_HEADER} not found under ${STM32_CUBE_H7_DIR}/Drivers/CMSIS")
 endif()
-if(NOT EXISTS "${DAS_CMSIS_DEVICE_INCLUDE}/stm32h755xx.h")
+if(NOT EXISTS "${DAS_CMSIS_DEVICE_INCLUDE}/${DAS_CMSIS_DEVICE_HEADER_NAME}")
     message(FATAL_ERROR
         "STM32H755 CMSIS device header not found under ${DAS_CMSIS_DEVICE_INCLUDE}")
 endif()
@@ -98,7 +101,10 @@ add_library(das::das ALIAS das)
 target_include_directories(das
     PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     PRIVATE "${DAS_CMSIS_CORE_INCLUDE}" "${DAS_CMSIS_DEVICE_INCLUDE}")
-target_compile_definitions(das PRIVATE ${DAS_CORE_DEFINE} STM32H755xx)
+target_compile_definitions(das PRIVATE
+    ${DAS_CORE_DEFINE}
+    STM32H755xx
+    DAS_CMSIS_DEVICE_HEADER=\"${DAS_CMSIS_DEVICE_HEADER_NAME}\")
 target_compile_features(das PUBLIC c_std_11)
 target_compile_options(das PRIVATE -Wall -Wextra -Werror)
 

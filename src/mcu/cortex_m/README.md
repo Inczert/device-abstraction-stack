@@ -6,6 +6,8 @@ The same architecture layer is shared by the STM32H755 Cortex-M7 and Cortex-M4 b
 
 ## Current support
 
+### Startup/runtime
+
 `startup.c` provides an optional reusable reset/runtime path:
 
 - copy `.data` from its linker-defined load address into RAM;
@@ -18,17 +20,35 @@ The same architecture layer is shared by the STM32H755 Cortex-M7 and Cortex-M4 b
 
 The reset/core handlers are weak so an RTOS, bootloader or application can provide strong replacements.
 
+### Interrupt controller
+
+`irq.c` implements the public device-agnostic `das_irq_*()` contract for Cortex-M by delegating to CMSIS-Core NVIC helpers.
+
+The public handle is `das_irq_t`; applications obtain it from DAS resource APIs such as `das_gpio_interrupt_get_irq()` rather than using `IRQn_Type` or vendor IRQ constants directly.
+
+Supported controller operations are:
+
+- enable/disable/query enabled state;
+- set/get priority;
+- query the number of implemented priority levels;
+- set/clear/query controller pending state.
+
+This implementation intentionally does **not** reproduce the NVIC register layout or CMSIS helper logic. The selected CMSIS device header supplies `IRQn_Type` and `__NVIC_PRIO_BITS`, while CMSIS-Core performs the actual controller accesses.
+
+See [`docs/interrupts.md`](../../../docs/interrupts.md).
+
 ## What this layer does not know
 
-The Cortex-M startup code does not know:
+The Cortex-M implementation does not own:
 
 - STM32H755 flash addresses;
 - which flash bank a core image uses;
 - AXI/D2 SRAM placement;
-- STM32 external IRQ numbers;
+- the meaning of STM32 peripheral interrupt sources;
+- GPIO/EXTI routing;
 - Nucleo board wiring.
 
-Those belong to device/build/board layers.
+The device layer resolves a peripheral source to the controller-line handle used by the generic IRQ API. For example, the STM32H755 GPIO backend maps a GPIO EXTI source onto the corresponding `das_irq_t`.
 
 ## Linker contract
 
@@ -54,22 +74,21 @@ A custom `DAS_LINKER_SCRIPT` may provide different physical addresses while reta
 
 ## Core selection
 
-`DAS_CORE` selects compiler/core details outside this source file:
+`DAS_CORE` selects compiler/core details:
 
 ```text
 cm7 -> Cortex-M7 + FPv5-D16 + CORE_CM7
 cm4 -> Cortex-M4 + FPv4-SP-D16 + CORE_CM4
 ```
 
-This keeps one reusable Cortex-M startup implementation while the device backend and build system select the appropriate CPU-specific views and memory policy.
+For the IRQ backend, the target build also supplies the selected CMSIS device header. This is required because CMSIS-Core deliberately gets the device IRQ enumeration and implemented priority width from the device header. The Cortex-M source itself contains no STM32 IRQ numbers.
 
 ## Planned architecture work
 
-Upcoming core-only features include:
+Upcoming architecture-level work may include:
 
-- NVIC helpers;
-- SysTick/timebase;
-- interrupt masking helpers;
+- generic monotonic time using CMSIS SysTick internally;
+- interrupt masking helpers only where they provide a useful public contract;
 - Cortex-M7 cache/MPU support where architecture-specific.
 
 STM32 RCC, GPIO, EXTI, USART, DMA and other peripherals belong under `src/device/stm32h755/`, not here.

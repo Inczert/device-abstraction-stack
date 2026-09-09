@@ -17,10 +17,19 @@ set $high=(unsigned int)g_das_hw_evidence.gpio_input_high
 set $irq=(unsigned int)g_das_hw_evidence.exti_irq_count
 set $rising=(unsigned int)g_das_hw_evidence.exti_rising_count
 set $falling=(unsigned int)g_das_hw_evidence.exti_falling_count
+set $priority_levels=(unsigned int)g_das_hw_evidence.irq_priority_levels
+set $priority=(unsigned int)g_das_hw_evidence.irq_priority
+set $required_flags=$das_expected_flags
 
-printf "command=%u seen=%u error=0x%08x flags=0x%08x low=%u high=%u irq=%u rising=%u falling=%u\n", $das_command, $seen, $error, $flags, $low, $high, $irq, $rising, $falling
+# EXTI qualification also proves the generic DAS interrupt-controller API:
+# enable state, priority round-trip, and software pending set/clear/query.
+if $das_command == 10
+  set $required_flags=$required_flags | 0x700
+end
 
-if $error == 0 && $seen == $das_command && ($flags & $das_expected_flags) == $das_expected_flags
+printf "command=%u seen=%u error=0x%08x flags=0x%08x low=%u high=%u irq=%u rising=%u falling=%u irq_levels=%u irq_priority=%u\n", $das_command, $seen, $error, $flags, $low, $high, $irq, $rising, $falling, $priority_levels, $priority
+
+if $error == 0 && $seen == $das_command && ($flags & $required_flags) == $required_flags
   printf "RESULT: PASS\n"
 else
   printf "RESULT: FAIL\n"

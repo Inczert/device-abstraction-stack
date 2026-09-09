@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include <das/irq.h>
 #include <das/result.h>
 
 /** Generic GPIO port identifier. Backends may reject ports absent on the target. */
@@ -108,19 +109,27 @@ bool das_gpio_read_input(das_gpio_pin_t pin);
 /**
  * Route/configure a GPIO interrupt source for the requested edge(s).
  *
- * This configures the backend GPIO/EXTI path only. NVIC vector selection,
- * priority, and ISR ownership remain the responsibility of the application.
+ * This configures the backend GPIO/EXTI source path. Interrupt-controller
+ * priority/enabling is controlled separately through the DAS IRQ API.
  */
 das_result_t das_gpio_interrupt_configure(das_gpio_pin_t pin,
                                            das_gpio_interrupt_edge_t edge);
 
-/** Enable or disable the backend interrupt/event line for this GPIO. */
+/** Enable or disable the backend GPIO interrupt source/event line. */
 das_result_t das_gpio_interrupt_enable(das_gpio_pin_t pin, bool enabled);
 
-/** Return whether interrupt pending state is set for this GPIO line. */
+/**
+ * Resolve the interrupt-controller line used by this GPIO interrupt source.
+ *
+ * Several GPIO pins may share one controller IRQ. The returned handle is
+ * therefore a controller-line handle, not a unique GPIO-event identifier.
+ */
+das_result_t das_gpio_interrupt_get_irq(das_gpio_pin_t pin, das_irq_t* irq);
+
+/** Return whether interrupt-source pending state is set for this GPIO line. */
 bool das_gpio_interrupt_pending(das_gpio_pin_t pin);
 
-/** Clear interrupt pending state for this GPIO line. */
+/** Clear interrupt-source pending state for this GPIO line. */
 das_result_t das_gpio_interrupt_clear(das_gpio_pin_t pin);
 
 #endif

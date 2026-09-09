@@ -3,6 +3,7 @@
 #include <das/board.h>
 #include <das/cortex_m/startup.h>
 #include <das/gpio.h>
+#include <das/irq.h>
 
 #include "stm32h755xx.h"
 
@@ -21,6 +22,9 @@
 #define DAS_GPIO_FLAG_OPEN_DRAIN_RELEASE (UINT32_C(1) << 5u)
 #define DAS_GPIO_FLAG_EXTI_RISING        (UINT32_C(1) << 6u)
 #define DAS_GPIO_FLAG_EXTI_FALLING       (UINT32_C(1) << 7u)
+#define DAS_GPIO_FLAG_IRQ_ENABLED        (UINT32_C(1) << 8u)
+#define DAS_GPIO_FLAG_IRQ_PRIORITY       (UINT32_C(1) << 9u)
+#define DAS_GPIO_FLAG_IRQ_PENDING        (UINT32_C(1) << 10u)
 
 /* CN10 D4 -> D3 jumper for GPIO electrical-path qualification. */
 static const das_gpio_pin_t GPIO_TEST_OUTPUT = {DAS_GPIO_PORT_E, 14u}; /* D4 */
@@ -81,6 +85,8 @@ typedef struct das_hw_evidence {
     volatile uint32_t exti_irq_count;
     volatile uint32_t exti_rising_count;
     volatile uint32_t exti_falling_count;
+    volatile uint32_t irq_priority_levels;
+    volatile uint32_t irq_priority;
 } das_hw_evidence_t;
 
 /* Explicit .data/.bss probes used by the Cortex-M reset qualification. */
@@ -139,6 +145,8 @@ static void reset_gpio_test_evidence(void) {
     g_das_hw_evidence.exti_irq_count = 0u;
     g_das_hw_evidence.exti_rising_count = 0u;
     g_das_hw_evidence.exti_falling_count = 0u;
+    g_das_hw_evidence.irq_priority_levels = 0u;
+    g_das_hw_evidence.irq_priority = UINT32_MAX;
 }
 
 static void run_gpio_loopback(void) {
@@ -220,21 +228,75 @@ static void run_gpio_open_drain(void) {
 }
 
 static void run_gpio_exti(void) {
+    das_irq_t irq = DAS_IRQ_INVALID;
+    bool enabled = false;
+    bool pending = false;
+    uint32_t observed_priority = UINT32_MAX;
+
     reset_gpio_test_evidence();
-    NVIC_DisableIRQ(EXTI15_10_IRQn);
+
+    if (das_gpio_interrupt_get_irq(GPIO_TEST_INPUT, &irq) != DAS_OK ||
+        !das_irq_is_valid(irq) ||
+        das_irq_disable(irq) != DAS_OK ||
+        das_irq_is_enabled(irq, &enabled) != DAS_OK ||
+        enabled) {
+        g_das_hw_evidence.error = UINT32_C(0x2005);
+        return;
+    }
 
     if (das_gpio_input_init(GPIO_TEST_INPUT, DAS_GPIO_PULL_NONE) != DAS_OK ||
         das_gpio_output_init(GPIO_TEST_OUTPUT, false) != DAS_OK ||
         das_gpio_interrupt_configure(GPIO_TEST_INPUT, DAS_GPIO_INTERRUPT_BOTH) != DAS_OK ||
         das_gpio_interrupt_clear(GPIO_TEST_INPUT) != DAS_OK) {
-        g_das_hw_evidence.error = UINT32_C(0x2005);
+        g_das_hw_evidence.error = UINT32_C(0x2006);
         return;
     }
 
+    if (das_irq_clear_pending(irq) != DAS_OK ||
+        das_irq_set_pending(irq) != DAS_OK ||
+        das_irq_is_pending(irq, &pending) != DAS_OK ||
+        !pending ||
+        das_irq_clear_pending(irq) != DAS_OK ||
+        das_irq_is_pending(irq, &pending) != DAS_OK ||
+        pending) {
+        g_das_hw_evidence.error = UINT32_C(0x2007);
+        return;
+    }
+    g_das_hw_evidence.gpio_test_flags |= DAS_GPIO_FLAG_IRQ_PENDING;
+
+    g_das_hw_evidence.irq_priority_levels = das_irq_priority_levels();
+    if (g_das_hw_evidence.irq_priority_levels == 0u) {
+        g_das_hw_evidence.error = UINT32_C(0x2008);
+        return;
+    }
+
+    const uint32_t selected_priority = g_das_hw_evidence.irq_priority_levels > 1u
+        ? g_das_hw_evidence.irq_priority_levels / 2u
+        : 0u;
+
+    if (das_irq_set_priority(irq, selected_priority) != DAS_OK ||
+        das_irq_get_priority(irq, &observed_priority) != DAS_OK ||
+        observed_priority != selected_priority) {
+        g_das_hw_evidence.error = UINT32_C(0x2009);
+        return;
+    }
+    g_das_hw_evidence.irq_priority = observed_priority;
+    g_das_hw_evidence.gpio_test_flags |= DAS_GPIO_FLAG_IRQ_PRIORITY;
+
     short_delay();
-    NVIC_ClearPendingIRQ(EXTI15_10_IRQn);
-    NVIC_EnableIRQ(EXTI15_10_IRQn);
-    (void)das_gpio_interrupt_enable(GPIO_TEST_INPUT, true);
+    if (das_irq_clear_pending(irq) != DAS_OK ||
+        das_irq_enable(irq) != DAS_OK ||
+        das_irq_is_enabled(irq, &enabled) != DAS_OK ||
+        !enabled) {
+        g_das_hw_evidence.error = UINT32_C(0x200a);
+        return;
+    }
+    g_das_hw_evidence.gpio_test_flags |= DAS_GPIO_FLAG_IRQ_ENABLED;
+
+    if (das_gpio_interrupt_enable(GPIO_TEST_INPUT, true) != DAS_OK) {
+        g_das_hw_evidence.error = UINT32_C(0x200b);
+        return;
+    }
 
     for (uint32_t cycle = 0u; cycle < 2u; ++cycle) {
         (void)das_gpio_write(GPIO_TEST_OUTPUT, true);
@@ -244,7 +306,7 @@ static void run_gpio_exti(void) {
     }
 
     (void)das_gpio_interrupt_enable(GPIO_TEST_INPUT, false);
-    NVIC_DisableIRQ(EXTI15_10_IRQn);
+    (void)das_irq_disable(irq);
 
     if (g_das_hw_evidence.exti_rising_count >= 2u) {
         g_das_hw_evidence.gpio_test_flags |= DAS_GPIO_FLAG_EXTI_RISING;

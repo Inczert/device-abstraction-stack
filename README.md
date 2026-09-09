@@ -13,9 +13,10 @@ The current STM32 path uses **CMSIS definitions directly**, without STM32 HAL/LL
 | Architecture | Cortex-M |
 | Device | STM32H755 |
 | Board | NUCLEO-H755ZI-Q |
-| Cores | CM7 physically qualified; CM4 physical campaign implemented and awaiting final campaign evidence |
+| Cores | CM7 and CM4 startup/GPIO/EXTI physically qualified under debugger control |
 | Startup | reusable weak Cortex-M reset/runtime path |
-| Linker | default STM32H755 CM7 and CM4 layouts, overridable |
+| Linker | default STM32H755 CM7 and CM4 layouts plus custom override qualification |
+| Interrupts | device-agnostic IRQ handles/control; CMSIS NVIC backend on Cortex-M |
 | GPIO | input/output, pulls, push-pull/open-drain, AF configuration, EXTI |
 | Board API | green/yellow/red user LEDs |
 | Debug/test | dual-core OpenOCD + GDB + packaged evidence campaign |
@@ -33,6 +34,7 @@ DAS aims for:
 - explicit CPU/core selection on multi-core devices;
 - Cortex-M code separated from STM32 peripheral code;
 - board wiring separated from device registers;
+- CMSIS retained as a low-level implementation dependency rather than exposed as the application contract;
 - no required code generator;
 - no mandatory heap, RTOS or scheduler;
 - reusable startup/linker defaults that applications can replace;
@@ -69,8 +71,8 @@ Implementation ownership:
 
 ```text
 src/mcu/cortex_m/
-    Cortex-M architecture only
-    startup, future NVIC/SysTick/cache/MPU
+    Cortex-M architecture
+    startup, IRQ controller backend, future SysTick/cache/MPU
 
 src/device/stm32h755/
     STM32H755 silicon/peripherals
@@ -108,14 +110,7 @@ CM4:
 -DDAS_CORE=cm4
 ```
 
-The selected core controls:
-
-- CPU/FPU compiler flags;
-- CMSIS core header;
-- `CORE_CM7` / `CORE_CM4`;
-- default linker script.
-
-The default core is `cm7`.
+The selected core controls CPU/FPU compiler flags, CMSIS core definitions, core-specific device views, and the default linker script. The default core is `cm7`.
 
 ## Building
 
@@ -155,9 +150,26 @@ add_executable(my_firmware src/main.c)
 target_link_libraries(my_firmware PRIVATE das::das)
 ```
 
-There is no separate `das::linker` target.
+There is no separate linker pseudo-library. `libdas.a` has no final physical addresses by itself; the selected linker script is propagated through `das::das` and applies when the final ELF is linked.
 
-`libdas.a` is a static archive and has no final physical addresses by itself. The selected linker script is propagated through `das::das` and applies when `my_firmware` is linked into an ELF.
+## Interrupt model
+
+Applications use DAS interrupt handles rather than CMSIS/vendor interrupt numbers:
+
+```c
+das_irq_t irq = DAS_IRQ_INVALID;
+
+(void)das_gpio_interrupt_get_irq(pin, &irq);
+(void)das_irq_set_priority(irq, 3u);
+(void)das_irq_clear_pending(irq);
+(void)das_irq_enable(irq);
+```
+
+On Cortex-M the backend delegates controller access to CMSIS `NVIC_*` helpers. The application does not need to know that the selected architecture uses NVIC or that an STM32 GPIO source maps to a vendor `IRQn_Type` value.
+
+Peripheral/source state remains separate from controller state. For GPIO, EXTI routing/masking/pending belongs to the GPIO/device backend while `das_irq_*()` controls the CPU interrupt-controller line.
+
+See [Interrupt model](docs/interrupts.md).
 
 ## Default linker layouts
 
@@ -186,7 +198,7 @@ Override the selected default with:
 -DDAS_LINKER_SCRIPT=/path/to/custom.ld
 ```
 
-The qualification campaign includes a real custom-linker override build that relocates a CM7 test image to `0x08020000`; this proves that the override is actually propagated through `das::das` rather than merely documented optimistically.
+The qualification campaign includes a custom-linker override build that relocates a CM7 test image to `0x08020000`, proving that the override is propagated through `das::das`.
 
 See [STM32H755 memory and linker policy](docs/memory-layout.md).
 
@@ -200,9 +212,7 @@ The Cortex-M layer provides a weak reset/runtime path that:
 4. executes the required barriers;
 5. calls `main()`.
 
-Applications with a bootloader, RTOS or custom startup can replace the weak symbols.
-
-Device-specific external IRQ vectors remain part of the final target image.
+Applications with a bootloader, RTOS or custom startup can replace the weak symbols. Device-specific external IRQ vectors remain part of the final target image.
 
 ## Public APIs
 
@@ -210,6 +220,7 @@ Current public headers:
 
 ```text
 include/das/result.h
+include/das/irq.h
 include/das/gpio.h
 include/das/board.h
 include/das/cortex_m/startup.h
@@ -227,26 +238,26 @@ Run the full STM32H755 campaign:
     --clean
 ```
 
-The campaign now builds **three** images before touching the board:
+The campaign builds three images:
 
 ```text
 CM7 hardware image        DAS_CORE=cm7, default CM7 linker
 CM4 hardware image        DAS_CORE=cm4, default CM4 linker
-custom-link smoke image   DAS_CORE=cm7, DAS_LINKER_SCRIPT=tests/link/stm32h755/custom_cm7.ld
+custom-link smoke image   DAS_CORE=cm7, custom linker override
 ```
 
-It then uses OpenOCD in direct-DAP dual-core mode:
+It uses one direct-DAP OpenOCD session:
 
 ```text
 GDB :3333 -> STM32H755 Cortex-M7 / CPU1
 GDB :3334 -> STM32H755 Cortex-M4 / CPU2
 ```
 
-Both cores are physically exercised for startup, GPIO pulls, loopback, open-drain and EXTI. The LED visual checks remain on CM7 because the board mapping is shared and CM4 GPIO output/input is already exercised electrically through the loopback fixture.
+Both cores are physically exercised for startup, GPIO pulls, loopback, open-drain and EXTI. The EXTI case also qualifies the public DAS IRQ controller path: source-to-handle resolution, enable/query, priority set/get, controller pending set/query/clear, and real edge delivery.
 
-The expanded campaign contains **24 acceptance points** and packages both core images, all three linker layouts/builds, GDB/OpenOCD logs and the final summary into one timestamped `.tar.gz`.
+The current complete campaign contains **24 acceptance points** and packages both core images, all linker-layout evidence, GDB/OpenOCD logs and the final summary into one timestamped `.tar.gz`.
 
-Important boundary: the CM4 tests are debugger-driven physical execution. They prove that CPU2 can execute the DAS image and access GPIO/EXTI correctly, but they do **not** yet qualify production CM7-to-CM4 boot/release sequencing, HSEM or shared-memory coordination. Those remain dual-core system work.
+Important boundary: CM4 execution is currently debugger-driven. Production CM7-to-CM4 boot/release sequencing, HSEM and shared-memory coordination remain separate dual-core system work.
 
 See [Hardware qualification](docs/testing.md).
 
@@ -254,6 +265,7 @@ See [Hardware qualification](docs/testing.md).
 
 - [Architecture](docs/architecture.md)
 - [Building and integration](docs/integration.md)
+- [Interrupt model](docs/interrupts.md)
 - [STM32H755 memory/linker policy](docs/memory-layout.md)
 - [Public API reference](docs/api.md)
 - [Porting DAS](docs/porting.md)

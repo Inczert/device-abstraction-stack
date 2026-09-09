@@ -158,3 +158,25 @@ das_result_t das_clock_get_frequency(uint32_t* frequency_hz) {
     *frequency_hz = frequencies.system_hz;
     return DAS_OK;
 }
+
+das_result_t das_clock_get_core_frequency(uint32_t* frequency_hz) {
+    if (frequency_hz == 0) {
+        return DAS_ERROR_INVALID_ARGUMENT;
+    }
+
+    stm32h755_clock_frequencies_t frequencies = {0};
+    const das_result_t result =
+        stm32h755_clock_get_frequencies(0u, &frequencies);
+    if (result != DAS_OK) {
+        return result;
+    }
+
+#if defined(CORE_CM7)
+    *frequency_hz = frequencies.cm7_hz;
+#elif defined(CORE_CM4)
+    *frequency_hz = frequencies.cm4_hz;
+#else
+#error "NUCLEO-H755ZI-Q clock backend requires CORE_CM7 or CORE_CM4"
+#endif
+    return DAS_OK;
+}

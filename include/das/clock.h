@@ -37,4 +37,14 @@ das_result_t das_clock_set_frequency(uint32_t frequency_hz);
 /** Read the current primary/system frequency derived from live hardware state. */
 das_result_t das_clock_get_frequency(uint32_t* frequency_hz);
 
+/**
+ * Read the clock frequency of the core executing the current DAS build.
+ *
+ * This differs from das_clock_get_frequency() on targets where a secondary
+ * core runs below the primary/system clock. Drivers such as the default
+ * Cortex-M SysTick timebase use this value rather than assuming SYSCLK equals
+ * the executing CPU clock.
+ */
+das_result_t das_clock_get_core_frequency(uint32_t* frequency_hz);
+
 #endif

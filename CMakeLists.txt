@@ -36,9 +36,13 @@ if(DAS_DEVICE STREQUAL "nucleo_h755zi_q")
             "Unsupported DAS_CORE='${DAS_CORE}' for ${DAS_DEVICE}; expected cm7 or cm4")
     endif()
 
+    set(DAS_COMMON_SOURCES
+        src/common/time.c)
+
     set(DAS_MCU_SOURCES
         src/mcu/cortex_m/startup.c
-        src/mcu/cortex_m/irq.c)
+        src/mcu/cortex_m/irq.c
+        src/mcu/cortex_m/time.c)
 
     set(DAS_DEVICE_SOURCES
         src/device/stm32h755/gpio.c
@@ -48,7 +52,8 @@ if(DAS_DEVICE STREQUAL "nucleo_h755zi_q")
 
     set(DAS_BOARD_SOURCES
         src/board/nucleo_h755zi_q/board.c
-        src/board/nucleo_h755zi_q/clock.c)
+        src/board/nucleo_h755zi_q/clock.c
+        src/board/nucleo_h755zi_q/time.c)
 else()
     message(FATAL_ERROR "Unsupported DAS_DEVICE='${DAS_DEVICE}'")
 endif()
@@ -96,6 +101,7 @@ message(STATUS
 message(STATUS "DAS linker script: ${DAS_EFFECTIVE_LINKER_SCRIPT}")
 
 add_library(das STATIC
+    ${DAS_COMMON_SOURCES}
     ${DAS_MCU_SOURCES}
     ${DAS_DEVICE_SOURCES}
     ${DAS_BOARD_SOURCES})
@@ -106,6 +112,7 @@ target_include_directories(das
     PRIVATE
         "${DAS_CMSIS_CORE_INCLUDE}"
         "${DAS_CMSIS_DEVICE_INCLUDE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/mcu/${DAS_MCU_BACKEND}"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/device/${DAS_DEVICE_BACKEND}")
 target_compile_definitions(das PRIVATE
     ${DAS_CORE_DEFINE}

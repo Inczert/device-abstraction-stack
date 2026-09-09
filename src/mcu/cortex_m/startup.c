@@ -16,6 +16,13 @@ extern uint32_t __vector_table_start__;
 
 extern int main(void);
 
+/*
+ * Optional internal SysTick hook. When the DAS Cortex-M time backend is linked,
+ * it provides this symbol. RTOS/application code can still replace the weak
+ * SysTick_Handler entirely and use das_time_set_source() instead.
+ */
+void das_cortex_m_systick_hook(void) __attribute__((weak));
+
 static inline void cortex_m_dsb(void) {
     __asm volatile("dsb 0xf" ::: "memory");
 }
@@ -74,4 +81,9 @@ DAS_CORTEX_M_DEFAULT_HANDLER(UsageFault_Handler);
 DAS_CORTEX_M_DEFAULT_HANDLER(SVC_Handler);
 DAS_CORTEX_M_DEFAULT_HANDLER(DebugMon_Handler);
 DAS_CORTEX_M_DEFAULT_HANDLER(PendSV_Handler);
-DAS_CORTEX_M_DEFAULT_HANDLER(SysTick_Handler);
+
+__attribute__((weak)) void SysTick_Handler(void) {
+    if (das_cortex_m_systick_hook != 0) {
+        das_cortex_m_systick_hook();
+    }
+}

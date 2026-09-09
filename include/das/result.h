@@ -12,7 +12,9 @@ typedef enum das_result {
     /** The operation is valid generically but unsupported by this backend/device. */
     DAS_ERROR_UNSUPPORTED = -2,
     /** A bounded hardware/state transition did not complete before its deadline. */
-    DAS_ERROR_TIMEOUT = -3
+    DAS_ERROR_TIMEOUT = -3,
+    /** The requested operation requires initialization or an installed resource. */
+    DAS_ERROR_NOT_READY = -4
 } das_result_t;
 
 #endif

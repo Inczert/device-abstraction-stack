@@ -43,7 +43,7 @@ This layer contains architecture-only code, in C and/or assembly:
 
 It must not contain STM32 peripherals such as GPIO, RCC, USART, DMA, timers or SPI.
 
-The same Cortex-M startup is used for both STM32H755 cores. Core selection changes compiler/core definitions, not the conceptual ownership of startup.
+The same Cortex-M startup source is built for both STM32H755 cores. Core selection changes compiler/core definitions, not the conceptual ownership of startup.
 
 ### Device layer
 
@@ -68,7 +68,7 @@ This layer owns STM32H755 silicon behavior:
 - ADC/watchdog;
 - dual-core silicon control where appropriate.
 
-STM32H755 contains two CPUs. Where registers have CPU-specific views, the device backend selects the correct one from `CORE_CM7` or `CORE_CM4`. For example, EXTI interrupt masks/pending state use the CPU1 or CPU2 view rather than hard-coding CPU1.
+STM32H755 contains two CPUs. Where registers have CPU-specific views, the device backend selects the correct one from `CORE_CM7` or `CORE_CM4`. GPIO register programming is shared silicon behavior, while per-core EXTI/RCC views remain core-aware.
 
 ### Board layer
 
@@ -175,14 +175,7 @@ CPU2: Cortex-M4
 
 The board does not change when choosing which core image is being built. Therefore `DAS_DEVICE` should not encode `_cm7` or `_cm4` into the board name.
 
-`DAS_CORE` selects:
-
-- CPU/FPU compiler flags;
-- CMSIS core header;
-- `CORE_CM7` or `CORE_CM4`;
-- core-specific default linker layout.
-
-This makes the model extend naturally to other multi-core devices.
+`DAS_CORE` selects CPU/FPU compiler flags, CMSIS core header, `CORE_CM7`/`CORE_CM4`, and the core-specific default linker layout.
 
 ## Startup ownership
 
@@ -194,9 +187,7 @@ This makes the model extend naturally to other multi-core devices.
 4. execute barriers;
 5. enter `main()`.
 
-The startup code consumes linker symbols but does not know STM32H755 addresses.
-
-The final image still owns the vector table, including device-specific external IRQ entries.
+The startup code consumes linker symbols but does not know STM32H755 addresses. The final image still owns the vector table, including device-specific external IRQ entries.
 
 ## Memory ownership
 
@@ -212,9 +203,7 @@ CM4:
   D2 SRAM1     -> writable sections/stack
 ```
 
-This is a default firmware partition, not a hard architectural restriction.
-
-Applications remain free to provide a different linker script with `DAS_LINKER_SCRIPT`.
+This is a default firmware partition, not a hard architectural restriction. Applications remain free to provide a different linker script with `DAS_LINKER_SCRIPT`.
 
 See [STM32H755 memory and linker policy](memory-layout.md).
 
@@ -242,6 +231,42 @@ application/device vector table  -> final firmware target
 
 The device backend must also respect the selected CPU's EXTI/RCC view on a dual-core STM32H755.
 
+## Dual-core qualification architecture
+
+The physical campaign uses a single direct-DAP OpenOCD instance exposing both debug targets:
+
+```text
+ST-LINK
+   |
+   v
+OpenOCD direct DAP
+   |
+   +-- GDB :3333 -> STM32H755 cpu0 -> Cortex-M7
+   |
+   `-- GDB :3334 -> STM32H755 cpu1 -> Cortex-M4
+```
+
+The campaign loads and executes a separately linked image on each core and runs the same startup/GPIO/EXTI electrical tests on both.
+
+This is **debugger-driven core execution**. It validates that the code can physically run on CPU2 and reach the real STM32H755 GPIO/EXTI paths, but it is not the production dual-core boot model.
+
+Production dual-core control remains a separate device/system responsibility:
+
+```text
+CM7 configures system/clock policy
+        |
+        v
+CM7 releases or wakes CM4
+        |
+        v
+HSEM/shared-memory coordination
+        |
+        v
+independent application execution
+```
+
+Those mechanisms belong to the dedicated dual-core work rather than being hidden inside a GPIO test harness.
+
 ## Dependency rules
 
 1. `include/das/` exposes no vendor device types.
@@ -256,12 +281,13 @@ The device backend must also respect the selected CPU's EXTI/RCC view on a dual-
 
 Compilation alone is not sufficient evidence.
 
-Current qualification combines:
+The expanded campaign combines:
 
-- static CM7 linker-layout validation;
-- static CM4 linker-layout validation;
-- physical CM7 startup/reset validation;
-- physical GPIO/EXTI loopback;
-- visible board LED behavior.
+- default CM7 linker-layout validation;
+- default CM4 linker-layout validation;
+- custom linker-override validation;
+- physical CM7 startup/reset and GPIO/EXTI validation;
+- physical CM4 startup/reset and GPIO/EXTI validation;
+- visible board LED behavior on CM7.
 
-CM4 physical boot/release, shared memory and HSEM are intentionally deferred to the dual-core work because those require coordinated CPU1/CPU2 behavior rather than merely a correct CM4 ELF.
+A successful run therefore qualifies the current GPIO/EXTI implementation from both cores while keeping production CM4 boot/release, HSEM and shared-memory coordination as explicit later work.

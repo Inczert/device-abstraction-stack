@@ -2,27 +2,35 @@
 
 Target board: **NUCLEO-H755ZI-Q / STM32H755**.
 
-The physical test firmware in this directory executes on **Cortex-M7 / CPU1**. The full campaign also builds a separate **Cortex-M4 / CPU2 linker-smoke image** for static memory-layout qualification.
+The hardware-test firmware in this directory is built twice by the full campaign:
+
+```text
+DAS_CORE=cm7 -> Cortex-M7 / CPU1 image
+DAS_CORE=cm4 -> Cortex-M4 / CPU2 image
+```
+
+Both images use the same test source and DAS public APIs. The different CMake build directories provide core-specific compiler flags, CMSIS definitions and linker layouts.
 
 ## What this directory owns
 
-The CM7 hardware-test image provides:
+Each hardware-test image provides:
 
 - the STM32H755 external-IRQ vector layout needed by the test;
 - test application logic and GDB evidence;
-- physical GPIO/LED qualification behavior.
+- physical GPIO qualification behavior;
+- startup `.data`/`.bss` probes.
 
 It consumes:
 
-- `das::das` for reusable Cortex-M startup and public GPIO/board APIs;
-- the core-selected default STM32H755 linker script propagated by `das::das`;
+- `das::das` for reusable Cortex-M startup and GPIO/board APIs;
+- the selected STM32H755 linker script propagated by `das::das`;
 - CMSIS device definitions for independent register evidence.
 
 There is no test-local linker script and no separate `das::linker` target.
 
-## Linker defaults
+## Core layouts
 
-CM7 physical image:
+CM7:
 
 ```text
 DAS_CORE=cm7
@@ -31,7 +39,7 @@ vector/code  -> flash bank 1 at 0x08000000
 stack top    -> 0x24080000
 ```
 
-CM4 static link image built by the campaign:
+CM4:
 
 ```text
 DAS_CORE=cm4
@@ -40,33 +48,53 @@ vector/code  -> flash bank 2 at 0x08100000
 stack top    -> 0x30020000
 ```
 
-CM4 is not flashed or executed by this campaign. Physical CPU2 boot/release belongs to the dual-core work.
+The full campaign also builds a separate custom-link smoke image from `tests/link/stm32h755/` to validate `DAS_LINKER_SCRIPT` override behavior.
+
+## Dual-core debug path
+
+The campaign starts:
+
+```text
+scripts/openocd_h755_dual_core.cfg
+```
+
+which uses ST-LINK direct DAP and exposes:
+
+```text
+GDB :3333 -> CM7 / CPU1
+GDB :3334 -> CM4 / CPU2
+```
+
+The older conservative HLA configuration remains for explicit recovery; HLA is not suitable for OpenOCD dual-core debugging.
 
 ## Qualified paths
 
 The complete campaign checks:
 
-- CM7 static memory/linker layout;
-- CM4 static memory/linker layout;
-- Cortex-M7/OpenOCD attachment before flashing;
-- CM7 ELF programming and `compare-sections`;
-- reusable Cortex-M reset/runtime initialization;
-- `.data` restoration and `.bss` clearing;
-- VTOR/vector placement;
-- GPIO clock/mode configuration;
-- pull-up and pull-down;
-- physical output-to-input loopback;
-- open-drain behavior;
-- rising/falling EXTI delivery;
-- green/yellow/red LED states and synchronized blinking.
+- CM7 default memory/linker layout;
+- CM4 default memory/linker layout;
+- custom linker override propagation;
+- CM7 and CM4 OpenOCD/CPUID attachment before flashing;
+- ELF programming and `compare-sections` for both core images;
+- reusable Cortex-M reset/runtime initialization on both cores;
+- `.data` restoration and `.bss` clearing on both cores;
+- VTOR/vector placement on both cores;
+- GPIO clock/mode configuration from both cores;
+- pull-up and pull-down from both cores;
+- physical output-to-input loopback from both cores;
+- open-drain behavior from both cores;
+- rising/falling EXTI delivery through CPU1 and CPU2 views;
+- green/yellow/red LED states and synchronized blinking on CM7.
 
-A successful complete run currently reports **15 PASS / 0 FAIL**.
+A complete expanded run contains **24 acceptance points**.
+
+The CM4 execution here is debugger-driven. It proves that CPU2 can run the current DAS startup/GPIO/EXTI code, but it does not yet prove production CM7-to-CM4 boot/release, HSEM or shared-memory coordination.
 
 ## Wiring
 
-For pull tests leave **CN10 D3 / PE13 / pin 10 disconnected**.
+For each core's pull tests leave **CN10 D3 / PE13 / pin 10 disconnected**.
 
-For loopback/open-drain/EXTI tests connect one jumper:
+For each core's loopback/open-drain/EXTI tests connect one jumper:
 
 ```text
 CN10 D4 / PE14 / pin 8   ---- jumper ----   CN10 D3 / PE13 / pin 10
@@ -74,6 +102,8 @@ CN10 D4 / PE14 / pin 8   ---- jumper ----   CN10 D3 / PE13 / pin 10
 ```
 
 Do not connect either pin to 3V3, 5V or GND.
+
+The campaign intentionally asks you to disconnect/reconnect the fixture for the CM4 phase so both cores get the same physical evidence.
 
 Board LEDs:
 
@@ -89,12 +119,13 @@ Board LEDs:
   --clean
 ```
 
-The campaign packages both core linker scripts, both ELF/map pairs, static memory-layout logs, CM7 physical GDB/OpenOCD logs, symbols, tool metadata and the final summary into a timestamped `.tar.gz`.
+The campaign packages both hardware ELF/map pairs, the custom-link ELF/map pair, all linker scripts, static memory checks, per-core GDB logs, dual-core OpenOCD log, symbol tables, tool metadata and the final summary into one timestamped `.tar.gz`.
 
-Build the CM7 physical image only:
+Build one core image only:
 
 ```bash
-./scripts/build_stm32h755.sh /path/to/STM32CubeH7 --clean
+./scripts/build_stm32h755.sh /path/to/STM32CubeH7 --core cm7 --clean
+./scripts/build_stm32h755.sh /path/to/STM32CubeH7 --core cm4 --build-dir build/stm32h755/cm4-hw --clean
 ```
 
 Explicit destructive recovery remains separate:

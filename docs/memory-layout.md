@@ -36,68 +36,17 @@ The STM32H755 contains 2 MiB of internal flash arranged as two 1 MiB banks. DAS 
 | CM7 | bank 1, `0x08000000..0x080FFFFF` | AXI SRAM, `0x24000000..0x2407FFFF` | `0x24080000` |
 | CM4 | bank 2, `0x08100000..0x081FFFFF` | D2 SRAM1, `0x30000000..0x3001FFFF` | `0x30020000` |
 
-This is a safe default partition, not a claim that each core can only access those regions.
-
-The split avoids two independently linked images owning the same flash and RAM ranges.
+This is a safe default partition, not a claim that each core can only access those regions. The split simply prevents two independently linked default images from owning the same flash and RAM ranges.
 
 ### CM7 script
 
-`stm32h755_cm7.ld` models:
-
-- ITCM;
-- flash bank 1 and bank 2;
-- DTCM;
-- AXI SRAM;
-- SRAM1, SRAM2, SRAM3;
-- SRAM4;
-- backup SRAM.
-
-Normal sections are placed as:
-
-```text
-flash bank 1
-    .isr_vector
-    .text
-    .rodata
-    .ARM.extab / .ARM.exidx
-    .data load image
-
-AXI SRAM
-    .data
-    .bss
-    .noinit
-    heap bounds
-    reserved stack
-```
+`stm32h755_cm7.ld` places the vector table, code, read-only data and `.data` load image in flash bank 1. Normal writable sections, heap bounds and stack are placed in AXI SRAM.
 
 ### CM4 script
 
-`stm32h755_cm4.ld` deliberately avoids the M7 TCM regions. It models:
+`stm32h755_cm4.ld` places the vector table, code, read-only data and `.data` load image in flash bank 2. Normal writable sections, heap bounds and stack are placed in D2 SRAM1.
 
-- flash bank 1 and bank 2;
-- SRAM1, SRAM2, SRAM3;
-- SRAM4;
-- backup SRAM.
-
-Normal sections are placed as:
-
-```text
-flash bank 2
-    .isr_vector
-    .text
-    .rodata
-    .ARM.extab / .ARM.exidx
-    .data load image
-
-D2 SRAM1
-    .data
-    .bss
-    .noinit
-    heap bounds
-    reserved stack
-```
-
-Actual CM4 boot/release sequencing is not a linker problem. Physical CM4 execution, HSEM/shared-memory policy, and coordinated dual-core startup are tracked separately by the dual-core work.
+The CM4 default boot address therefore matches the second flash bank at `0x08100000`.
 
 ## Startup contract
 
@@ -126,8 +75,6 @@ __StackTop
 
 The Cortex-M startup code knows what these symbols mean. It does not know their STM32 addresses.
 
-That separation is intentional:
-
 ```text
 Cortex-M startup mechanics    src/mcu/cortex_m/
 STM32H755 memory addresses    cmake/targets/stm32h755_*.ld
@@ -145,7 +92,7 @@ app objects ─┼─> final link + selected .ld ─> firmware.elf
 libdas.a ────┘
 ```
 
-DAS therefore attaches the selected linker script as an **INTERFACE link option** of `das::das`. A normal application needs only:
+DAS attaches the selected linker script as an **INTERFACE link option** of `das::das`. A normal application needs only:
 
 ```cmake
 target_link_libraries(my_firmware PRIVATE das::das)
@@ -177,18 +124,39 @@ target_link_libraries(my_firmware PRIVATE das::das)
 
 An empty `DAS_LINKER_SCRIPT` means: use the default selected by `DAS_DEVICE + DAS_CORE`.
 
-Custom layouts are expected for cases such as:
-
-- bootloaders;
-- A/B image slots;
-- a different flash-bank split;
-- code/data in TCM;
-- external SDRAM;
-- explicit DMA/non-cacheable sections;
-- CM7/CM4 shared-memory windows;
-- a different stack/heap policy.
+Custom layouts are expected for bootloaders, A/B image slots, TCM placement, external RAM, DMA/non-cacheable sections, shared-memory windows, or different stack/heap policy.
 
 If the DAS reusable startup is retained, the custom script must still provide its linker-symbol contract. If the application also replaces startup, it may define a completely different contract.
+
+## Custom-linker qualification fixture
+
+The repository contains a test-only linker script:
+
+```text
+tests/link/stm32h755/custom_cm7.ld
+```
+
+It deliberately relocates the CM7 vector table and image start from `0x08000000` to:
+
+```text
+0x08020000
+```
+
+The campaign configures a separate build with:
+
+```text
+DAS_CORE=cm7
+DAS_LINKER_SCRIPT=tests/link/stm32h755/custom_cm7.ld
+```
+
+and links the normal `das::das` consumer test without any explicit `-T` option in that target. The generated ELF/map are then checked against the relocated flash range.
+
+This proves two things independently:
+
+1. `DAS_LINKER_SCRIPT` really overrides the device/core default;
+2. the override reaches the final executable transitively through `das::das`.
+
+The fixture is not flashed to hardware. Its purpose is to validate build-system/linker selection, not to consume another flash sector for ceremonial reasons.
 
 ## Stack and heap
 
@@ -205,16 +173,14 @@ DAS does not provide a heap allocator. `__HeapBase` and `__HeapLimit` are bounda
 
 ## Qualification
 
-The hardware campaign statically validates both core layouts before touching the board.
+The full campaign validates three link configurations:
 
-For CM7 it checks the actual hardware-test ELF and then executes that image on the NUCLEO-H755ZI-Q.
+```text
+CM7 default layout      static + physical execution
+CM4 default layout      static + physical execution
+CM7 custom override     static linker-selection test
+```
 
-For CM4 it builds a separate non-executed linker-smoke ELF and validates:
+Physical execution of the CM4 image proves that the selected bank-2/D2-SRAM layout can actually boot under debugger control and reconstruct the C runtime correctly.
 
-- vector address `0x08100000`;
-- `.data` load image in flash bank 2;
-- `.data`/`.bss` in SRAM1;
-- stack top `0x30020000`;
-- startup symbols and heap/stack ordering.
-
-CM4 physical boot is intentionally deferred to the dual-core issue. A linker map can prove placement; it cannot prove that CPU2 was correctly released from reset.
+That still does not qualify production CM7-to-CM4 release sequencing, HSEM or shared-memory ownership. Those are dual-core system behaviors rather than linker behaviors.

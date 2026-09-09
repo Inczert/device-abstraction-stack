@@ -3,7 +3,6 @@ set pagination off
 set print pretty off
 set mem inaccessible-by-default off
 
-target extended-remote :3333
 monitor arm semihosting disable
 monitor halt
 
@@ -12,7 +11,8 @@ monitor halt
 set var g_das_startup_data_probe = 0xdeadbeef
 set var g_das_startup_bss_probe = 0xa5a5a5a5
 
-monitor reset run
+monitor reset halt
+monitor resume
 shell sleep 1
 monitor halt
 

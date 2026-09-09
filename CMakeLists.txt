@@ -114,9 +114,5 @@ if(DAS_BUILD_LINK_TESTS)
 endif()
 
 if(DAS_BUILD_HARDWARE_TESTS)
-    if(NOT DAS_CORE STREQUAL "cm7")
-        message(FATAL_ERROR
-            "STM32H755 physical campaign currently executes on cm7 only; CM4 boot/release qualification is tracked separately")
-    endif()
     add_subdirectory(tests/hardware/stm32h755)
 endif()

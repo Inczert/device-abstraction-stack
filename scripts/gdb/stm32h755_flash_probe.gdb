@@ -3,14 +3,13 @@ set pagination off
 set print pretty off
 set mem inaccessible-by-default off
 
-target extended-remote :3333
 monitor arm semihosting disable
 monitor reset halt
 
 printf "Flashing DAS STM32H755 hardware-test image...\n"
 load
 compare-sections
-monitor reset run
+monitor resume
 shell sleep 1
 monitor halt
 

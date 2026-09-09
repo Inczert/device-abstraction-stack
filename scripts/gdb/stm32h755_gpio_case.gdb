@@ -3,7 +3,6 @@ set pagination off
 set print pretty off
 set mem inaccessible-by-default off
 
-target extended-remote :3333
 monitor halt
 set variable g_das_hw_command = $das_command
 monitor resume

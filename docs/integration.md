@@ -13,6 +13,8 @@ For the current STM32H755 target:
 
 DAS uses CMSIS definitions only. It does not compile or link STM32 HAL or LL source files.
 
+For the full dual-core hardware campaign, OpenOCD must provide the ST-LINK direct-DAP interface script (`interface/stlink-dap.cfg`) and STM32H7 dual-core support.
+
 ## Target composition
 
 The current board selector is:
@@ -42,14 +44,7 @@ Device                = stm32h755
 Board                 = nucleo_h755zi_q
 ```
 
-`DAS_CORE` selects:
-
-- ARM compiler/FPU flags;
-- CMSIS `core_cm7.h` or `core_cm4.h`;
-- `CORE_CM7` or `CORE_CM4`;
-- the default STM32H755 linker script.
-
-The default remains `cm7`.
+`DAS_CORE` selects CPU/FPU compiler flags, CMSIS core header, `CORE_CM7`/`CORE_CM4`, and the default STM32H755 linker script. The default remains `cm7`.
 
 ## Standalone build
 
@@ -66,22 +61,16 @@ cmake -S . -B build/cm7 \
 cmake --build build/cm7 --parallel
 ```
 
-CM4:
+CM4 uses a separate build directory and `-DDAS_CORE=cm4`.
+
+The helper script can build either physical-test image:
 
 ```bash
-cmake -S . -B build/cm4 \
-  -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/arm-none-eabi.cmake \
-  -DCMAKE_BUILD_TYPE=Debug \
-  -DDAS_DEVICE=nucleo_h755zi_q \
-  -DDAS_CORE=cm4 \
-  -DSTM32_CUBE_H7_DIR=/path/to/STM32CubeH7
-
-cmake --build build/cm4 --parallel
+./scripts/build_stm32h755.sh /path/to/STM32CubeH7 --core cm7 --clean
+./scripts/build_stm32h755.sh /path/to/STM32CubeH7 --core cm4 --build-dir build/stm32h755/cm4-hw --clean
 ```
 
-Use separate build directories for the two cores. Compiler flags, CMSIS core definitions and link policy are different and should not be swapped in-place inside one CMake cache.
-
-Configure output reports the selected composition and linker script.
+Use separate CMake build directories for the two cores. Their compiler flags, CMSIS definitions and linker policy differ.
 
 ## Consuming DAS
 
@@ -94,29 +83,15 @@ set(STM32_CUBE_H7_DIR "/path/to/STM32CubeH7" CACHE PATH "" FORCE)
 
 add_subdirectory(third_party/device-abstraction-stack)
 
-add_executable(my_firmware
-    src/main.c
-)
-
+add_executable(my_firmware src/main.c)
 target_link_libraries(my_firmware PRIVATE das::das)
 ```
 
-That final line is the normal integration contract.
-
-Application code includes public headers:
-
-```c
-#include <das/board.h>
-#include <das/gpio.h>
-```
-
-Do not add `src/mcu/`, `src/device/`, or `src/board/` to application include paths.
+That final line is the normal integration contract. Application code includes public headers only; do not add `src/mcu/`, `src/device/`, or `src/board/` to application include paths.
 
 ## Static library versus linker script
 
-`das::das` is a static library. The archive itself is not linked to a physical address.
-
-The selected `.ld` file is used later, when the final executable is created:
+`das::das` is a static library. The archive itself is not linked to a physical address. The selected `.ld` file is used when the final executable is created:
 
 ```text
 application objects + libdas.a
@@ -129,7 +104,7 @@ application objects + libdas.a
          firmware.elf
 ```
 
-DAS propagates the selected linker script from `das::das` through CMake `INTERFACE` link options. Therefore the consumer does **not** link a second pseudo-library and does not call a configuration helper:
+DAS propagates the selected linker script from `das::das` through CMake `INTERFACE` link options. Therefore the consumer does not link a second pseudo-library and does not call a configuration helper:
 
 ```cmake
 target_link_libraries(my_firmware PRIVATE das::das)
@@ -137,7 +112,7 @@ target_link_libraries(my_firmware PRIVATE das::das)
 
 is sufficient for the default bare-metal layout.
 
-## Linker selection
+## Linker selection and override
 
 When `DAS_LINKER_SCRIPT` is empty, DAS selects:
 
@@ -160,47 +135,28 @@ or:
 -DDAS_LINKER_SCRIPT=/path/to/custom.ld
 ```
 
-A relative override is resolved from the DAS source directory. For product integration, using an absolute path or parent-project CMake path is clearer.
-
-Custom linker scripts remain appropriate for bootloaders, flash partitions, TCM placement, shared-memory layouts, external RAM, RTOS-specific sections, or any other memory policy that differs from the DAS default.
+The hardware campaign contains a separate custom-link smoke build using `tests/link/stm32h755/custom_cm7.ld`. Its vector table is deliberately relocated to `0x08020000`, and the generated ELF/map are checked. This validates the override path independently of the default linker scripts.
 
 See [STM32H755 memory and linker policy](memory-layout.md).
 
 ## Reusable Cortex-M startup
 
-DAS currently includes optional weak Cortex-M startup definitions:
+DAS includes optional weak Cortex-M startup definitions in:
 
 ```text
 src/mcu/cortex_m/startup.c
 include/das/cortex_m/startup.h
 ```
 
-The default reset path:
+The default reset path restores `.data`, clears `.bss`, writes SCB VTOR, executes DSB/ISB, and calls `main()`.
 
-1. restores `.data`;
-2. clears `.bss`;
-3. writes SCB VTOR;
-4. executes DSB/ISB;
-5. calls `main()`.
-
-Both default STM32H755 linker scripts provide the required symbols:
-
-```text
-__data_load__
-__data_start__
-__data_end__
-__bss_start__
-__bss_end__
-__vector_table_start__
-```
-
-A bootloader, RTOS or application may replace the weak startup handlers and/or the linker script.
+Both default STM32H755 linker scripts provide the required startup symbols. A bootloader, RTOS or application may replace the weak startup handlers and/or the linker script.
 
 The generic Cortex-M layer does not define STM32 external-IRQ vectors.
 
 ## Core-specific STM32 device definitions
 
-For the selected core DAS privately defines:
+For the selected core DAS privately defines either:
 
 ```text
 STM32H755xx + CORE_CM7
@@ -212,9 +168,20 @@ or:
 STM32H755xx + CORE_CM4
 ```
 
-The STM32H755 device backend uses the correct core-specific RCC/EXTI view where the silicon has per-core registers.
+The STM32H755 device backend uses the correct per-core RCC/EXTI view where the silicon exposes one. These definitions are implementation details, not public API.
 
-These definitions are implementation details and should not be treated as public application API.
+## Dual-core hardware qualification
+
+The full campaign builds both core images and then starts a **single** OpenOCD instance in direct-DAP dual-core mode:
+
+```text
+GDB :3333 -> CM7 / CPU1
+GDB :3334 -> CM4 / CPU2
+```
+
+The campaign physically executes startup and automated GPIO/EXTI tests on both cores. It does not yet represent the production dual-core boot contract: CM4 execution is driven by the debugger, while CM7-to-CM4 boot/release, HSEM and shared-memory coordination remain separate system features.
+
+The conservative single-core/HLA OpenOCD configuration remains available for explicit recovery operations.
 
 ## `FetchContent`
 
@@ -232,23 +199,10 @@ FetchContent_Declare(
 )
 
 FetchContent_MakeAvailable(das)
-
 target_link_libraries(my_firmware PRIVATE das::das)
 ```
 
 Use a release tag or fixed commit for reproducible products.
-
-## Hardware qualification
-
-The physical campaign currently executes the CM7 image. It also builds and statically checks a CM4 link-smoke image before flashing the board:
-
-```bash
-./scripts/stm32h755_test_campaign.sh \
-    /path/to/STM32CubeH7 \
-    --clean
-```
-
-CM4 physical boot/release is tracked as dual-core work rather than being treated as a linker test.
 
 ## CMake variables
 
@@ -258,8 +212,8 @@ CM4 physical boot/release is tracked as dual-core work rather than being treated
 | `DAS_CORE` | `cm7` | selected CPU core (`cm7` or `cm4`) |
 | `DAS_LINKER_SCRIPT` | empty | custom linker override; empty selects device/core default |
 | `STM32_CUBE_H7_DIR` | empty | STM32CubeH7 root for CMSIS headers |
-| `DAS_BUILD_LINK_TESTS` | `OFF` | build static linker-smoke target |
-| `DAS_BUILD_HARDWARE_TESTS` | `OFF` | build CM7 physical qualification target |
+| `DAS_BUILD_LINK_TESTS` | `OFF` | build linker-smoke target |
+| `DAS_BUILD_HARDWARE_TESTS` | `OFF` | build physical qualification firmware for the selected core |
 
 ## Installed-package status
 

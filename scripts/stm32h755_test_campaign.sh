@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STM32_CUBE_H7_DIR="${STM32_CUBE_H7_DIR:-}"
 BUILD_DIR="${DAS_STM32_BUILD_DIR:-$ROOT_DIR/build/stm32h755}"
 CM4_BUILD_DIR=""
+CUSTOM_BUILD_DIR=""
 OPENOCD_SCRIPTS="${OPENOCD_SCRIPTS:-/usr/share/openocd/scripts}"
 DEBUG_TIMEOUT=30
 CLEAN=0
@@ -32,7 +33,7 @@ Options:
   --openocd-scripts DIR   OpenOCD scripts directory.
   --debug-timeout SEC     GDB timeout per case (default: 30).
   --clean                 Clean before building.
-  --no-build              Reuse existing CM7 hardware and CM4 link-test ELFs.
+  --no-build              Reuse existing CM7/CM4 hardware and custom-link ELFs.
   -h, --help              Show help.
 USAGE
 }
@@ -78,17 +79,19 @@ if (( CLEAN != 0 )); then
   rm -rf -- "$BUILD_DIR"
 fi
 
-CM4_BUILD_DIR="$BUILD_DIR/cm4-link"
+CM4_BUILD_DIR="$BUILD_DIR/cm4-hw"
+CUSTOM_BUILD_DIR="$BUILD_DIR/custom-link"
 
 STAMP="$(date -u +'%Y%m%dT%H%M%SZ')"
 CAMPAIGN_ROOT="$BUILD_DIR/campaign"
 LOG_DIR="$CAMPAIGN_ROOT/$STAMP"
 ARCHIVE="$CAMPAIGN_ROOT/das-stm32h755-campaign-$STAMP.tar.gz"
 mkdir -p "$LOG_DIR"
-OPENOCD_LOG="$LOG_DIR/openocd.log"
+OPENOCD_LOG="$LOG_DIR/openocd-dual-core.log"
 SUMMARY="$LOG_DIR/summary.txt"
-BUILD_LOG="$LOG_DIR/build.log"
-CM4_BUILD_LOG="$LOG_DIR/cm4_link_build.log"
+BUILD_LOG="$LOG_DIR/cm7_build.log"
+CM4_BUILD_LOG="$LOG_DIR/cm4_build.log"
+CUSTOM_BUILD_LOG="$LOG_DIR/custom_link_build.log"
 METADATA="$LOG_DIR/metadata.txt"
 
 cleanup_openocd() {
@@ -132,23 +135,27 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 {
-  echo "DAS STM32H755 hardware campaign"
+  echo "DAS STM32H755 dual-core hardware campaign"
   echo "UTC start: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
   echo "Repository: $ROOT_DIR"
   if command -v git >/dev/null 2>&1; then
     echo "DAS commit: $(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
   fi
-  echo "CM7 build dir: $BUILD_DIR"
-  echo "CM4 static-link build dir: $CM4_BUILD_DIR"
+  echo "CM7 hardware build dir: $BUILD_DIR"
+  echo "CM4 hardware build dir: $CM4_BUILD_DIR"
+  echo "Custom linker build dir: $CUSTOM_BUILD_DIR"
   echo "STM32CubeH7: ${STM32_CUBE_H7_DIR:-not supplied}"
   if [[ -n "$STM32_CUBE_H7_DIR" ]] && command -v git >/dev/null 2>&1; then
     echo "STM32CubeH7 commit: $(git -C "$STM32_CUBE_H7_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
   fi
   echo "CM7 default linker: $ROOT_DIR/cmake/targets/stm32h755_cm7.ld"
   echo "CM4 default linker: $ROOT_DIR/cmake/targets/stm32h755_cm4.ld"
+  echo "Custom linker fixture: $ROOT_DIR/tests/link/stm32h755/custom_cm7.ld"
+  echo "OpenOCD dual-core config: $ROOT_DIR/scripts/openocd_h755_dual_core.cfg"
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$ROOT_DIR/cmake/targets/stm32h755_cm7.ld" 2>/dev/null || true
     sha256sum "$ROOT_DIR/cmake/targets/stm32h755_cm4.ld" 2>/dev/null || true
+    sha256sum "$ROOT_DIR/tests/link/stm32h755/custom_cm7.ld" 2>/dev/null || true
   fi
   echo "GDB: $GDB_BIN"
   "$GDB_BIN" --version 2>/dev/null | head -n 1 || true
@@ -161,67 +168,86 @@ trap 'exit 143' TERM
 } >"$METADATA"
 
 if (( SKIP_BUILD == 0 )); then
-  build_args=(--stm32h7-root "$STM32_CUBE_H7_DIR" --build-dir "$BUILD_DIR")
   set +e
-  "$ROOT_DIR/scripts/build_stm32h755.sh" "${build_args[@]}" 2>&1 | tee "$BUILD_LOG"
-  BUILD_RC=${PIPESTATUS[0]}
+  "$ROOT_DIR/scripts/build_stm32h755.sh" \
+    --stm32h7-root "$STM32_CUBE_H7_DIR" \
+    --build-dir "$BUILD_DIR" \
+    --core cm7 2>&1 | tee "$BUILD_LOG"
+  CM7_BUILD_RC=${PIPESTATUS[0]}
   set -e
-  if (( BUILD_RC != 0 )); then
-    echo "STM32H755 CM7 hardware build failed with exit code $BUILD_RC" >&2
-    exit "$BUILD_RC"
+  if (( CM7_BUILD_RC != 0 )); then
+    echo "STM32H755 CM7 hardware build failed with exit code $CM7_BUILD_RC" >&2
+    exit "$CM7_BUILD_RC"
+  fi
+
+  set +e
+  "$ROOT_DIR/scripts/build_stm32h755.sh" \
+    --stm32h7-root "$STM32_CUBE_H7_DIR" \
+    --build-dir "$CM4_BUILD_DIR" \
+    --core cm4 2>&1 | tee "$CM4_BUILD_LOG"
+  CM4_BUILD_RC=${PIPESTATUS[0]}
+  set -e
+  if (( CM4_BUILD_RC != 0 )); then
+    echo "STM32H755 CM4 hardware build failed with exit code $CM4_BUILD_RC" >&2
+    exit "$CM4_BUILD_RC"
   fi
 
   set +e
   {
-    cmake -S "$ROOT_DIR" -B "$CM4_BUILD_DIR" \
+    cmake -S "$ROOT_DIR" -B "$CUSTOM_BUILD_DIR" \
       -DCMAKE_TOOLCHAIN_FILE="$ROOT_DIR/cmake/toolchains/arm-none-eabi.cmake" \
       -DCMAKE_BUILD_TYPE=Debug \
       -DDAS_DEVICE=nucleo_h755zi_q \
-      -DDAS_CORE=cm4 \
+      -DDAS_CORE=cm7 \
+      -DDAS_LINKER_SCRIPT="$ROOT_DIR/tests/link/stm32h755/custom_cm7.ld" \
       -DSTM32_CUBE_H7_DIR="$STM32_CUBE_H7_DIR" \
       -DDAS_BUILD_LINK_TESTS=ON \
       -DDAS_BUILD_HARDWARE_TESTS=OFF
-    cmake --build "$CM4_BUILD_DIR" --target das_stm32h755_link_test --parallel
-  } 2>&1 | tee "$CM4_BUILD_LOG"
-  CM4_BUILD_RC=${PIPESTATUS[0]}
+    cmake --build "$CUSTOM_BUILD_DIR" --target das_stm32h755_link_test --parallel
+  } 2>&1 | tee "$CUSTOM_BUILD_LOG"
+  CUSTOM_BUILD_RC=${PIPESTATUS[0]}
   set -e
-  if (( CM4_BUILD_RC != 0 )); then
-    echo "STM32H755 CM4 static linker build failed with exit code $CM4_BUILD_RC" >&2
-    exit "$CM4_BUILD_RC"
+  if (( CUSTOM_BUILD_RC != 0 )); then
+    echo "STM32H755 custom-linker build failed with exit code $CUSTOM_BUILD_RC" >&2
+    exit "$CUSTOM_BUILD_RC"
   fi
 else
-  echo "Build skipped; reusing existing CM7 hardware and CM4 link-test ELFs." | tee "$BUILD_LOG"
+  echo "Build skipped; reusing existing CM7/CM4 hardware and custom-link ELFs." | tee "$BUILD_LOG"
 fi
 
-ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.elf"
-MAP_FILE="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.map"
-CM4_ELF="$CM4_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.elf"
-CM4_MAP="$CM4_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.map"
+CM7_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.elf"
+CM7_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.map"
+CM4_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.elf"
+CM4_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.map"
+CUSTOM_ELF="$CUSTOM_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.elf"
+CUSTOM_MAP="$CUSTOM_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.map"
 
-[[ -s "$ELF" ]] || { echo "CM7 hardware-test ELF not found: $ELF" >&2; exit 1; }
-[[ -s "$MAP_FILE" ]] || { echo "CM7 hardware-test map not found: $MAP_FILE" >&2; exit 1; }
-[[ -s "$CM4_ELF" ]] || { echo "CM4 link-test ELF not found: $CM4_ELF" >&2; exit 1; }
-[[ -s "$CM4_MAP" ]] || { echo "CM4 link-test map not found: $CM4_MAP" >&2; exit 1; }
+for path in "$CM7_ELF" "$CM7_MAP" "$CM4_ELF" "$CM4_MAP" "$CUSTOM_ELF" "$CUSTOM_MAP"; do
+  [[ -s "$path" ]] || { echo "Expected campaign artifact not found: $path" >&2; exit 1; }
+done
 
-cp "$ELF" "$LOG_DIR/das_stm32h755_cm7_hw_test.elf"
-cp "$MAP_FILE" "$LOG_DIR/das_stm32h755_cm7_hw_test.map"
-cp "$CM4_ELF" "$LOG_DIR/das_stm32h755_cm4_link_test.elf"
-cp "$CM4_MAP" "$LOG_DIR/das_stm32h755_cm4_link_test.map"
+cp "$CM7_ELF" "$LOG_DIR/das_stm32h755_cm7_hw_test.elf"
+cp "$CM7_MAP" "$LOG_DIR/das_stm32h755_cm7_hw_test.map"
+cp "$CM4_ELF" "$LOG_DIR/das_stm32h755_cm4_hw_test.elf"
+cp "$CM4_MAP" "$LOG_DIR/das_stm32h755_cm4_hw_test.map"
+cp "$CUSTOM_ELF" "$LOG_DIR/das_stm32h755_custom_link_test.elf"
+cp "$CUSTOM_MAP" "$LOG_DIR/das_stm32h755_custom_link_test.map"
 cp "$ROOT_DIR/cmake/targets/stm32h755_cm7.ld" "$LOG_DIR/"
 cp "$ROOT_DIR/cmake/targets/stm32h755_cm4.ld" "$LOG_DIR/"
+cp "$ROOT_DIR/tests/link/stm32h755/custom_cm7.ld" "$LOG_DIR/"
 if command -v arm-none-eabi-size >/dev/null 2>&1; then
-  arm-none-eabi-size "$ELF" >"$LOG_DIR/cm7-elf-size.txt" 2>&1 || true
+  arm-none-eabi-size "$CM7_ELF" >"$LOG_DIR/cm7-elf-size.txt" 2>&1 || true
   arm-none-eabi-size "$CM4_ELF" >"$LOG_DIR/cm4-elf-size.txt" 2>&1 || true
+  arm-none-eabi-size "$CUSTOM_ELF" >"$LOG_DIR/custom-elf-size.txt" 2>&1 || true
 fi
-arm-none-eabi-nm -n "$ELF" >"$LOG_DIR/cm7-symbols.txt" 2>&1 || true
+arm-none-eabi-nm -n "$CM7_ELF" >"$LOG_DIR/cm7-symbols.txt" 2>&1 || true
 arm-none-eabi-nm -n "$CM4_ELF" >"$LOG_DIR/cm4-symbols.txt" 2>&1 || true
+arm-none-eabi-nm -n "$CUSTOM_ELF" >"$LOG_DIR/custom-symbols.txt" 2>&1 || true
 
 safe_log_name() {
   local name="$1"
   name="${name//[^[:alnum:]._-]/_}"
-  while [[ "$name" == *"__"* ]]; do
-    name="${name//__/_}"
-  done
+  while [[ "$name" == *"__"* ]]; do name="${name//__/_}"; done
   name="${name#_}"
   name="${name%_}"
   printf '%s' "$name"
@@ -247,15 +273,17 @@ wait_for_enter() {
 
 record() {
   local name="$1" status="$2"
-  printf '%-30s %s\n' "$name" "$status" | tee -a "$SUMMARY"
+  printf '%-34s %s\n' "$name" "$status" | tee -a "$SUMMARY"
   if [[ "$status" == PASS ]]; then ((PASS_COUNT += 1)); else ((FAIL_COUNT += 1)); fi
 }
 
 run_gdb() {
-  local log="$1"; shift
+  local elf="$1" port="$2" log="$3"
+  shift 3
   mkdir -p "$(dirname "$log")"
   set +e
-  timeout "${DEBUG_TIMEOUT}s" "$GDB_BIN" -q "$ELF" -batch "$@" 2>&1 | tee "$log"
+  timeout "${DEBUG_TIMEOUT}s" "$GDB_BIN" -q "$elf" -batch \
+    -ex "target extended-remote :${port}" "$@" 2>&1 | tee "$log"
   local pipe_status=("${PIPESTATUS[@]}")
   local gdb_rc=${pipe_status[0]}
   local tee_rc=${pipe_status[1]}
@@ -263,122 +291,151 @@ run_gdb() {
   (( gdb_rc == 0 && tee_rc == 0 )) && grep -q '^RESULT: PASS$' "$log"
 }
 
-if "$ROOT_DIR/scripts/check_stm32h755_memory_layout.sh" --core cm7 "$ELF" "$MAP_FILE" \
-    2>&1 | tee "$LOG_DIR/cm7_memory_layout.log"; then
-  record "STM32H755 CM7 memory layout" PASS
-else
-  record "STM32H755 CM7 memory layout" FAIL
-  echo "CM7 linker/memory-layout validation failed; hardware execution is skipped." >&2
-  exit 1
-fi
+check_layout() {
+  local name="$1" log="$2"
+  shift 2
+  if "$ROOT_DIR/scripts/check_stm32h755_memory_layout.sh" "$@" 2>&1 | tee "$log"; then
+    record "$name" PASS
+  else
+    record "$name" FAIL
+    return 1
+  fi
+}
 
-if "$ROOT_DIR/scripts/check_stm32h755_memory_layout.sh" --core cm4 "$CM4_ELF" "$CM4_MAP" \
-    2>&1 | tee "$LOG_DIR/cm4_memory_layout.log"; then
-  record "STM32H755 CM4 memory layout" PASS
-else
-  record "STM32H755 CM4 memory layout" FAIL
-  echo "CM4 linker/memory-layout validation failed; hardware execution is skipped." >&2
-  exit 1
-fi
+check_layout "STM32H755 CM7 memory layout" "$LOG_DIR/cm7_memory_layout.log" \
+  --core cm7 "$CM7_ELF" "$CM7_MAP" || exit 1
+check_layout "STM32H755 CM4 memory layout" "$LOG_DIR/cm4_memory_layout.log" \
+  --core cm4 "$CM4_ELF" "$CM4_MAP" || exit 1
+check_layout "Custom linker override" "$LOG_DIR/custom_memory_layout.log" \
+  --core cm7 --flash-begin 0x08020000 --flash-end 0x08100000 \
+  "$CUSTOM_ELF" "$CUSTOM_MAP" || exit 1
 
-echo "Starting OpenOCD..."
+echo "Starting dual-core OpenOCD..."
 openocd -s "$OPENOCD_SCRIPTS" \
-  -f "$ROOT_DIR/scripts/openocd_h755.cfg" \
+  -f "$ROOT_DIR/scripts/openocd_h755_dual_core.cfg" \
   -c "init; reset halt" >"$OPENOCD_LOG" 2>&1 &
 OPENOCD_PID=$!
-for ((attempt = 0; attempt < 100; ++attempt)); do
-  grep -q "Listening on port 3333 for gdb connections" "$OPENOCD_LOG" 2>/dev/null && break
+for ((attempt = 0; attempt < 150; ++attempt)); do
+  if grep -q "Listening on port 3333 for gdb connections" "$OPENOCD_LOG" 2>/dev/null && \
+     grep -q "Listening on port 3334 for gdb connections" "$OPENOCD_LOG" 2>/dev/null; then
+    break
+  fi
   if ! kill -0 "$OPENOCD_PID" >/dev/null 2>&1; then
     cat "$OPENOCD_LOG" >&2
-    echo "OpenOCD exited before GDB became ready" >&2
+    echo "OpenOCD exited before both GDB servers became ready" >&2
     exit 1
   fi
   sleep 0.1
 done
-if ! grep -q "Listening on port 3333 for gdb connections" "$OPENOCD_LOG"; then
+if ! grep -q "Listening on port 3333 for gdb connections" "$OPENOCD_LOG" || \
+   ! grep -q "Listening on port 3334 for gdb connections" "$OPENOCD_LOG"; then
   cat "$OPENOCD_LOG" >&2
-  echo "OpenOCD GDB server timeout" >&2
+  echo "Dual-core OpenOCD GDB server timeout" >&2
   exit 1
 fi
 
-if run_gdb "$LOG_DIR/board_probe.log" -x "$ROOT_DIR/scripts/gdb/stm32h755_probe.gdb"; then
-  record "Board/OpenOCD probe" PASS
-else
-  record "Board/OpenOCD probe" FAIL
-  echo "Non-destructive board probe failed; nothing was flashed. If the target will not attach, run scripts/stm32h755_recover.sh." >&2
-  exit 1
-fi
-
-if run_gdb "$LOG_DIR/flash_probe.log" -x "$ROOT_DIR/scripts/gdb/stm32h755_flash_probe.gdb"; then
-  record "CMSIS/GPIO bring-up" PASS
-else
-  record "CMSIS/GPIO bring-up" FAIL
-  echo "Firmware bring-up failed; remaining cases are skipped. Recovery remains an explicit separate action." >&2
-  exit 1
-fi
-
-if run_gdb "$LOG_DIR/cortex_m_startup_reset.log" -x "$ROOT_DIR/scripts/gdb/stm32h755_startup_probe.gdb"; then
-  record "Cortex-M startup/reset" PASS
-else
-  record "Cortex-M startup/reset" FAIL
-  echo "Reusable Cortex-M reset/runtime initialization failed; remaining cases are skipped." >&2
-  exit 1
-fi
-
-automated_gpio_case() {
-  local name="$1" command="$2" expected_flags="$3"
-  local log="$LOG_DIR/$(safe_log_name "$name").log"
-  if run_gdb "$log" \
-      -ex "set \$das_command=$command" \
-      -ex "set \$das_expected_flags=$expected_flags" \
-      -x "$ROOT_DIR/scripts/gdb/stm32h755_gpio_case.gdb"; then
-    record "$name" PASS
+probe_core() {
+  local label="$1" elf="$2" port="$3" expected_part="$4"
+  local log="$LOG_DIR/$(safe_log_name "$label").log"
+  if run_gdb "$elf" "$port" "$log" \
+      -ex "set \$das_expected_part=$expected_part" \
+      -x "$ROOT_DIR/scripts/gdb/stm32h755_probe.gdb"; then
+    record "$label" PASS
   else
-    record "$name" FAIL
+    record "$label" FAIL
+    return 1
   fi
 }
 
-wait_for_enter "GPIO pull test: leave CN10 D3 / PE13 / pin 10 electrically DISCONNECTED. Remove any jumper or shield drive from that pin."
-automated_gpio_case "GPIO pull-up" 7 4
-automated_gpio_case "GPIO pull-down" 8 8
+probe_core "CM7 OpenOCD probe" "$CM7_ELF" 3333 0xc27 || exit 1
+probe_core "CM4 OpenOCD probe" "$CM4_ELF" 3334 0xc24 || exit 1
 
-wait_for_enter "GPIO loopback test: connect ONE jumper from CN10 D4 / PE14 / pin 8 (output) to CN10 D3 / PE13 / pin 10 (input). Do not connect either pin to 3V3, 5V, or GND."
-automated_gpio_case "GPIO loopback low/high" 6 3
-automated_gpio_case "GPIO open-drain" 9 48
-automated_gpio_case "GPIO EXTI rising/falling" 10 192
+bring_up_core() {
+  local core="$1" elf="$2" port="$3"
+  if run_gdb "$elf" "$port" "$LOG_DIR/${core}_flash_probe.log" \
+      -x "$ROOT_DIR/scripts/gdb/stm32h755_flash_probe.gdb"; then
+    record "$core CMSIS/GPIO bring-up" PASS
+  else
+    record "$core CMSIS/GPIO bring-up" FAIL
+    return 1
+  fi
+
+  if run_gdb "$elf" "$port" "$LOG_DIR/${core}_startup_reset.log" \
+      -x "$ROOT_DIR/scripts/gdb/stm32h755_startup_probe.gdb"; then
+    record "$core Cortex-M startup/reset" PASS
+  else
+    record "$core Cortex-M startup/reset" FAIL
+    return 1
+  fi
+}
+
+automated_gpio_case() {
+  local core="$1" elf="$2" port="$3" name="$4" command="$5" expected_flags="$6"
+  local label="$core $name"
+  local log="$LOG_DIR/$(safe_log_name "$label").log"
+  if run_gdb "$elf" "$port" "$log" \
+      -ex "set \$das_command=$command" \
+      -ex "set \$das_expected_flags=$expected_flags" \
+      -x "$ROOT_DIR/scripts/gdb/stm32h755_gpio_case.gdb"; then
+    record "$label" PASS
+  else
+    record "$label" FAIL
+  fi
+}
 
 visual_case() {
-  local name="$1" command="$2" expected_mask="$3" prompt="$4"
-  local log="$LOG_DIR/$(safe_log_name "$name").log"
+  local core="$1" elf="$2" port="$3" name="$4" command="$5" expected_mask="$6" prompt="$7"
+  local label="$core $name"
+  local log="$LOG_DIR/$(safe_log_name "$label").log"
   local automated=FAIL visual=FAIL
 
-  if run_gdb "$log" \
+  if run_gdb "$elf" "$port" "$log" \
       -ex "set \$das_command=$command" \
       -ex "set \$das_expected_mask=$expected_mask" \
       -x "$ROOT_DIR/scripts/gdb/stm32h755_led_case.gdb"; then
     automated=PASS
   fi
 
-  if [[ "$automated" == PASS ]] && yes_no "$prompt"; then
-    visual=PASS
-  fi
+  if [[ "$automated" == PASS ]] && yes_no "$prompt"; then visual=PASS; fi
 
   if [[ "$automated" == PASS && "$visual" == PASS ]]; then
-    record "$name" PASS
+    record "$label" PASS
   else
-    record "$name" FAIL
+    record "$label" FAIL
   fi
 }
 
-visual_case "LED all off" 1 0 "Are green, yellow, and red user LEDs all OFF"
-visual_case "LED green only" 2 1 "Is only the GREEN user LED ON"
-visual_case "LED yellow only" 3 2 "Is only the YELLOW user LED ON"
-visual_case "LED red only" 4 4 "Is only the RED user LED ON"
-visual_case "LED all blink" 5 0 "Are all three user LEDs visibly BLINKING together"
+bring_up_core "CM7" "$CM7_ELF" 3333 || exit 1
 
-run_gdb "$LOG_DIR/final_all_off.log" \
+wait_for_enter "CM7 pull tests: leave CN10 D3 / PE13 / pin 10 electrically DISCONNECTED. Remove any jumper or shield drive from that pin."
+automated_gpio_case "CM7" "$CM7_ELF" 3333 "GPIO pull-up" 7 4
+automated_gpio_case "CM7" "$CM7_ELF" 3333 "GPIO pull-down" 8 8
+
+wait_for_enter "CM7 loopback tests: connect ONE jumper from CN10 D4 / PE14 / pin 8 (output) to CN10 D3 / PE13 / pin 10 (input). Do not connect either pin to 3V3, 5V, or GND."
+automated_gpio_case "CM7" "$CM7_ELF" 3333 "GPIO loopback low/high" 6 3
+automated_gpio_case "CM7" "$CM7_ELF" 3333 "GPIO open-drain" 9 48
+automated_gpio_case "CM7" "$CM7_ELF" 3333 "GPIO EXTI rising/falling" 10 192
+
+visual_case "CM7" "$CM7_ELF" 3333 "LED all off" 1 0 "Are green, yellow, and red user LEDs all OFF"
+visual_case "CM7" "$CM7_ELF" 3333 "LED green only" 2 1 "Is only the GREEN user LED ON"
+visual_case "CM7" "$CM7_ELF" 3333 "LED yellow only" 3 2 "Is only the YELLOW user LED ON"
+visual_case "CM7" "$CM7_ELF" 3333 "LED red only" 4 4 "Is only the RED user LED ON"
+visual_case "CM7" "$CM7_ELF" 3333 "LED all blink" 5 0 "Are all three user LEDs visibly BLINKING together"
+
+run_gdb "$CM7_ELF" 3333 "$LOG_DIR/cm7_final_all_off.log" \
   -ex 'set $das_command=1' \
   -ex 'set $das_expected_mask=0' \
   -x "$ROOT_DIR/scripts/gdb/stm32h755_led_case.gdb" >/dev/null || true
+
+bring_up_core "CM4" "$CM4_ELF" 3334 || exit 1
+
+wait_for_enter "CM4 pull tests: DISCONNECT the D4-to-D3 jumper again. Leave CN10 D3 / PE13 / pin 10 electrically disconnected."
+automated_gpio_case "CM4" "$CM4_ELF" 3334 "GPIO pull-up" 7 4
+automated_gpio_case "CM4" "$CM4_ELF" 3334 "GPIO pull-down" 8 8
+
+wait_for_enter "CM4 loopback tests: reconnect ONE jumper from CN10 D4 / PE14 / pin 8 to CN10 D3 / PE13 / pin 10. Do not connect either pin to 3V3, 5V, or GND."
+automated_gpio_case "CM4" "$CM4_ELF" 3334 "GPIO loopback low/high" 6 3
+automated_gpio_case "CM4" "$CM4_ELF" 3334 "GPIO open-drain" 9 48
+automated_gpio_case "CM4" "$CM4_ELF" 3334 "GPIO EXTI rising/falling" 10 192
 
 (( FAIL_COUNT == 0 )) || exit 1

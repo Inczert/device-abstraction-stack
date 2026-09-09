@@ -2,14 +2,34 @@
 set -Eeuo pipefail
 
 CORE=""
+FLASH_BEGIN_OVERRIDE=""
+FLASH_END_OVERRIDE=""
+RAM_BEGIN_OVERRIDE=""
+RAM_END_OVERRIDE=""
+STACK_TOP_OVERRIDE=""
 
 usage() {
-    echo "Usage: $0 --core <cm7|cm4> <firmware.elf> <firmware.map>" >&2
+    cat >&2 <<'USAGE'
+Usage:
+  check_stm32h755_memory_layout.sh --core <cm7|cm4> [range overrides] <firmware.elf> <firmware.map>
+
+Range overrides (hex or decimal):
+  --flash-begin VALUE
+  --flash-end VALUE
+  --ram-begin VALUE
+  --ram-end VALUE
+  --stack-top VALUE
+USAGE
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --core) CORE="$2"; shift 2 ;;
+        --flash-begin) FLASH_BEGIN_OVERRIDE="$2"; shift 2 ;;
+        --flash-end) FLASH_END_OVERRIDE="$2"; shift 2 ;;
+        --ram-begin) RAM_BEGIN_OVERRIDE="$2"; shift 2 ;;
+        --ram-end) RAM_END_OVERRIDE="$2"; shift 2 ;;
+        --stack-top) STACK_TOP_OVERRIDE="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         --*) echo "Unknown option: $1" >&2; usage; exit 2 ;;
         *) break ;;
@@ -42,16 +62,26 @@ case "$CORE" in
         FLASH_END=0x08100000
         RAM_BEGIN=0x24000000
         RAM_END=0x24080000
-        RAM_NAME="AXI SRAM"
         ;;
     cm4)
         FLASH_BEGIN=0x08100000
         FLASH_END=0x08200000
         RAM_BEGIN=0x30000000
         RAM_END=0x30020000
-        RAM_NAME="D2 SRAM1"
         ;;
 esac
+
+[[ -z "$FLASH_BEGIN_OVERRIDE" ]] || FLASH_BEGIN="$FLASH_BEGIN_OVERRIDE"
+[[ -z "$FLASH_END_OVERRIDE" ]] || FLASH_END="$FLASH_END_OVERRIDE"
+[[ -z "$RAM_BEGIN_OVERRIDE" ]] || RAM_BEGIN="$RAM_BEGIN_OVERRIDE"
+[[ -z "$RAM_END_OVERRIDE" ]] || RAM_END="$RAM_END_OVERRIDE"
+STACK_TOP="${STACK_TOP_OVERRIDE:-$RAM_END}"
+
+for value in "$FLASH_BEGIN" "$FLASH_END" "$RAM_BEGIN" "$RAM_END" "$STACK_TOP"; do
+    : $(( value ))
+done
+(( $((FLASH_BEGIN)) < $((FLASH_END)) )) || { echo "Invalid flash range" >&2; exit 2; }
+(( $((RAM_BEGIN)) < $((RAM_END)) )) || { echo "Invalid RAM range" >&2; exit 2; }
 
 NM_OUTPUT="$(arm-none-eabi-nm -n "$ELF")"
 
@@ -113,36 +143,36 @@ heap_limit="$(symbol_hex __HeapLimit)"
 }
 
 (( $((vector_end)) >= $((vector_start)) && $((vector_end)) <= $((FLASH_END)) )) || {
-    echo "Vector table ends outside $CORE flash allocation: $vector_end" >&2
+    echo "Vector table ends outside selected flash allocation: $vector_end" >&2
     exit 1
 }
 in_range "$data_load" "$FLASH_BEGIN" "$FLASH_END" || {
-    echo ".data load image is outside $CORE flash allocation: $data_load" >&2
+    echo ".data load image is outside selected flash allocation: $data_load" >&2
     exit 1
 }
 in_range "$data_start" "$RAM_BEGIN" "$RAM_END" || {
-    echo ".data start is outside $RAM_NAME: $data_start" >&2
+    echo ".data start is outside selected RAM allocation: $data_start" >&2
     exit 1
 }
 (( $((data_end)) >= $((data_start)) && $((data_end)) <= $((RAM_END)) )) || {
-    echo ".data end is invalid for $RAM_NAME: $data_end" >&2
+    echo ".data end is invalid for selected RAM allocation: $data_end" >&2
     exit 1
 }
 in_range "$bss_start" "$RAM_BEGIN" "$RAM_END" || {
-    echo ".bss start is outside $RAM_NAME: $bss_start" >&2
+    echo ".bss start is outside selected RAM allocation: $bss_start" >&2
     exit 1
 }
 (( $((bss_end)) >= $((bss_start)) && $((bss_end)) <= $((RAM_END)) )) || {
-    echo ".bss end is invalid for $RAM_NAME: $bss_end" >&2
+    echo ".bss end is invalid for selected RAM allocation: $bss_end" >&2
     exit 1
 }
-[[ $((stack_top)) -eq $((RAM_END)) ]] || {
+[[ $((stack_top)) -eq $((STACK_TOP)) ]] || {
     printf 'Unexpected %s stack top: %s (expected 0x%08x)\n' \
-        "$CORE" "$stack_top" "$((RAM_END))" >&2
+        "$CORE" "$stack_top" "$((STACK_TOP))" >&2
     exit 1
 }
 in_range "$stack_limit" "$RAM_BEGIN" "$RAM_END" || {
-    echo "Stack limit is outside $RAM_NAME: $stack_limit" >&2
+    echo "Stack limit is outside selected RAM allocation: $stack_limit" >&2
     exit 1
 }
 [[ $((heap_limit)) -eq $((stack_limit)) ]] || {
@@ -155,6 +185,8 @@ in_range "$stack_limit" "$RAM_BEGIN" "$RAM_END" || {
 }
 
 printf 'core=%s\n' "$CORE"
+printf 'flash=0x%08x..0x%08x ram=0x%08x..0x%08x\n' \
+    "$((FLASH_BEGIN))" "$((FLASH_END))" "$((RAM_BEGIN))" "$((RAM_END))"
 printf 'vector=%s..%s\n' "$vector_start" "$vector_end"
 printf '.data load=%s ram=%s..%s\n' "$data_load" "$data_start" "$data_end"
 printf '.bss=%s..%s\n' "$bss_start" "$bss_end"

@@ -13,12 +13,12 @@ The current STM32 path uses **CMSIS definitions directly**, without STM32 HAL/LL
 | Architecture | Cortex-M |
 | Device | STM32H755 |
 | Board | NUCLEO-H755ZI-Q |
-| Cores | CM7 build/physical qualification; CM4 build/link-layout qualification |
+| Cores | CM7 physically qualified; CM4 physical campaign implemented and awaiting final campaign evidence |
 | Startup | reusable weak Cortex-M reset/runtime path |
 | Linker | default STM32H755 CM7 and CM4 layouts, overridable |
 | GPIO | input/output, pulls, push-pull/open-drain, AF configuration, EXTI |
 | Board API | green/yellow/red user LEDs |
-| Debug/test | OpenOCD + GDB + packaged evidence campaign |
+| Debug/test | dual-core OpenOCD + GDB + packaged evidence campaign |
 
 DAS is still early development. The current project version is `0.1.0`.
 
@@ -186,7 +186,7 @@ Override the selected default with:
 -DDAS_LINKER_SCRIPT=/path/to/custom.ld
 ```
 
-An empty `DAS_LINKER_SCRIPT` uses the DAS device/core default.
+The qualification campaign includes a real custom-linker override build that relocates a CM7 test image to `0x08020000`; this proves that the override is actually propagated through `das::das` rather than merely documented optimistically.
 
 See [STM32H755 memory and linker policy](docs/memory-layout.md).
 
@@ -227,19 +227,26 @@ Run the full STM32H755 campaign:
     --clean
 ```
 
-The campaign:
+The campaign now builds **three** images before touching the board:
 
-- statically validates the CM7 linker layout;
-- builds and statically validates an independent CM4 linker-smoke image;
-- probes the real Cortex-M7 before flashing;
-- validates CM7 flash/startup/runtime behavior;
-- tests GPIO pulls, loopback, open-drain and EXTI;
-- tests the three Nucleo user LEDs;
-- packages logs, ELF/map files, symbol tables and linker scripts into a `.tar.gz`.
+```text
+CM7 hardware image        DAS_CORE=cm7, default CM7 linker
+CM4 hardware image        DAS_CORE=cm4, default CM4 linker
+custom-link smoke image   DAS_CORE=cm7, DAS_LINKER_SCRIPT=tests/link/stm32h755/custom_cm7.ld
+```
 
-The current successful target is **15 acceptance points**.
+It then uses OpenOCD in direct-DAP dual-core mode:
 
-CM4 physical boot/release is intentionally separate from linker qualification and is tracked by the dual-core work.
+```text
+GDB :3333 -> STM32H755 Cortex-M7 / CPU1
+GDB :3334 -> STM32H755 Cortex-M4 / CPU2
+```
+
+Both cores are physically exercised for startup, GPIO pulls, loopback, open-drain and EXTI. The LED visual checks remain on CM7 because the board mapping is shared and CM4 GPIO output/input is already exercised electrically through the loopback fixture.
+
+The expanded campaign contains **24 acceptance points** and packages both core images, all three linker layouts/builds, GDB/OpenOCD logs and the final summary into one timestamped `.tar.gz`.
+
+Important boundary: the CM4 tests are debugger-driven physical execution. They prove that CPU2 can execute the DAS image and access GPIO/EXTI correctly, but they do **not** yet qualify production CM7-to-CM4 boot/release sequencing, HSEM or shared-memory coordination. Those remain dual-core system work.
 
 See [Hardware qualification](docs/testing.md).
 

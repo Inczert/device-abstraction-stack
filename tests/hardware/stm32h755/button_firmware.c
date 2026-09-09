@@ -3,6 +3,7 @@
 #include <das/board.h>
 #include <das/board_resources.h>
 #include <das/cortex_m/startup.h>
+#include <das/gpio.h>
 #include <das/irq.h>
 
 #include "stm32h755xx.h"
@@ -53,10 +54,24 @@ typedef struct das_button_test_evidence {
     volatile uint32_t release_count;
     volatile uint32_t irq_priority_levels;
     volatile uint32_t irq_priority;
+    /* Test-only physical wiring diagnostics. PC13 is the stock B1 route;
+     * PA0 is the documented MB1363 solder-bridge alternative. */
+    volatile uint32_t pc13_level;
+    volatile uint32_t pa0_level;
+    volatile uint32_t gpio_c_moder;
+    volatile uint32_t gpio_c_pupdr;
+    volatile uint32_t gpio_c_idr;
+    volatile uint32_t gpio_a_idr;
+    volatile uint32_t rcc_ahb4enr;
 } das_button_test_evidence_t;
 
 volatile das_button_test_evidence_t g_das_button_test_evidence = {
     .magic = DAS_BUTTON_MAGIC,
+};
+
+static const das_gpio_pin_t BUTTON_ALT_DIAGNOSTIC_PIN = {
+    DAS_GPIO_PORT_A,
+    0u,
 };
 
 static bool pin_equals(das_gpio_pin_t pin, das_gpio_port_t port, uint8_t number) {
@@ -104,8 +119,29 @@ static void validate_resource_map(void) {
     }
 }
 
+static void capture_button_diagnostics(void) {
+    const das_gpio_pin_t button = das_board_button_pin(DAS_BOARD_BUTTON_USER);
+    g_das_button_test_evidence.pc13_level =
+        das_gpio_read_input(button) ? 1u : 0u;
+    g_das_button_test_evidence.pa0_level =
+        das_gpio_read_input(BUTTON_ALT_DIAGNOSTIC_PIN) ? 1u : 0u;
+    g_das_button_test_evidence.gpio_c_moder = GPIOC->MODER;
+    g_das_button_test_evidence.gpio_c_pupdr = GPIOC->PUPDR;
+    g_das_button_test_evidence.gpio_c_idr = GPIOC->IDR;
+    g_das_button_test_evidence.gpio_a_idr = GPIOA->IDR;
+    g_das_button_test_evidence.rcc_ahb4enr = RCC->AHB4ENR;
+}
+
 int main(void) {
     validate_resource_map();
+
+    /* This is diagnostic-only. MB1363 can route B1 to PA0 instead of PC13.
+     * Pull PA0 down so an unconnected alternate route has a deterministic
+     * level while still allowing a button-routed PA0 to rise when pressed. */
+    if (das_gpio_input_init(BUTTON_ALT_DIAGNOSTIC_PIN, DAS_GPIO_PULL_DOWN) != DAS_OK) {
+        g_das_button_test_evidence.error = UINT32_C(0x1500);
+        for (;;) { __NOP(); }
+    }
 
     das_irq_t irq = DAS_IRQ_INVALID;
     if (das_board_button_interrupt_get_irq(DAS_BOARD_BUTTON_USER, &irq) != DAS_OK ||
@@ -138,6 +174,7 @@ int main(void) {
 
     g_das_button_test_evidence.pressed =
         das_board_button_is_pressed(DAS_BOARD_BUTTON_USER) ? 1u : 0u;
+    capture_button_diagnostics();
     g_das_button_test_evidence.ready = 1u;
     g_das_button_test_evidence.booted = 1u;
 
@@ -145,6 +182,7 @@ int main(void) {
         ++g_das_button_test_evidence.heartbeat;
         g_das_button_test_evidence.pressed =
             das_board_button_is_pressed(DAS_BOARD_BUTTON_USER) ? 1u : 0u;
+        capture_button_diagnostics();
     }
 }
 

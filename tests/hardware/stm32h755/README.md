@@ -1,50 +1,72 @@
-# STM32H755 physical bring-up
+# STM32H755 physical qualification target
 
-Target: NUCLEO-H755ZI-Q, CM7.
+Target: **NUCLEO-H755ZI-Q / STM32H755 Cortex-M7**.
 
-This DAS campaign intentionally uses only CMSIS core/device headers. It does not link STM32 HAL or LL. OpenOCD attaches under reset at a conservative 400 kHz SWD clock, flashes one freestanding test image, and lets GDB verify software/register evidence. LED behavior is additionally accepted by the person looking at the board.
+This directory contains the minimal freestanding firmware used by the DAS physical hardware campaign. It is a qualification image, not an application template.
 
-The board LED mapping is:
+The image intentionally uses:
 
-- green LD1: PB0, active high
-- yellow LD2: PE1, active high
-- red LD3: PB14, active high
+- the public DAS API for GPIO/board control;
+- CMSIS core/device definitions through the DAS STM32H7 backend;
+- no STM32 HAL or LL;
+- a test-local reset handler and linker script so it can be flashed independently;
+- an evidence structure inspected by GDB for deterministic acceptance checks.
 
-The GPIO electrical-path fixture uses two Arduino-header pins:
+## Qualified paths
 
-- D4: PE14, test output
-- D3: PE13, test input / EXTI13
+The current campaign validates:
 
-The runner asks for wiring changes at the appropriate time. For pull-up/down qualification, D3 must be electrically disconnected. For loopback, open-drain, and EXTI qualification, connect exactly one jumper from D4 to D3. The open-drain test uses D3's internal pull-up, so no external resistor is required for this campaign.
+- Cortex-M7/OpenOCD attachment before flashing;
+- ELF programming and `compare-sections` integrity;
+- startup, heartbeat, and HardFault/error state;
+- GPIO clock/mode configuration;
+- internal pull-up and pull-down;
+- physical output-to-input loopback;
+- open-drain driven-low/released behavior;
+- rising/falling EXTI delivery through a physical jumper;
+- green, yellow, and red board LED states and synchronized blinking.
 
-Run everything from the repository root:
+## Wiring
+
+For pull tests, leave **CN10 D3 / PE13 / pin 10 disconnected**.
+
+For loopback/open-drain/EXTI tests, connect one jumper:
+
+```text
+CN10 D4 / PE14 / pin 8   ---- jumper ----   CN10 D3 / PE13 / pin 10
+       output                                   input / EXTI13
+```
+
+Do not connect either test pin to 3V3, 5V, or GND.
+
+Board LED mapping:
+
+- LD1 green: PB0, active high;
+- LD2 yellow: PE1, active high;
+- LD3 red: PB14, active high.
+
+## Run
+
+From the repository root:
 
 ```bash
 ./scripts/stm32h755_test_campaign.sh /path/to/STM32CubeH7 --clean
 ```
 
-The campaign performs:
+The campaign creates a timestamped evidence directory and a `.tar.gz` bundle containing build output, OpenOCD/GDB logs, ELF/map/symbol information, tool versions, and the summary. The archive is also produced for failed campaigns when logging has already started.
 
-1. a non-destructive Cortex-M7/OpenOCD probe;
-2. flash/startup/CMSIS GPIO bring-up validation;
-3. floating-input pull-up and pull-down checks;
-4. physical D4-to-D3 push-pull loopback at low and high levels;
-5. open-drain drive-low/release-high validation;
-6. rising and falling EXTI13 interrupt validation through the physical jumper;
-7. visual plus register-backed LED output/toggle checks.
-
-Raw OpenOCD/GDB logs are stored below `build/stm32h755/campaign/`.
-
-Build without running hardware tests:
+Build only:
 
 ```bash
 ./scripts/build_stm32h755.sh /path/to/STM32CubeH7 --clean
 ```
 
-If a bad image makes normal attachment troublesome, explicitly erase both flash banks with:
+Explicit destructive recovery:
 
 ```bash
 ./scripts/stm32h755_recover.sh
 ```
 
-The recovery command is intentionally separate because mass erase is destructive and should never be a casual side effect of a test runner.
+Recovery is intentionally separate from qualification so a failed test never triggers an implicit mass erase.
+
+For the complete acceptance contract and evidence format, see [`docs/testing.md`](../../../docs/testing.md).

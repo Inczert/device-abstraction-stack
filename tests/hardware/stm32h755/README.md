@@ -7,17 +7,20 @@ This directory contains the minimal freestanding firmware used by the DAS physic
 The image intentionally uses:
 
 - the public DAS API for GPIO/board control;
-- CMSIS core/device definitions through the DAS STM32H7 backend;
+- the reusable DAS Cortex-M reset/runtime path;
+- CMSIS device definitions for independent STM32H755 register evidence;
 - no STM32 HAL or LL;
-- a test-local reset handler and linker script so it can be flashed independently;
+- a test-local device vector table and linker script so it can be flashed independently;
 - an evidence structure inspected by GDB for deterministic acceptance checks.
 
 ## Qualified paths
 
-The current campaign validates:
+The campaign validates:
 
 - Cortex-M7/OpenOCD attachment before flashing;
 - ELF programming and `compare-sections` integrity;
+- reusable Cortex-M startup by dirtying RAM, resetting, then verifying `.data` restoration and `.bss` clearing;
+- VTOR points to the test image's vector table after reset;
 - startup, heartbeat, and HardFault/error state;
 - GPIO clock/mode configuration;
 - internal pull-up and pull-down;
@@ -25,6 +28,8 @@ The current campaign validates:
 - open-drain driven-low/released behavior;
 - rising/falling EXTI delivery through a physical jumper;
 - green, yellow, and red board LED states and synchronized blinking.
+
+The startup test deliberately separates responsibilities: the Cortex-M layer owns reset/runtime mechanics and core exception defaults, while this STM32H755 target image owns the device-specific external IRQ vector layout.
 
 ## Wiring
 

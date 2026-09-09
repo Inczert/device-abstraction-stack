@@ -5,9 +5,7 @@
 #include "stm32h755xx.h"
 
 static bool gpio_pin_valid(das_gpio_pin_t pin) {
-    return pin.port >= DAS_GPIO_PORT_A &&
-           pin.port <= DAS_GPIO_PORT_K &&
-           pin.pin < 16u;
+    return pin.port <= DAS_GPIO_PORT_K && pin.pin < 16u;
 }
 
 das_result_t das_gpio_interrupt_get_irq(das_gpio_pin_t pin, das_irq_t* irq) {

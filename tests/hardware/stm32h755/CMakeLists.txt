@@ -1,5 +1,5 @@
 add_executable(das_stm32h755_hw_test firmware.c)
-target_link_libraries(das_stm32h755_hw_test PRIVATE das::das)
+target_link_libraries(das_stm32h755_hw_test PRIVATE das::das das::linker)
 target_include_directories(das_stm32h755_hw_test PRIVATE
     "${DAS_CMSIS_CORE_INCLUDE}"
     "${DAS_CMSIS_DEVICE_INCLUDE}")
@@ -12,6 +12,5 @@ target_link_options(das_stm32h755_hw_test PRIVATE
     --specs=nosys.specs
     -Wl,--gc-sections
     -Wl,--unresolved-symbols=report-all
-    -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/das_stm32h755_hw_test.map
-    -T${CMAKE_CURRENT_SOURCE_DIR}/linker.ld)
+    -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/das_stm32h755_hw_test.map)
 set_target_properties(das_stm32h755_hw_test PROPERTIES SUFFIX ".elf")

@@ -11,8 +11,6 @@ Core:  Cortex-M7
 Debug: ST-LINK + OpenOCD + GDB
 ```
 
-The test firmware uses DAS APIs for control and exposes a small evidence structure for GDB inspection. GDB also reads hardware state independently where useful.
-
 ## Running the campaign
 
 ```bash
@@ -21,123 +19,93 @@ The test firmware uses DAS APIs for control and exposes a small evidence structu
   --clean
 ```
 
-Example:
-
-```bash
-./scripts/stm32h755_test_campaign.sh \
-  /home/dev/STM32Cube/Repository/STM32CubeH7/ \
-  --clean
-```
-
-The campaign builds the test image, starts OpenOCD, performs a non-destructive board probe before flashing, programs the firmware, runs automated GDB cases, pauses for required physical wiring, asks for visual LED confirmation, and packages the evidence.
+The campaign builds the test image, validates the generated memory layout, starts OpenOCD, probes the board, flashes the ELF, runs automated GDB cases, pauses for GPIO wiring, asks for LED confirmation, and packages the evidence.
 
 ## What is tested
 
-### 1. Board/OpenOCD probe
+### 1. STM32H755 memory layout
 
-Before flashing, GDB attaches through OpenOCD and checks the Cortex-M CPUID.
-
-Expected part number:
+Before touching the board, the campaign runs:
 
 ```text
-0xC27 -> Cortex-M7
+scripts/check_stm32h755_memory_layout.sh
 ```
 
-This step is non-destructive. If attachment fails, the campaign stops before programming a new image.
+against the generated ELF and map file. It checks:
 
-### 2. Flash and firmware bring-up
+- required linker/startup symbols exist in the ELF and map;
+- vector table begins at `0x08000000`;
+- `.data` load image resides in flash;
+- `.data` and `.bss` reside in AXI SRAM;
+- stack top is `0x24080000`;
+- heap/static bounds do not overlap the reserved stack.
 
-The campaign:
+The hardware-test target links the same reusable script exposed to applications through `das::linker`:
 
-- loads the ELF;
-- runs GDB `compare-sections`;
-- resets/runs the target;
-- checks that the firmware booted;
-- checks that the heartbeat advances;
-- checks that no fault/error evidence was recorded;
-- checks expected GPIO clocks/modes.
+```text
+cmake/targets/stm32h755_cm7.ld
+```
 
-### 3. Cortex-M startup/reset
+### 2. Board/OpenOCD probe
 
-The campaign validates the reusable Cortex-M reset/runtime path rather than merely inferring it from a successful boot.
+GDB attaches through OpenOCD and verifies Cortex-M7 CPUID before flashing. Failure stops the campaign without programming a new image.
 
-GDB deliberately changes test variables placed in `.data` and `.bss`, then resets the target and verifies:
+### 3. Flash and firmware bring-up
 
-- `.data` is restored from its flash load image;
-- `.bss` is cleared to zero;
-- SCB VTOR points to `__vector_table_start__`;
-- the application reaches `main()` again;
-- the heartbeat advances;
+The ELF is loaded and checked with `compare-sections`; the campaign then verifies boot, heartbeat, fault state, and expected GPIO clocks/modes.
+
+### 4. Cortex-M startup/reset
+
+GDB deliberately corrupts variables in `.data` and `.bss`, resets the target, and verifies:
+
+- `.data` is restored from flash;
+- `.bss` is cleared;
+- SCB VTOR equals `__vector_table_start__`;
+- `main()` is reached again;
+- heartbeat advances;
 - no startup/fault error is recorded.
 
-The test image supplies the STM32H755-specific vector table. The reusable Cortex-M layer owns reset/runtime mechanics and weak core exception defaults only.
+This links the build-time memory contract to actual reset/runtime behavior on silicon.
 
-### 4. GPIO pull-up
+### 5. GPIO pull-up
 
-The input test pin is left electrically disconnected and configured with an internal pull-up. The physical input state must read high.
+With D3/PE13 electrically disconnected, the internal pull-up must produce a high physical input state.
 
-### 5. GPIO pull-down
+### 6. GPIO pull-down
 
-The same disconnected input is configured with an internal pull-down. The physical input state must read low.
+The same disconnected input configured pull-down must read low.
 
-### 6. GPIO loopback low/high
+### 7. GPIO loopback low/high
 
-A physical jumper connects a DAS-controlled output to a DAS-controlled input.
+A physical jumper carries low and high levels from D4/PE14 output to D3/PE13 input.
 
-The firmware drives low and high and verifies that the input pad follows both states. The signal must leave one MCU pad, travel through the jumper, and return through another input pad.
+### 8. GPIO open-drain
 
-### 7. GPIO open-drain
+The same loopback verifies driven-low and released/high open-drain behavior.
 
-Using the same loopback wiring, the output is configured open-drain and the input side observes driven-low and released/high behavior with the configured pull-up path.
+### 9. GPIO EXTI rising/falling
 
-### 8. GPIO EXTI rising/falling
+The output generates physical edges into the EXTI input and the campaign requires rising and falling IRQ evidence.
 
-The output pin generates physical edges into the input pin. The input is configured for both-edge EXTI operation.
+### 10-14. Board LEDs
 
-The hardware-test image currently owns Cortex-M NVIC setup directly while DAS owns GPIO-to-EXTI configuration and pending/clear operations. Dedicated Cortex-M NVIC helpers are tracked separately.
-
-The campaign requires evidence of rising and falling interrupt delivery, not merely correctly programmed EXTI registers.
-
-### 9-13. Board LEDs
-
-The campaign checks:
-
-- all LEDs off;
-- green only;
-- yellow only;
-- red only;
-- all three blinking together.
-
-Each static state is checked in software/register evidence and then confirmed visually. Blinking is confirmed by an advancing firmware counter plus visual observation.
+The campaign checks all-off, green-only, yellow-only, red-only and synchronized blinking. Software/register evidence is combined with human visual confirmation.
 
 ## Required GPIO wiring
-
-Loopback fixture:
 
 ```text
 CN10 D4 / PE14 / pin 8   ---- jumper ----   CN10 D3 / PE13 / pin 10
        output                                   input / EXTI13
 ```
 
-Use one direct jumper only.
-
-Do not connect either test pin to 3V3, 5V or GND unless a future test explicitly instructs otherwise.
-
-For pull-up/down cases, **D3 / PE13 must be electrically disconnected**.
-
-## Board LED mapping
-
-| LED | GPIO | Active state |
-| --- | --- | --- |
-| LD1 green | PB0 | high |
-| LD2 yellow | PE1 | high |
-| LD3 red | PB14 | high |
+For pull-up/down tests D3/PE13 must be disconnected. Do not connect either test pin to 3V3, 5V or GND unless a future test explicitly requires it.
 
 ## Expected summary
 
-A complete current campaign contains **13 acceptance points**:
+A complete campaign now contains **14 acceptance points**:
 
 ```text
+STM32H755 memory layout          PASS
 Board/OpenOCD probe             PASS
 CMSIS/GPIO bring-up             PASS
 Cortex-M startup/reset          PASS
@@ -153,94 +121,66 @@ LED red only                    PASS
 LED all blink                   PASS
 ```
 
-The script exits nonzero if any acceptance point fails.
+Any failure makes the campaign exit nonzero.
 
 ## Evidence bundle
 
-Every campaign creates a timestamped directory under:
+Every campaign creates a timestamped directory and `.tar.gz` archive under:
 
 ```text
 build/stm32h755/campaign/
 ```
 
-and packages it as:
+Important contents now include:
 
 ```text
-das-stm32h755-campaign-<UTC timestamp>.tar.gz
+summary.txt
+metadata.txt
+build.log
+memory_layout.log
+stm32h755_cm7.ld
+das_stm32h755_hw_test.map
+das_stm32h755_hw_test.elf
+symbols.txt
+elf-size.txt
+openocd.log
+board_probe.log
+flash_probe.log
+cortex_m_startup_reset.log
+GPIO_*.log
+LED_*.log
+final_all_off.log
 ```
 
-Typical contents include:
-
-```text
-<timestamp>/
-├── summary.txt
-├── metadata.txt
-├── build.log
-├── openocd.log
-├── board_probe.log
-├── flash_probe.log
-├── cortex_m_startup_reset.log
-├── GPIO_pull-up.log
-├── GPIO_pull-down.log
-├── GPIO_loopback_low_high.log
-├── GPIO_open-drain.log
-├── GPIO_EXTI_rising_falling.log
-├── LED_all_off.log
-├── LED_green_only.log
-├── LED_yellow_only.log
-├── LED_red_only.log
-├── LED_all_blink.log
-├── final_all_off.log
-├── das_stm32h755_hw_test.elf
-├── das_stm32h755_hw_test.map
-├── elf-size.txt
-└── symbols.txt
-```
-
-The bundle is produced even when the campaign fails, as long as logging has started. `metadata.txt` records the DAS commit, STM32CubeH7 commit when available, tool versions, and host information.
+The archive is produced even on failure after logging starts. `metadata.txt` records the DAS commit, tool versions, STM32CubeH7 commit when available, and the linker-script path/hash.
 
 ## Build-only mode
 
 ```bash
-./scripts/build_stm32h755.sh \
-  /path/to/STM32CubeH7 \
-  --clean
-```
-
-Resulting ELF:
-
-```text
-build/stm32h755/tests/hardware/stm32h755/das_stm32h755_hw_test.elf
+./scripts/build_stm32h755.sh /path/to/STM32CubeH7 --clean
 ```
 
 ## Reusing an existing build
 
-The campaign supports:
-
-```bash
---no-build
-```
-
-when an existing hardware-test ELF is already available. `--clean` and `--no-build` are mutually exclusive.
+Use `--no-build` when the expected ELF/map already exists. It cannot be combined with `--clean`.
 
 ## Recovery
 
-If bad firmware makes normal attachment troublesome, recovery remains a separate explicit operation:
+Destructive recovery remains a separate explicit operation:
 
 ```bash
 ./scripts/stm32h755_recover.sh
 ```
 
-The qualification campaign never silently mass-erases the device as a side effect of a failed test.
+A failed qualification run never silently mass-erases the target.
 
 ## Qualification principles
 
-A useful backend test should answer three questions:
+A useful DAS acceptance test should answer:
 
-1. Did DAS request the right configuration?
-2. Did the MCU execute and reflect that configuration?
-3. Did the physical signal/resource behave as intended?
+1. Did build/link policy put code and data where intended?
+2. Did reset reconstruct the expected runtime state?
+3. Did DAS request and execute the intended peripheral configuration?
+4. Did the physical resource behave correctly?
 
-Startup adds a fourth question for core/runtime work: did reset reconstruct the expected C runtime state and vector placement?
-
-The campaign deliberately combines GDB evidence, MCU state and physical observation/loopback so a PASS means substantially more than “the ELF linked and one LED did something.”
+Combining linker-map evidence, GDB state, physical loopback and visual observation gives failures enough context to diagnose instead of merely producing a red badge and emotional damage.

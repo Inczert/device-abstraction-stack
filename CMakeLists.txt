@@ -10,6 +10,8 @@ if(DAS_DEVICE STREQUAL "nucleo_h755zi_q")
     set(DAS_MCU_BACKEND "cortex_m")
     set(DAS_DEVICE_BACKEND "stm32h755")
     set(DAS_BOARD_BACKEND "nucleo_h755zi_q")
+    set(DAS_DEFAULT_LINKER_SCRIPT
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/stm32h755_cm7.ld")
 
     set(DAS_MCU_SOURCES
         src/mcu/cortex_m/startup.c)
@@ -21,6 +23,13 @@ if(DAS_DEVICE STREQUAL "nucleo_h755zi_q")
         src/board/nucleo_h755zi_q/board.c)
 else()
     message(FATAL_ERROR "Unsupported DAS_DEVICE='${DAS_DEVICE}'")
+endif()
+
+set(DAS_LINKER_SCRIPT "${DAS_DEFAULT_LINKER_SCRIPT}" CACHE FILEPATH
+    "Linker script propagated by the optional das::linker target")
+
+if(NOT EXISTS "${DAS_LINKER_SCRIPT}")
+    message(FATAL_ERROR "DAS linker script not found: ${DAS_LINKER_SCRIPT}")
 endif()
 
 if(NOT STM32_CUBE_H7_DIR)
@@ -50,6 +59,7 @@ endif()
 
 message(STATUS
     "DAS composition: mcu=${DAS_MCU_BACKEND}, device=${DAS_DEVICE_BACKEND}, board=${DAS_BOARD_BACKEND}")
+message(STATUS "DAS linker script: ${DAS_LINKER_SCRIPT}")
 
 add_library(das STATIC
     ${DAS_MCU_SOURCES}
@@ -63,6 +73,12 @@ target_include_directories(das
 target_compile_definitions(das PRIVATE CORE_CM7 STM32H755xx)
 target_compile_features(das PUBLIC c_std_11)
 target_compile_options(das PRIVATE -Wall -Wextra -Werror)
+
+# Optional link-time memory policy. Consumers that own a bootloader/custom
+# partition can simply omit das::linker and pass their own -T script instead.
+add_library(das_linker INTERFACE)
+add_library(das::linker ALIAS das_linker)
+target_link_options(das_linker INTERFACE "-T${DAS_LINKER_SCRIPT}")
 
 if(DAS_BUILD_HARDWARE_TESTS)
     add_subdirectory(tests/hardware/stm32h755)

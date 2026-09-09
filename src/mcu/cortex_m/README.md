@@ -10,18 +10,18 @@ It intentionally contains no STM32 peripheral code. Device-specific interrupt ro
 
 - copies `.data` from its load address into RAM;
 - clears `.bss`;
-- programs the architecturally defined SCB VTOR register from the linker-provided `__vector_table_start__` symbol;
-- executes the required DSB/ISB barriers;
+- programs the architecturally defined SCB VTOR register from `__vector_table_start__`;
+- executes DSB/ISB barriers;
 - calls the application's `main()`;
 - provides weak default handlers for Cortex-M core exceptions.
 
 `Reset_Handler` and the default exception handlers are weak. Applications with a bootloader, RTOS startup, custom runtime initialization, or their own exception policy can replace them with strong definitions.
 
-The Cortex-M layer does **not** define STM32 external interrupt vectors. A target image must still provide a vector table with the device-specific external IRQ layout it actually uses.
+The Cortex-M layer does **not** define STM32 external interrupt vectors. A concrete target image owns its device-specific vector-table layout.
 
 ## Linker contract
 
-The reusable startup path expects the final firmware linker script to export:
+The startup path expects:
 
 ```text
 __data_load__
@@ -32,7 +32,15 @@ __bss_end__
 __vector_table_start__
 ```
 
-The STM32H755 qualification linker script currently provides that contract. Reusable STM32H755 linker/memory-layout support is tracked separately in issue #3.
+For STM32H755 CM7, DAS now provides a compatible default script at:
+
+```text
+cmake/targets/stm32h755_cm7.ld
+```
+
+through the optional `das::linker` target. The linker script remains device/build policy rather than Cortex-M source because the physical addresses belong to STM32H755, not to the ARM core architecture.
+
+Applications can override or omit that linker target without replacing the generic Cortex-M startup implementation.
 
 ## Planned core work
 

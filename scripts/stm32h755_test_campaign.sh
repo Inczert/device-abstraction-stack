@@ -63,7 +63,7 @@ if (( CLEAN != 0 && SKIP_BUILD != 0 )); then
 fi
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing command: $1" >&2; exit 2; }; }
-for command in cmake openocd timeout tee grep tar; do need "$command"; done
+for command in cmake openocd timeout tee grep tar arm-none-eabi-nm; do need "$command"; done
 if command -v gdb-multiarch >/dev/null 2>&1; then GDB_BIN=gdb-multiarch
 elif command -v arm-none-eabi-gdb >/dev/null 2>&1; then GDB_BIN=arm-none-eabi-gdb
 else echo "Install gdb-multiarch or arm-none-eabi-gdb" >&2; exit 2
@@ -139,6 +139,10 @@ trap 'exit 143' TERM
   if [[ -n "$STM32_CUBE_H7_DIR" ]] && command -v git >/dev/null 2>&1; then
     echo "STM32CubeH7 commit: $(git -C "$STM32_CUBE_H7_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
   fi
+  echo "Linker script: $ROOT_DIR/cmake/targets/stm32h755_cm7.ld"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$ROOT_DIR/cmake/targets/stm32h755_cm7.ld" 2>/dev/null || true
+  fi
   echo "GDB: $GDB_BIN"
   "$GDB_BIN" --version 2>/dev/null | head -n 1 || true
   openocd --version 2>&1 | head -n 1 || true
@@ -168,12 +172,11 @@ MAP_FILE="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.map"
 [[ -s "$ELF" ]] || { echo "Hardware-test ELF not found: $ELF" >&2; exit 1; }
 cp "$ELF" "$LOG_DIR/" 2>/dev/null || true
 [[ ! -f "$MAP_FILE" ]] || cp "$MAP_FILE" "$LOG_DIR/"
+cp "$ROOT_DIR/cmake/targets/stm32h755_cm7.ld" "$LOG_DIR/" 2>/dev/null || true
 if command -v arm-none-eabi-size >/dev/null 2>&1; then
   arm-none-eabi-size "$ELF" >"$LOG_DIR/elf-size.txt" 2>&1 || true
 fi
-if command -v arm-none-eabi-nm >/dev/null 2>&1; then
-  arm-none-eabi-nm -n "$ELF" >"$LOG_DIR/symbols.txt" 2>&1 || true
-fi
+arm-none-eabi-nm -n "$ELF" >"$LOG_DIR/symbols.txt" 2>&1 || true
 
 safe_log_name() {
   local name="$1"
@@ -221,6 +224,15 @@ run_gdb() {
   set -e
   (( gdb_rc == 0 && tee_rc == 0 )) && grep -q '^RESULT: PASS$' "$log"
 }
+
+if "$ROOT_DIR/scripts/check_stm32h755_memory_layout.sh" "$ELF" "$MAP_FILE" \
+    2>&1 | tee "$LOG_DIR/memory_layout.log"; then
+  record "STM32H755 memory layout" PASS
+else
+  record "STM32H755 memory layout" FAIL
+  echo "Reusable STM32H755 linker/memory-layout validation failed; hardware execution is skipped." >&2
+  exit 1
+fi
 
 echo "Starting OpenOCD..."
 openocd -s "$OPENOCD_SCRIPTS" \

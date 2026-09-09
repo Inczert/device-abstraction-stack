@@ -9,7 +9,7 @@ static const das_gpio_pin_t LED_PINS[DAS_BOARD_LED_COUNT] = {
 };
 
 static bool led_valid(das_board_led_t led) {
-    return led >= DAS_BOARD_LED_GREEN && led < DAS_BOARD_LED_COUNT;
+    return led < DAS_BOARD_LED_COUNT;
 }
 
 das_gpio_pin_t das_board_led_pin(das_board_led_t led) {

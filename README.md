@@ -1,6 +1,6 @@
 # DAS — Device Abstraction Stack
 
-DAS is a small, layered C library for embedded systems. It separates application-facing APIs from CPU architecture code, silicon-specific peripheral code, board wiring, and final firmware build policy.
+DAS is a small, layered C library for embedded systems. It separates application-facing APIs from CPU architecture code, silicon-specific peripheral code, physical board mappings, and final firmware build policy.
 
 The current STM32 path uses **CMSIS definitions directly**, without STM32 HAL/LL or CubeIDE/CubeMX-generated initialization files.
 
@@ -13,20 +13,21 @@ The current STM32 path uses **CMSIS definitions directly**, without STM32 HAL/LL
 | Architecture | Cortex-M |
 | Device | STM32H755 |
 | Board | NUCLEO-H755ZI-Q |
-| Cores | CM7 and CM4 startup/GPIO/EXTI physically qualified under debugger control |
+| Cores | CM7 and CM4 startup/GPIO/EXTI/time physically qualified under debugger control |
 | Startup | reusable weak Cortex-M reset/runtime path |
 | Linker | default STM32H755 CM7 and CM4 layouts plus custom override qualification |
 | Interrupts | device-agnostic IRQ handles/control; CMSIS NVIC backend on Cortex-M |
-| Clock | standard board-frequency API with STM32H755 RCC/PWR/FLASH backend, pending final hardware qualification |
+| Clock | 64/200/300/400 MHz board profiles with STM32H755 RCC/PWR/FLASH backend, hardware-qualified |
+| Time | generic monotonic millisecond API; CMSIS SysTick backend plus external/RTOS source injection |
 | GPIO | input/output, pulls, push-pull/open-drain, AF configuration, EXTI |
-| Board API | green/yellow/red user LEDs |
+| Board API | LEDs, B1 user button, ST-LINK VCP, Arduino/Zio UART/I2C/SPI and D3/D4 fixture mappings |
 | Debug/test | dual-core OpenOCD + GDB + packaged evidence campaign |
 
 DAS is still early development. The current project version is `0.1.0`.
 
 ## Purpose
 
-The goal is to build practical embedded firmware without requiring a bulky generated vendor project while preserving direct, inspectable control over the hardware.
+The goal is to build practical embedded firmware without requiring a generated vendor project while preserving direct, inspectable control over the hardware.
 
 DAS aims for:
 
@@ -71,17 +72,21 @@ common     board
 Implementation ownership:
 
 ```text
+src/common/
+    hardware-independent semantics
+    monotonic time helpers
+
 src/mcu/cortex_m/
     Cortex-M architecture
-    startup, IRQ controller backend, future SysTick/cache/MPU
+    startup, IRQ controller, SysTick backend
 
 src/device/stm32h755/
     STM32H755 silicon/peripherals
     GPIO/EXTI and RCC/PWR/FLASH clock engine now, UART/DMA/etc. later
 
 src/board/nucleo_h755zi_q/
-    physical Nucleo resources and board policy
-    LEDs and standard clock profiles now, button/VCOM/connectors/etc. later
+    physical NUCLEO resources and board policy
+    LEDs, B1, connector groups and standard clock profiles
 
 cmake/targets/
     final firmware memory/linker policy
@@ -128,11 +133,7 @@ cmake -S . -B build/cm7 \
 cmake --build build/cm7 --parallel
 ```
 
-CM4 uses the same command with a separate build directory and:
-
-```text
--DDAS_CORE=cm4
-```
+CM4 uses a separate build directory and `-DDAS_CORE=cm4`.
 
 DAS requires STM32CubeH7 only for CMSIS core/device headers. HAL and LL sources are not linked.
 
@@ -174,9 +175,28 @@ The NUCLEO-H755ZI-Q backend currently advertises:
 400 MHz
 ```
 
-The board layer owns the physical supply/source policy. The STM32H755 device layer owns RCC, PWR, FLASH, PLL and bus-divider programming. On the stock board the default direct-SMPS power path is limited to the VOS1 operating range, so 480 MHz is not advertised.
+The board layer owns physical supply/source policy. The STM32H755 device layer owns RCC, PWR, FLASH, PLL and bus-divider programming. On the stock board 480 MHz is deliberately not advertised for the qualified direct-SMPS/VOS1 profile.
 
 See [Clock control](docs/clocks.md).
+
+## Monotonic time
+
+The public time API is independent of SysTick and STM32 types:
+
+```c
+#include <das/time.h>
+
+(void)das_time_init();
+das_time_ms_t start = das_time_now_ms();
+
+if (das_time_interval_elapsed(start, 1000u)) {
+    /* one second elapsed */
+}
+```
+
+The default Cortex-M backend uses CMSIS `SysTick_Config()` with the live executing-core frequency. An RTOS/application that owns SysTick can install its own millisecond source with `das_time_set_source()`.
+
+See [Monotonic time](docs/time.md).
 
 ## Interrupt model
 
@@ -191,11 +211,35 @@ das_irq_t irq = DAS_IRQ_INVALID;
 (void)das_irq_enable(irq);
 ```
 
-On Cortex-M the backend delegates controller access to CMSIS `NVIC_*` helpers. The application does not need to know that the selected architecture uses NVIC or that an STM32 GPIO source maps to a vendor `IRQn_Type` value.
-
-Peripheral/source state remains separate from controller state. For GPIO, EXTI routing/masking/pending belongs to the GPIO/device backend while `das_irq_*()` controls the CPU interrupt-controller line.
+On Cortex-M the backend delegates controller access to CMSIS `NVIC_*` helpers. Peripheral/source state remains separate from controller state.
 
 See [Interrupt model](docs/interrupts.md).
+
+## Board resources
+
+Applications can refer to physical board functions semantically instead of scattering STM32 pins through application code:
+
+```c
+(void)das_board_button_init(DAS_BOARD_BUTTON_USER);
+if (das_board_button_is_pressed(DAS_BOARD_BUTTON_USER)) {
+    /* B1 pressed */
+}
+```
+
+Named connector resources include:
+
+```text
+DAS_BOARD_UART_STLINK_VCP
+DAS_BOARD_UART_ARDUINO
+DAS_BOARD_I2C_ARDUINO
+DAS_BOARD_SPI_ARDUINO
+DAS_BOARD_GPIO_ARDUINO_D3
+DAS_BOARD_GPIO_ARDUINO_D4
+```
+
+The resource layer maps board wiring only. UART/I2C/SPI peripheral behavior remains the responsibility of their generic DAS drivers as those are implemented.
+
+See [NUCLEO board resources](docs/board.md).
 
 ## Default linker layouts
 
@@ -230,13 +274,7 @@ See [STM32H755 memory and linker policy](docs/memory-layout.md).
 
 ## Reusable Cortex-M startup
 
-The Cortex-M layer provides a weak reset/runtime path that:
-
-1. restores `.data`;
-2. clears `.bss`;
-3. sets VTOR;
-4. executes the required barriers;
-5. calls `main()`.
+The Cortex-M layer provides a weak reset/runtime path that restores `.data`, clears `.bss`, sets VTOR, executes the required barriers, and calls `main()`.
 
 Applications with a bootloader, RTOS or custom startup can replace the weak symbols. Device-specific external IRQ vectors remain part of the final target image.
 
@@ -247,9 +285,11 @@ Current public headers:
 ```text
 include/das/result.h
 include/das/clock.h
+include/das/time.h
 include/das/irq.h
 include/das/gpio.h
 include/das/board.h
+include/das/board_resources.h
 include/das/cortex_m/startup.h
 ```
 
@@ -265,20 +305,11 @@ Run the full STM32H755 campaign:
     --clean
 ```
 
-The campaign builds the CM7/CM4 hardware images, the custom-linker smoke image, and a dedicated CM7 clock-profile image. The clock image exercises the public 64/200/300/400 MHz profile path before the established GPIO/IRQ qualification continues.
+The latest completed baseline is **27/27 PASS** on commit `883b37608f2e7f7bd2ac723b91b1cdfde898261e`, covering both cores' startup/GPIO/EXTI/time paths, the board clock profiles, and the linker checks.
 
-It uses one direct-DAP OpenOCD session:
+Issue #15 expands the campaign to **28 acceptance points** by adding one physical CM7 B1 user-button input/EXTI case. The same timestamped archive now also carries the board-resource/button ELF, map, symbols and GDB evidence.
 
-```text
-GDB :3333 -> STM32H755 Cortex-M7 / CPU1
-GDB :3334 -> STM32H755 Cortex-M4 / CPU2
-```
-
-Both cores are physically exercised for startup, GPIO pulls, loopback, open-drain and EXTI. The EXTI case also qualifies the public DAS IRQ controller path.
-
-The expanded complete campaign contains **25 acceptance points** and packages both core images, clock/profile evidence, linker-layout evidence, GDB/OpenOCD logs and the final summary into one timestamped `.tar.gz`.
-
-The first three acceptance points are host-only linker/layout checks. They intentionally do not require a connected board; hardware qualification starts with the OpenOCD probes.
+The first three acceptance points are host-only linker/layout checks. Hardware qualification starts with the OpenOCD probes.
 
 Important boundary: CM4 execution is currently debugger-driven. Production CM7-to-CM4 boot/release sequencing, HSEM and shared-memory coordination remain separate dual-core system work.
 
@@ -289,7 +320,9 @@ See [Hardware qualification](docs/testing.md).
 - [Architecture](docs/architecture.md)
 - [Building and integration](docs/integration.md)
 - [Clock control](docs/clocks.md)
+- [Monotonic time](docs/time.md)
 - [Interrupt model](docs/interrupts.md)
+- [NUCLEO board resources](docs/board.md)
 - [STM32H755 memory/linker policy](docs/memory-layout.md)
 - [Public API reference](docs/api.md)
 - [Porting DAS](docs/porting.md)

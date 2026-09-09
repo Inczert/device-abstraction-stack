@@ -13,7 +13,9 @@ SECTIONS
     .isr_vector :
     {
         . = ALIGN(256);
+        __vector_table_start__ = .;
         KEEP(*(.isr_vector))
+        __vector_table_end__ = .;
     } > FLASH
 
     .text :

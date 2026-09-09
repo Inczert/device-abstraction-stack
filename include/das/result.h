@@ -14,7 +14,9 @@ typedef enum das_result {
     /** A bounded hardware/state transition did not complete before its deadline. */
     DAS_ERROR_TIMEOUT = -3,
     /** The requested operation requires initialization or an installed resource. */
-    DAS_ERROR_NOT_READY = -4
+    DAS_ERROR_NOT_READY = -4,
+    /** A peripheral reported a transport/data error while servicing the operation. */
+    DAS_ERROR_IO = -5
 } das_result_t;
 
 #endif

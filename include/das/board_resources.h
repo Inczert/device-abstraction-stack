@@ -5,6 +5,7 @@
 
 #include <das/gpio.h>
 #include <das/result.h>
+#include <das/uart.h>
 
 /** Semantic UART-style board connections. */
 typedef enum das_board_uart_resource {
@@ -21,6 +22,17 @@ typedef struct das_board_uart_pins {
 /** Resolve the pins associated with a semantic UART board connection. */
 das_result_t das_board_uart_get_pins(das_board_uart_resource_t resource,
                                      das_board_uart_pins_t* pins);
+
+/**
+ * Configure a semantic board UART route and initialize the generic UART.
+ *
+ * The board backend owns pin routing/alternate-function selection and resolves
+ * the underlying device instance. The caller receives only a portable DAS UART
+ * handle.
+ */
+das_result_t das_board_uart_init(das_board_uart_resource_t resource,
+                                 const das_uart_config_t* config,
+                                 das_uart_t* uart);
 
 /** Semantic I2C board connections. */
 typedef enum das_board_i2c_resource {

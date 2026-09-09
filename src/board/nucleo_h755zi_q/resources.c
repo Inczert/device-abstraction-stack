@@ -3,7 +3,11 @@
 #include <das/board.h>
 #include <das/board_resources.h>
 
+#include "uart_internal.h"
+
 #include <stdint.h>
+
+#define DAS_NUCLEO_UART_AF UINT8_C(7)
 
 static das_gpio_pin_t invalid_pin(void) {
     return (das_gpio_pin_t){DAS_GPIO_PORT_A, UINT8_C(0xff)};
@@ -44,6 +48,11 @@ static const das_board_uart_pins_t UART_PINS[DAS_BOARD_UART_COUNT] = {
     },
 };
 
+static const stm32h755_uart_instance_t UART_INSTANCES[DAS_BOARD_UART_COUNT] = {
+    [DAS_BOARD_UART_STLINK_VCP] = STM32H755_UART_USART3,
+    [DAS_BOARD_UART_ARDUINO] = STM32H755_UART_USART1,
+};
+
 static const das_board_i2c_pins_t I2C_PINS[DAS_BOARD_I2C_COUNT] = {
     [DAS_BOARD_I2C_ARDUINO] = {
         .scl = {DAS_GPIO_PORT_B, 8u},
@@ -71,6 +80,55 @@ das_result_t das_board_uart_get_pins(das_board_uart_resource_t resource,
         return DAS_ERROR_INVALID_ARGUMENT;
     }
     *pins = UART_PINS[resource];
+    return DAS_OK;
+}
+
+das_result_t das_board_uart_init(das_board_uart_resource_t resource,
+                                 const das_uart_config_t* config,
+                                 das_uart_t* uart) {
+    if (!uart_valid(resource) || config == 0 || uart == 0) {
+        return DAS_ERROR_INVALID_ARGUMENT;
+    }
+
+    *uart = DAS_UART_INVALID;
+    const das_board_uart_pins_t pins = UART_PINS[resource];
+    const das_gpio_config_t tx_config = {
+        .mode = DAS_GPIO_MODE_ALTERNATE,
+        .pull = DAS_GPIO_PULL_NONE,
+        .output_type = DAS_GPIO_OUTPUT_PUSH_PULL,
+        .speed = DAS_GPIO_SPEED_HIGH,
+        .alternate = DAS_NUCLEO_UART_AF,
+        .initial_high = true,
+    };
+    const das_gpio_config_t rx_config = {
+        .mode = DAS_GPIO_MODE_ALTERNATE,
+        .pull = DAS_GPIO_PULL_UP,
+        .output_type = DAS_GPIO_OUTPUT_PUSH_PULL,
+        .speed = DAS_GPIO_SPEED_HIGH,
+        .alternate = DAS_NUCLEO_UART_AF,
+        .initial_high = true,
+    };
+
+    das_result_t result = das_gpio_configure(pins.tx, &tx_config);
+    if (result != DAS_OK) {
+        return result;
+    }
+    result = das_gpio_configure(pins.rx, &rx_config);
+    if (result != DAS_OK) {
+        return result;
+    }
+
+    const das_uart_t resolved = stm32h755_uart_handle(UART_INSTANCES[resource]);
+    if (!das_uart_is_valid(resolved)) {
+        return DAS_ERROR_UNSUPPORTED;
+    }
+
+    result = das_uart_init(resolved, config);
+    if (result != DAS_OK) {
+        return result;
+    }
+
+    *uart = resolved;
     return DAS_OK;
 }
 

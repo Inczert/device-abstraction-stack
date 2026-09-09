@@ -63,12 +63,15 @@ __attribute__((weak, noreturn)) void Default_Handler(void) {
     }
 }
 
-void NMI_Handler(void) __attribute__((weak, alias("Default_Handler")));
-void HardFault_Handler(void) __attribute__((weak, alias("Default_Handler")));
-void MemManage_Handler(void) __attribute__((weak, alias("Default_Handler")));
-void BusFault_Handler(void) __attribute__((weak, alias("Default_Handler")));
-void UsageFault_Handler(void) __attribute__((weak, alias("Default_Handler")));
-void SVC_Handler(void) __attribute__((weak, alias("Default_Handler")));
-void DebugMon_Handler(void) __attribute__((weak, alias("Default_Handler")));
-void PendSV_Handler(void) __attribute__((weak, alias("Default_Handler")));
-void SysTick_Handler(void) __attribute__((weak, alias("Default_Handler")));
+#define DAS_CORTEX_M_DEFAULT_HANDLER(name) \
+    void name(void) __attribute__((weak, alias("Default_Handler"), noreturn))
+
+DAS_CORTEX_M_DEFAULT_HANDLER(NMI_Handler);
+DAS_CORTEX_M_DEFAULT_HANDLER(HardFault_Handler);
+DAS_CORTEX_M_DEFAULT_HANDLER(MemManage_Handler);
+DAS_CORTEX_M_DEFAULT_HANDLER(BusFault_Handler);
+DAS_CORTEX_M_DEFAULT_HANDLER(UsageFault_Handler);
+DAS_CORTEX_M_DEFAULT_HANDLER(SVC_Handler);
+DAS_CORTEX_M_DEFAULT_HANDLER(DebugMon_Handler);
+DAS_CORTEX_M_DEFAULT_HANDLER(PendSV_Handler);
+DAS_CORTEX_M_DEFAULT_HANDLER(SysTick_Handler);

@@ -95,6 +95,12 @@ yes_no() {
   done
 }
 
+wait_for_enter() {
+  echo
+  echo "$1"
+  read -r -p "Press ENTER when ready... "
+}
+
 record() {
   local name="$1" status="$2"
   printf '%-28s %s\n' "$name" "$status" | tee -a "$SUMMARY"
@@ -142,9 +148,31 @@ if run_gdb "$LOG_DIR/flash_probe.log" -x "$ROOT_DIR/scripts/gdb/stm32h755_flash_
   record "CMSIS/GPIO bring-up" PASS
 else
   record "CMSIS/GPIO bring-up" FAIL
-  echo "Firmware bring-up failed; LED cases are skipped. Recovery remains an explicit separate action." >&2
+  echo "Firmware bring-up failed; GPIO/LED cases are skipped. Recovery remains an explicit separate action." >&2
   exit 1
 fi
+
+automated_gpio_case() {
+  local name="$1" command="$2" expected_flags="$3"
+  local log="$LOG_DIR/${name// /_}.log"
+  if run_gdb "$log" \
+      -ex "set \$das_command=$command" \
+      -ex "set \$das_expected_flags=$expected_flags" \
+      -x "$ROOT_DIR/scripts/gdb/stm32h755_gpio_case.gdb"; then
+    record "$name" PASS
+  else
+    record "$name" FAIL
+  fi
+}
+
+wait_for_enter "GPIO pull test: leave Arduino D3 (PE13) electrically DISCONNECTED. Remove any jumper or shield drive from D3."
+automated_gpio_case "GPIO pull-up" 7 4
+automated_gpio_case "GPIO pull-down" 8 8
+
+wait_for_enter "GPIO loopback test: connect ONE jumper from Arduino D4 (PE14, output) to Arduino D3 (PE13, input). Do not connect either pin to 3V3, 5V, or GND."
+automated_gpio_case "GPIO loopback low/high" 6 3
+automated_gpio_case "GPIO open-drain" 9 48
+automated_gpio_case "GPIO EXTI rising/falling" 10 192
 
 visual_case() {
   local name="$1" command="$2" expected_mask="$3" prompt="$4"

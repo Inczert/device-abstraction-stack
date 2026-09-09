@@ -6,7 +6,21 @@ set_property(CACHE DAS_DEVICE PROPERTY STRINGS nucleo_h755zi_q)
 set(STM32_CUBE_H7_DIR "" CACHE PATH "Path to STM32CubeH7 checkout")
 option(DAS_BUILD_HARDWARE_TESTS "Build physical board test firmware" OFF)
 
-if(NOT DAS_DEVICE STREQUAL "nucleo_h755zi_q")
+if(DAS_DEVICE STREQUAL "nucleo_h755zi_q")
+    set(DAS_MCU_BACKEND "cortex_m")
+    set(DAS_DEVICE_BACKEND "stm32h755")
+    set(DAS_BOARD_BACKEND "nucleo_h755zi_q")
+
+    # The Cortex-M layer is intentionally empty for now. Upcoming core-only
+    # support (startup, NVIC, SysTick, cache/MPU helpers) belongs here.
+    set(DAS_MCU_SOURCES)
+
+    set(DAS_DEVICE_SOURCES
+        src/device/stm32h755/gpio.c)
+
+    set(DAS_BOARD_SOURCES
+        src/board/nucleo_h755zi_q/board.c)
+else()
     message(FATAL_ERROR "Unsupported DAS_DEVICE='${DAS_DEVICE}'")
 endif()
 
@@ -35,9 +49,13 @@ if(NOT EXISTS "${DAS_CMSIS_DEVICE_INCLUDE}/stm32h755xx.h")
     message(FATAL_ERROR "STM32H755 CMSIS device header not found under ${DAS_CMSIS_DEVICE_INCLUDE}")
 endif()
 
+message(STATUS
+    "DAS composition: mcu=${DAS_MCU_BACKEND}, device=${DAS_DEVICE_BACKEND}, board=${DAS_BOARD_BACKEND}")
+
 add_library(das STATIC
-    src/mcu/stm32h7/gpio.c
-    src/device/nucleo_h755zi_q/board.c)
+    ${DAS_MCU_SOURCES}
+    ${DAS_DEVICE_SOURCES}
+    ${DAS_BOARD_SOURCES})
 add_library(das::das ALIAS das)
 
 target_include_directories(das

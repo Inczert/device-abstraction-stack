@@ -1,82 +1,123 @@
-# Porting DAS to a new MCU or board
+# Porting DAS
 
-DAS is intended to grow by adding small backends and board mappings behind the existing public API. A port should preserve the abstraction boundary rather than teaching application code about the new vendor.
+DAS grows by composing independent CPU/core, device, and board layers behind stable public APIs. A port should preserve those boundaries rather than introducing a new vendor namespace into application code.
 
 ## Porting model
 
-A new target normally consists of two independent pieces:
-
-1. an **MCU-family backend** that implements generic peripheral APIs using that family's registers;
-2. a **device/board layer** that maps semantic board resources to real peripherals and pins.
-
-For example, the current target is composed of:
+A target is normally composed from:
 
 ```text
-STM32H7 GPIO backend
+MCU/core architecture
         +
-NUCLEO-H755ZI-Q board mapping
+Device/silicon implementation
+        +
+Board mapping
         =
+DAS target
+```
+
+Current target:
+
+```text
+Cortex-M
+    +
+STM32H755
+    +
+NUCLEO-H755ZI-Q
+    =
 DAS_DEVICE=nucleo_h755zi_q
 ```
 
-## 1. Add or reuse an MCU-family backend
+## 1. Add or reuse the MCU/core layer
 
-Create or extend:
+Location:
 
 ```text
-src/mcu/<family>/
+src/mcu/<architecture>/
+```
+
+Examples:
+
+```text
+src/mcu/cortex_m/
+src/mcu/riscv/
+```
+
+This layer contains CPU/core architectural support only, in C and/or assembly.
+
+Appropriate responsibilities include:
+
+- exception mechanics;
+- interrupt-controller/core helpers;
+- core timers such as Cortex-M SysTick;
+- cache/MPU primitives;
+- architectural barriers/masking;
+- reusable core startup primitives.
+
+It must **not** contain vendor peripheral implementations such as STM32 GPIO, RCC, USART, DMA, timers, SPI, I2C or ADC.
+
+A core layer should be reusable across devices that share the same CPU architecture.
+
+## 2. Add the device layer
+
+Location:
+
+```text
+src/device/<device>/
 ```
 
 Example:
 
 ```text
-src/mcu/stm32h7/gpio.c
+src/device/stm32h755/
 ```
 
-Implement the generic public contract from `include/das/`.
+This layer implements silicon-specific peripherals and control using the selected device's register definitions.
 
-A backend may use vendor-supplied register-definition headers such as CMSIS device headers internally, but those types must not appear in public DAS headers.
+For STM32H755, examples include:
 
-### Backend rules
+- GPIO;
+- RCC/PWR/FLASH;
+- EXTI/SYSCFG;
+- USART/LPUART;
+- DMA/DMAMUX;
+- timers;
+- SPI/I2C;
+- ADC/watchdog;
+- dual-core device control.
 
-A backend should:
+Device code may use CMSIS device headers internally, but vendor types must not leak into public DAS headers.
+
+### Device backend rules
+
+A device implementation should:
 
 - validate public API arguments;
-- enable only the peripheral clocks it requires;
-- avoid unrelated global clock-tree or startup policy;
-- preserve documented API semantics;
-- use atomic hardware operations where the peripheral provides them;
-- avoid heap allocation unless a future API explicitly documents it;
-- avoid depending on a specific RTOS;
-- return `DAS_ERROR_UNSUPPORTED` when a generic operation cannot be represented safely on that backend.
+- configure only the hardware it owns;
+- avoid unrelated board policy;
+- preserve documented public semantics;
+- use atomic hardware operations where available;
+- avoid heap/RTOS dependencies unless explicitly part of the API;
+- return useful errors/timeouts rather than hanging indefinitely;
+- return `DAS_ERROR_UNSUPPORTED` when a valid generic operation cannot be represented safely.
 
-For GPIO specifically, a complete backend should consider:
+## 3. Add the board layer
 
-- input/output/alternate/analog modes;
-- pull configuration;
-- output type;
-- drive/speed configuration;
-- alternate-function selection;
-- physical input vs output-latch reads;
-- interrupt/event routing when supported.
-
-## 2. Add the board/device layer
-
-Create:
+Location:
 
 ```text
-src/device/<board>/
+src/board/<board>/
 ```
 
 Example:
 
 ```text
-src/device/nucleo_h755zi_q/board.c
+src/board/nucleo_h755zi_q/
 ```
 
-The board layer should map meaningful resources onto the generic peripheral API.
+The board layer maps real physical resources onto generic/device capabilities.
 
-For example:
+Example:
 
 ```c
 static const das_gpio_pin_t LED_PINS[DAS_BOARD_LED_COUNT] = {
@@ -86,97 +127,96 @@ static const das_gpio_pin_t LED_PINS[DAS_BOARD_LED_COUNT] = {
 };
 ```
 
-This mapping belongs in the board layer, not scattered through applications.
+Useful board semantics include LEDs, buttons, connector buses, fixed chip-selects/enables, virtual COM mapping, board sensors, and physical clock-source configuration.
 
-Do not add a board abstraction merely to rename every MCU pin one-for-one. Use it for resources with genuine board semantics: LEDs, buttons, fixed transceivers, enables, chip selects, board sensors, and similar wiring.
+Do not use the board layer as a second register backend or as a one-for-one alias table for every MCU pin.
 
-## 3. Extend target selection in CMake
+## 4. Extend CMake composition
 
-The current top-level CMake accepts:
+The selected public target should resolve explicitly to its implementation pieces.
 
-```text
-DAS_DEVICE=nucleo_h755zi_q
-```
-
-A new target should extend this selection so that only the required backend/device sources and compile definitions are built.
-
-The desired model is conceptually:
+Conceptually:
 
 ```cmake
 if(DAS_DEVICE STREQUAL "nucleo_h755zi_q")
-    # STM32H755 / STM32H7 backend + Nucleo mapping
-elseif(DAS_DEVICE STREQUAL "some_other_board")
-    # required family backend + board mapping
+    set(DAS_MCU_BACKEND cortex_m)
+    set(DAS_DEVICE_BACKEND stm32h755)
+    set(DAS_BOARD_BACKEND nucleo_h755zi_q)
+elseif(...)
+    ...
 else()
     message(FATAL_ERROR "Unsupported DAS_DEVICE='${DAS_DEVICE}'")
 endif()
 ```
 
-As the target list grows this may be factored into target-specific CMake modules, but the key property should remain explicit compile-time selection.
+Only sources required for the selected target should be compiled.
 
-## 4. Define the external low-level dependency
+As the matrix grows, composition may move into CMake target modules, but the dependency graph must remain explicit.
 
-For Cortex-M devices, CMSIS is the preferred register-definition boundary where practical.
+## 5. Define low-level dependencies
 
-A port should document:
+For Cortex-M targets, CMSIS is the preferred boundary where practical:
 
-- which low-level headers are required;
-- how their path is supplied to CMake;
-- which device preprocessor symbols are required;
+- CMSIS-Core for CPU/core definitions;
+- vendor CMSIS device headers for device registers.
+
+Document:
+
+- required headers;
+- how their root path is provided to CMake;
+- compiler/device preprocessor symbols;
 - whether any vendor source files are linked;
-- any compiler/ABI constraints.
+- ABI/toolchain constraints.
 
-Avoid silently importing an entire vendor SDK if the backend only requires a small register-definition subset.
+Avoid importing an entire SDK when only register definitions are required.
 
-## 5. Keep startup outside the library
+## 6. Keep startup and memory-map responsibilities separated
 
-A new MCU port does not automatically mean DAS should provide the application's startup code.
+Reusable CPU startup mechanics belong to the MCU/core layer.
 
-A hardware qualification target may include a minimal reset handler and linker script under `tests/hardware/<target>/`, but normal applications should remain free to provide their own startup, bootloader, RTOS, memory layout, and clock policy.
+Physical flash/RAM addresses and linker layouts belong to device/build support.
 
-If architecture-level reusable startup support is added later, it should be a distinct optional layer rather than an accidental dependency of a peripheral library.
+Board clock-source wiring belongs to the board layer.
 
-## 6. Add hardware qualification
+A hardware qualification image may contain local startup/linker files while reusable support is still being developed, but those test files must not become hidden dependencies of the static library.
 
-A backend is not complete when compilation succeeds.
+Applications must remain free to override startup and linker behavior for bootloaders, RTOSes, custom partitions, or special vector placement.
 
-Create a physical-target test area under:
+## 7. Add hardware qualification
+
+A port is not complete because it compiles.
+
+Create target qualification under:
 
 ```text
 tests/hardware/<target>/
 ```
 
-and supporting scripts under:
+with supporting OpenOCD/GDB/build scripts as appropriate.
 
-```text
-scripts/
-scripts/gdb/
-```
-
-Qualification should test the public DAS API, not duplicate the backend's register writes in the test firmware.
-
-GDB/register reads may be used as independent evidence, but where practical the test should include a physical path.
+Qualification should exercise the **public DAS API** and gather independent evidence.
 
 Examples:
 
-- GPIO output: board LED or output pad observation;
-- GPIO input: output-to-input jumper loopback;
-- pull configuration: undriven input state;
-- open drain: pull-up plus driven-low/released behavior;
-- EXTI: physical output edge into an interrupt input;
-- UART: TX-to-RX loopback;
-- SPI: controller/peripheral loopback or known peripheral;
-- DMA/cache paths: memory and peripheral evidence plus integrity counters.
+- GPIO output: visible board LED and register evidence;
+- GPIO input: output-to-input physical jumper;
+- pulls: undriven input;
+- open-drain: pull-up plus driven/released behavior;
+- EXTI: physical edge into an interrupt input;
+- UART: TX/RX loopback;
+- SPI: MOSI/MISO loopback;
+- timers/PWM: counter/capture or external measurement;
+- DMA: pattern integrity plus completion/error evidence.
 
-## 7. Package test evidence
+## 8. Package evidence
 
-A hardware campaign should leave enough evidence to diagnose failures after the board is no longer in front of the developer.
+Hardware campaigns should preserve enough information to diagnose failures after the board is no longer attached.
 
 The current STM32H755 campaign packages:
 
 - build output;
 - compiler/tool versions;
-- repository commit IDs;
+- DAS and STM32Cube commit IDs where available;
 - OpenOCD log;
 - per-case GDB logs;
 - ELF;
@@ -184,34 +224,34 @@ The current STM32H755 campaign packages:
 - symbol table;
 - summary and exit status.
 
-New target campaigns should follow the same pattern where useful.
-
 ## Port acceptance checklist
 
-Before considering a new target supported:
+Before marking a target supported:
 
-- [ ] public API compiles without vendor types leaking into headers;
-- [ ] target selection is explicit in CMake;
-- [ ] backend uses only documented external dependencies;
-- [ ] board mappings match board documentation/schematic;
-- [ ] library builds with warnings treated as errors;
-- [ ] hardware test image boots independently;
-- [ ] register/configuration evidence passes;
-- [ ] physical I/O paths are exercised where feasible;
-- [ ] failure evidence is preserved in a portable archive;
-- [ ] documentation support matrix is updated;
-- [ ] any unsupported API behavior is explicitly documented.
+- [ ] public API remains vendor-type free;
+- [ ] core code contains no vendor peripheral implementation;
+- [ ] device code contains no board wiring assumptions;
+- [ ] board code does not duplicate device register programming;
+- [ ] CMake composes the core/device/board layers explicitly;
+- [ ] external dependencies are documented;
+- [ ] warnings are treated as errors;
+- [ ] target firmware boots independently;
+- [ ] configuration/execution evidence passes;
+- [ ] physical I/O is exercised where feasible;
+- [ ] evidence is archived;
+- [ ] documentation/support matrix is updated.
 
 ## Adding a new peripheral API
 
-A new peripheral should normally be developed in this order:
+Recommended order:
 
-1. define the generic public types and semantics;
+1. define generic public types and semantics;
 2. decide what policy remains application-owned;
-3. implement one backend;
-4. add a board mapping only if the board has semantic resources for it;
-5. build a physical qualification path;
-6. add API/integration documentation;
-7. only then replicate the backend on other MCU families.
+3. implement one device backend;
+4. add MCU/core helpers only if the feature is genuinely architectural;
+5. add board mappings only for real board semantics;
+6. build a physical qualification path;
+7. update API/integration documentation;
+8. then replicate the device backend on other silicon.
 
-This order keeps the generic API driven by real hardware rather than by an abstract taxonomy of every feature a vendor brochure has ever listed.
+This keeps the public API driven by real hardware behavior rather than by vendor brochure feature lists.

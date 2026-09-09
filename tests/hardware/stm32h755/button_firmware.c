@@ -124,14 +124,17 @@ int main(void) {
     const uint32_t priority = g_das_button_test_evidence.irq_priority_levels > 1u
         ? g_das_button_test_evidence.irq_priority_levels / 2u
         : 0u;
+    uint32_t observed_priority = UINT32_MAX;
 
     if (das_irq_set_priority(irq, priority) != DAS_OK ||
-        das_irq_get_priority(irq, (uint32_t*)&g_das_button_test_evidence.irq_priority) != DAS_OK ||
+        das_irq_get_priority(irq, &observed_priority) != DAS_OK ||
+        observed_priority != priority ||
         das_irq_enable(irq) != DAS_OK ||
         das_board_button_interrupt_enable(DAS_BOARD_BUTTON_USER, true) != DAS_OK) {
         g_das_button_test_evidence.error = UINT32_C(0x1502);
         for (;;) { __NOP(); }
     }
+    g_das_button_test_evidence.irq_priority = observed_priority;
 
     g_das_button_test_evidence.pressed =
         das_board_button_is_pressed(DAS_BOARD_BUTTON_USER) ? 1u : 0u;

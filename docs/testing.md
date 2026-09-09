@@ -1,6 +1,6 @@
 # Hardware qualification
 
-DAS treats target testing as part of backend qualification. The STM32H755 campaign combines host-side linker/image checks with physical execution on **both** Cortex-M cores and packages all evidence into one archive.
+DAS treats target testing as part of backend qualification. The STM32H755 campaign combines host-side linker/image checks with physical execution on both Cortex-M cores and packages all evidence into one archive.
 
 Current target:
 
@@ -12,17 +12,9 @@ CPU2:     Cortex-M4
 Debug:    ST-LINK direct DAP + OpenOCD + GDB
 ```
 
-The campaign deliberately distinguishes debugger-driven CM4 execution from production dual-core boot coordination. Running CPU2 under GDB proves that the CM4 image, startup path and GPIO/EXTI backend work on the real core. It does not yet prove a final CM7-to-CM4 release/HSEM/shared-memory design.
+Debugger-driven CM4 execution proves that the CM4 image and supported core/device paths work on the real CPU2. It does not yet prove production CM7-to-CM4 boot/release, HSEM or shared-memory coordination.
 
 ## Running the campaign
-
-```bash
-./scripts/stm32h755_test_campaign.sh \
-  /path/to/STM32CubeH7 \
-  --clean
-```
-
-Example:
 
 ```bash
 ./scripts/stm32h755_test_campaign.sh \
@@ -30,33 +22,33 @@ Example:
   --clean
 ```
 
-## Build phase
+Every run produces one timestamped archive under:
 
-Before OpenOCD starts, the campaign builds:
+```text
+build/stm32h755/campaign/
+```
+
+The archive is also created when a test fails after campaign logging has started.
+
+## Build products
+
+The expanded campaign builds:
 
 ```text
 CM7 hardware image
-    DAS_CORE=cm7
-    default linker: stm32h755_cm7.ld
-
+CM7 monotonic-time image
 CM7 clock-profile image
-    DAS_CORE=cm7
-    public DAS clock-profile API
-
+CM7 board-resource/button image
 CM4 hardware image
-    DAS_CORE=cm4
-    default linker: stm32h755_cm4.ld
-
+CM4 monotonic-time image
 CM7 custom-link smoke image
-    DAS_CORE=cm7
-    DAS_LINKER_SCRIPT=tests/link/stm32h755/custom_cm7.ld
 ```
 
-The custom-link fixture starts at `0x08020000` and exists solely to prove linker-script override propagation through `das::das`.
+The normal CM7 and CM4 hardware images use their respective default linker scripts. The custom-link image uses `tests/link/stm32h755/custom_cm7.ld` and exists solely to prove the linker-script override propagated through `das::das`.
 
-## Host-only static checks
+## Host-only acceptance points
 
-The first three acceptance points are static checks of generated ELF/map files. They do **not** access ST-LINK or the board:
+The first three checks do not access ST-LINK or the physical board:
 
 ```text
 STM32H755 CM7 memory layout
@@ -64,149 +56,139 @@ STM32H755 CM4 memory layout
 Custom linker override
 ```
 
-These are expected to pass even if the physical NUCLEO is disconnected. Hardware qualification begins only when the campaign starts OpenOCD and probes CPU1/CPU2.
+They validate ELF/map placement, runtime symbols and heap/stack boundaries. These three checks are expected to pass even when the NUCLEO is disconnected. Hardware qualification starts with the OpenOCD probes.
 
-### CM7 default
-
-Expected placement:
+Default layout expectations:
 
 ```text
-vector table    0x08000000
-code/load image flash bank 1
-.data/.bss      AXI SRAM
-stack top       0x24080000
+CM7 vector      0x08000000
+CM7 runtime RAM AXI SRAM, stack top 0x24080000
+
+CM4 vector      0x08100000
+CM4 runtime RAM D2 SRAM1, stack top 0x30020000
+
+custom CM7      vector at 0x08020000
 ```
-
-### CM4 default
-
-Expected placement:
-
-```text
-vector table    0x08100000
-code/load image flash bank 2
-.data/.bss      D2 SRAM1
-stack top       0x30020000
-```
-
-### Custom linker override
-
-Expected placement:
-
-```text
-vector table    0x08020000
-code/load image remaining flash bank 1 allocation
-.data/.bss      AXI SRAM
-stack top       0x24080000
-```
-
-All three checks require the reusable Cortex-M startup symbols and verify that static/heap usage does not overlap the reserved stack.
 
 ## Dual-core OpenOCD
 
-The physical phase uses:
+The physical phase uses `scripts/openocd_h755_dual_core.cfg` with ST-LINK direct DAP.
 
 ```text
-scripts/openocd_h755_dual_core.cfg
+:3333 -> STM32H755 CPU1 / Cortex-M7
+:3334 -> STM32H755 CPU2 / Cortex-M4
 ```
 
-This uses ST-LINK direct DAP rather than HLA because OpenOCD cannot expose both STM32H755 cores through HLA.
-
-The two GDB servers are:
-
-```text
-:3333 -> STM32H755 cpu0 -> Cortex-M7 / CPU1
-:3334 -> STM32H755 cpu1 -> Cortex-M4 / CPU2
-```
-
-Both cores are probed before either normal hardware image is programmed.
-
-Expected CPUID part numbers:
+Expected CPUID parts:
 
 ```text
 CM7 -> 0xC27
 CM4 -> 0xC24
 ```
 
+## Monotonic-time qualification
+
+A dedicated time image is run on each core.
+
+Each test validates:
+
+- no-source delay returns `DAS_ERROR_NOT_READY`;
+- external/application time-source injection;
+- elapsed time across `UINT32_MAX` wrap;
+- wrap-safe deadline creation/comparison;
+- rejection of intervals beyond the half-range limit;
+- default CMSIS SysTick initialization from the live executing-core clock;
+- a 100 ms delay measured against DWT cycles within 5%;
+- continued execution after the timing case.
+
+CM7 first selects the qualified 400 MHz board profile. CM4 independently uses its live core clock.
+
 ## Clock-profile qualification
 
-After the physical probes, the campaign loads a dedicated CM7 clock image. It tests the public `das_clock_*()` path rather than programming a raw PLL fixture directly.
-
-For the stock NUCLEO-H755ZI-Q it must:
+The dedicated CM7 clock image exercises the public `das_clock_*()` path. On the stock NUCLEO-H755ZI-Q it must:
 
 - advertise 64, 200, 300 and 400 MHz;
+- successfully apply/read back every advertised profile;
 - reject 480 MHz;
-- select and read back each advertised frequency;
-- configure the board's direct-SMPS supply path before VOS changes;
-- confirm `ACTVOSRDY` and `VOSRDY`;
-- finish at 400 MHz;
-- derive 400 MHz CM7, 200 MHz HCLK/CM4 and 100 MHz APB1..4 from live RCC state;
-- continue executing with a nonzero heartbeat.
+- configure the direct-SMPS board power path;
+- confirm power/VOS readiness;
+- finish at 400 MHz CM7, 200 MHz CM4/AHB and 100 MHz APB1..4;
+- continue executing after the transitions.
 
-The clock image is separate so the subsequent GPIO/IRQ campaign can reload its own qualified image instead of inheriting clock-test state accidentally.
+## Board-resource and user-button qualification
 
-## Core bring-up and startup checks
+Issue #15 adds a dedicated CM7 board-resource/button image.
 
-Each core independently runs the same hardware-test firmware built for that core.
-
-For both CM7 and CM4 the campaign:
-
-- loads the corresponding ELF;
-- runs GDB `compare-sections`;
-- starts only the selected target from the dual-core debug session;
-- checks firmware boot evidence and heartbeat;
-- checks GPIO clocks/modes;
-- corrupts one `.data` and one `.bss` object;
-- resets/starts the selected core;
-- verifies `.data` restoration and `.bss` clearing;
-- verifies SCB VTOR equals the linked vector-table address;
-- verifies no startup/fault error was recorded.
-
-## GPIO qualification on both cores
-
-The same five automated electrical tests are executed once from CM7 and again from CM4.
-
-### Pull-up
-
-D3 / PE13 is disconnected and configured with the internal pull-up. The physical input must read high.
-
-### Pull-down
-
-The same disconnected input is configured with the internal pull-down. The physical input must read low.
-
-### Loopback low/high
-
-Connect:
+Before the physical button interaction, firmware validates the semantic resource map used by DAS:
 
 ```text
-CN10 D4 / PE14 / pin 8   ---- jumper ----   CN10 D3 / PE13 / pin 10
-       output                                   input / EXTI13
+B1 USER                  -> PC13
+Arduino D3 / D4 fixture  -> PE13 / PE14
+ST-LINK VCP              -> PD8 / PD9
+Arduino UART             -> PB6 / PB7
+Arduino I2C              -> PB8 / PB9
+Arduino SPI              -> PA5 / PA6 / PB5, CS PD14
 ```
 
-The signal must leave one pad, traverse the jumper and be read through the other pad.
+The campaign then qualifies B1 through the **public board-button API** and generic DAS IRQ controller API.
 
-### Open-drain
+Sequence:
 
-The same loopback validates driven-low and released/high behavior.
+1. leave the blue B1 USER button released while the button image is loaded;
+2. the initial state must read logically released;
+3. when prompted, press and hold B1 and press ENTER while holding it;
+4. firmware must report logically pressed and at least one press EXTI event;
+5. release B1 and press ENTER when prompted;
+6. firmware must report logically released and at least one release EXTI event.
 
-### EXTI rising/falling
+Mechanical bounce is intentionally tolerated. The qualification requires one or more press/release events, not an exact count.
 
-The output generates physical edges into the input. Both cores must receive and clear rising/falling interrupt events through their own STM32H755 EXTI CPU view.
+The current button case runs on CM7 because #15 is board-resource qualification. The lower-level GPIO/EXTI implementation and generic IRQ path are already independently physically qualified on both CM7 and CM4.
 
-This is the important dual-core GPIO check: CM7 uses the CPU1 RCC/EXTI view and CM4 uses the CPU2 view. A CM4 compile alone would not prove that distinction.
+## Core startup/GPIO qualification
 
-Do not connect either loopback pin to 3V3, 5V or GND.
+Both CM7 and CM4 independently run the existing hardware image.
+
+Bring-up checks include:
+
+- ELF programming and `compare-sections`;
+- firmware boot/heartbeat;
+- reusable Cortex-M startup;
+- `.data` restoration and `.bss` clearing after reset;
+- VTOR equal to the linked vector-table address;
+- no startup/fault evidence.
+
+The same five automated GPIO electrical tests then run on each core:
+
+```text
+pull-up
+pull-down
+D4 -> D3 loopback low/high
+open-drain
+EXTI rising/falling
+```
+
+Fixture:
+
+```text
+CN10 D4 / PE14 / pin 8 ---- jumper ---- CN10 D3 / PE13 / pin 10
+```
+
+Pull tests require D3 to be disconnected. Loopback/open-drain/EXTI require the D4-to-D3 jumper. Do not connect either pin to 3V3, 5V or GND.
+
+The EXTI case also qualifies the public `das_irq_*()` path: source-to-controller resolution, enable state, priority set/get, software pending set/query/clear, and real physical edge delivery.
 
 ## Board LED checks
 
 The visual LED qualification remains on CM7:
 
-- all LEDs off;
-- green only;
-- yellow only;
-- red only;
-- all three blinking together.
-
-The board mapping is shared between the two cores, while CM4 GPIO output/input is already exercised physically through the loopback tests.
+```text
+all LEDs off
+green only
+yellow only
+red only
+all three blinking
+```
 
 Board mapping:
 
@@ -216,60 +198,51 @@ Board mapping:
 | LD2 yellow | PE1 | high |
 | LD3 red | PB14 | high |
 
-## Expected summary
+CM4 already drives GPIO physically through the loopback tests, so duplicating five human visual LED confirmations on CPU2 would add ceremony rather than meaningful coverage.
 
-A complete expanded campaign contains **25 acceptance points**:
+## Expected 28-case summary
+
+A complete #15 campaign contains **28 acceptance points**:
 
 ```text
-STM32H755 CM7 memory layout      PASS   [host/static]
-STM32H755 CM4 memory layout      PASS   [host/static]
-Custom linker override           PASS   [host/static]
-CM7 OpenOCD probe                PASS   [hardware]
-CM4 OpenOCD probe                PASS   [hardware]
-CM7 board clock profiles         PASS   [hardware]
-CM7 CMSIS/GPIO bring-up          PASS
-CM7 Cortex-M startup/reset       PASS
-CM7 GPIO pull-up                 PASS
-CM7 GPIO pull-down               PASS
-CM7 GPIO loopback low/high       PASS
-CM7 GPIO open-drain              PASS
-CM7 GPIO EXTI rising/falling     PASS
-CM7 LED all off                  PASS
-CM7 LED green only               PASS
-CM7 LED yellow only              PASS
-CM7 LED red only                 PASS
-CM7 LED all blink                PASS
-CM4 CMSIS/GPIO bring-up          PASS
-CM4 Cortex-M startup/reset       PASS
-CM4 GPIO pull-up                 PASS
-CM4 GPIO pull-down               PASS
-CM4 GPIO loopback low/high       PASS
-CM4 GPIO open-drain              PASS
-CM4 GPIO EXTI rising/falling     PASS
+STM32H755 CM7 memory layout       PASS   [host/static]
+STM32H755 CM4 memory layout       PASS   [host/static]
+Custom linker override            PASS   [host/static]
+
+CM7 OpenOCD probe                 PASS
+CM4 OpenOCD probe                 PASS
+CM7 monotonic timebase            PASS
+CM4 monotonic timebase            PASS
+CM7 HSI/PLL 400MHz clock          PASS
+CM7 user button input/EXTI        PASS
+
+CM7 CMSIS/GPIO bring-up           PASS
+CM7 Cortex-M startup/reset        PASS
+CM7 GPIO pull-up                  PASS
+CM7 GPIO pull-down                PASS
+CM7 GPIO loopback low/high        PASS
+CM7 GPIO open-drain               PASS
+CM7 GPIO EXTI rising/falling      PASS
+CM7 LED all off                   PASS
+CM7 LED green only                PASS
+CM7 LED yellow only               PASS
+CM7 LED red only                  PASS
+CM7 LED all blink                 PASS
+
+CM4 CMSIS/GPIO bring-up           PASS
+CM4 Cortex-M startup/reset        PASS
+CM4 GPIO pull-up                  PASS
+CM4 GPIO pull-down                PASS
+CM4 GPIO loopback low/high        PASS
+CM4 GPIO open-drain               PASS
+CM4 GPIO EXTI rising/falling      PASS
 ```
 
-The script exits nonzero if any acceptance point fails.
-
-## Wiring sequence
-
-The GPIO portion asks for four fixture states:
-
-1. CM7 pull tests: D3 disconnected;
-2. CM7 loopback/EXTI tests: D4 connected to D3;
-3. CM4 pull tests: disconnect the jumper again;
-4. CM4 loopback/EXTI tests: reconnect D4 to D3.
-
-The repeated disconnect/reconnect is intentional so each core gets the same physical coverage rather than inheriting an assumption from the other core's run.
+The script exits nonzero when an acceptance point fails.
 
 ## Evidence bundle
 
-Every campaign produces one archive:
-
-```text
-build/stm32h755/campaign/das-stm32h755-campaign-<UTC timestamp>.tar.gz
-```
-
-Typical contents include:
+Typical archive contents include:
 
 ```text
 summary.txt
@@ -285,52 +258,31 @@ custom_memory_layout.log
 
 CM7_OpenOCD_probe.log
 CM4_OpenOCD_probe.log
-CM7_clock_*.log
-CM7_flash_probe.log
-CM4_flash_probe.log
-CM7_startup_reset.log
-CM4_startup_reset.log
+CM7_monotonic_timebase.log
+CM4_monotonic_timebase.log
+CM7_clock_HSI_PLL_400.log
+CM7_button_setup.log
+CM7_button_pressed.log
+CM7_button_released.log
 CM7_GPIO_*.log
 CM4_GPIO_*.log
 CM7_LED_*.log
 
-stm32h755_cm7.ld
-stm32h755_cm4.ld
-custom_cm7.ld
+das_stm32h755_cm7_hw_test.elf/.map
+das_stm32h755_cm7_time_test.elf/.map
+das_stm32h755_cm7_clock_test.elf/.map
+das_stm32h755_cm7_button_test.elf/.map
+das_stm32h755_cm4_hw_test.elf/.map
+das_stm32h755_cm4_time_test.elf/.map
+das_stm32h755_custom_link_test.elf/.map
 
-das_stm32h755_cm7_clock_test.elf
-das_stm32h755_cm7_clock_test.map
-das_stm32h755_cm7_hw_test.elf
-das_stm32h755_cm7_hw_test.map
-das_stm32h755_cm4_hw_test.elf
-das_stm32h755_cm4_hw_test.map
-das_stm32h755_custom_link_test.elf
-das_stm32h755_custom_link_test.map
-
-cm7-clock-symbols.txt
-cm7-symbols.txt
-cm4-symbols.txt
-custom-symbols.txt
-cm7-clock-elf-size.txt
-cm7-elf-size.txt
-cm4-elf-size.txt
-custom-elf-size.txt
-```
-
-The bundle is produced on failure as well, once logging has started.
-
-## Build-only mode
-
-Build either physical image directly:
-
-```bash
-./scripts/build_stm32h755.sh /path/to/STM32CubeH7 --core cm7 --clean
-./scripts/build_stm32h755.sh /path/to/STM32CubeH7 --core cm4 --build-dir build/stm32h755/cm4-hw --clean
+symbol and size dumps for each generated image
+linker scripts used by the run
 ```
 
 ## Reusing an existing build
 
-`--no-build` reuses the CM7 hardware/clock images, CM4 hardware image and custom-link image. If any ELF/map is missing, the campaign stops rather than silently reducing coverage.
+`--no-build` reuses all expected images, including the button image. Missing ELF/map files are treated as errors rather than silently reducing coverage.
 
 `--clean` and `--no-build` are mutually exclusive.
 
@@ -342,10 +294,10 @@ Explicit destructive recovery remains separate:
 ./scripts/stm32h755_recover.sh
 ```
 
-Recovery keeps the conservative HLA/single-core OpenOCD path. The normal campaign never performs an implicit mass erase.
+The normal campaign never performs an implicit mass erase.
 
 ## Qualification boundary
 
-After a successful 25-case campaign DAS can claim that the stock board clock-profile path and both STM32H755 cores' startup/GPIO/EXTI paths execute physically on the NUCLEO-H755ZI-Q.
+After a successful 28-case campaign DAS can claim that the semantic NUCLEO board-resource mapping and B1 input/EXTI path are physically qualified in addition to the already-qualified linker, clock, time, GPIO and IRQ foundations.
 
-It still cannot claim that a production CM7 application correctly boots/releases CM4, coordinates clock-domain initialization, arbitrates shared memory or uses HSEM correctly. Those remain dual-core system features and are tracked separately.
+It still cannot claim production CM7-to-CM4 lifecycle/HSEM/shared-memory coordination or unimplemented UART/I2C/SPI data transfers. Those remain separate features.

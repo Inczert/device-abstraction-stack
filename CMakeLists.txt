@@ -52,6 +52,7 @@ if(DAS_DEVICE STREQUAL "nucleo_h755zi_q")
 
     set(DAS_BOARD_SOURCES
         src/board/nucleo_h755zi_q/board.c
+        src/board/nucleo_h755zi_q/resources.c
         src/board/nucleo_h755zi_q/clock.c
         src/board/nucleo_h755zi_q/time.c)
 else()

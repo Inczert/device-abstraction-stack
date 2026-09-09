@@ -254,7 +254,15 @@ if run_gdb "$LOG_DIR/flash_probe.log" -x "$ROOT_DIR/scripts/gdb/stm32h755_flash_
   record "CMSIS/GPIO bring-up" PASS
 else
   record "CMSIS/GPIO bring-up" FAIL
-  echo "Firmware bring-up failed; GPIO/LED cases are skipped. Recovery remains an explicit separate action." >&2
+  echo "Firmware bring-up failed; remaining cases are skipped. Recovery remains an explicit separate action." >&2
+  exit 1
+fi
+
+if run_gdb "$LOG_DIR/cortex_m_startup_reset.log" -x "$ROOT_DIR/scripts/gdb/stm32h755_startup_probe.gdb"; then
+  record "Cortex-M startup/reset" PASS
+else
+  record "Cortex-M startup/reset" FAIL
+  echo "Reusable Cortex-M reset/runtime initialization failed; remaining cases are skipped." >&2
   exit 1
 fi
 

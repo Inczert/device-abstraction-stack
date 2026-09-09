@@ -10,7 +10,9 @@ typedef enum das_result {
     /** One or more arguments are invalid for the selected backend/device. */
     DAS_ERROR_INVALID_ARGUMENT = -1,
     /** The operation is valid generically but unsupported by this backend/device. */
-    DAS_ERROR_UNSUPPORTED = -2
+    DAS_ERROR_UNSUPPORTED = -2,
+    /** A bounded hardware/state transition did not complete before its deadline. */
+    DAS_ERROR_TIMEOUT = -3
 } das_result_t;
 
 #endif

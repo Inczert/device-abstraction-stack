@@ -33,7 +33,7 @@ Options:
   --openocd-scripts DIR   OpenOCD scripts directory.
   --debug-timeout SEC     GDB timeout per case (default: 30).
   --clean                 Clean before building.
-  --no-build              Reuse existing CM7/CM4 hardware and custom-link ELFs.
+  --no-build              Reuse existing CM7/CM4 hardware, clock, and custom-link ELFs.
   -h, --help              Show help.
 USAGE
 }
@@ -212,22 +212,26 @@ if (( SKIP_BUILD == 0 )); then
     exit "$CUSTOM_BUILD_RC"
   fi
 else
-  echo "Build skipped; reusing existing CM7/CM4 hardware and custom-link ELFs." | tee "$BUILD_LOG"
+  echo "Build skipped; reusing existing CM7/CM4 hardware, clock, and custom-link ELFs." | tee "$BUILD_LOG"
 fi
 
 CM7_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.elf"
+CLOCK_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_clock_test.elf"
+CLOCK_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_clock_test.map"
 CM7_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.map"
 CM4_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.elf"
 CM4_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.map"
 CUSTOM_ELF="$CUSTOM_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.elf"
 CUSTOM_MAP="$CUSTOM_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.map"
 
-for path in "$CM7_ELF" "$CM7_MAP" "$CM4_ELF" "$CM4_MAP" "$CUSTOM_ELF" "$CUSTOM_MAP"; do
+for path in "$CM7_ELF" "$CM7_MAP" "$CLOCK_ELF" "$CLOCK_MAP" "$CM4_ELF" "$CM4_MAP" "$CUSTOM_ELF" "$CUSTOM_MAP"; do
   [[ -s "$path" ]] || { echo "Expected campaign artifact not found: $path" >&2; exit 1; }
 done
 
 cp "$CM7_ELF" "$LOG_DIR/das_stm32h755_cm7_hw_test.elf"
 cp "$CM7_MAP" "$LOG_DIR/das_stm32h755_cm7_hw_test.map"
+cp "$CLOCK_ELF" "$LOG_DIR/das_stm32h755_cm7_clock_test.elf"
+cp "$CLOCK_MAP" "$LOG_DIR/das_stm32h755_cm7_clock_test.map"
 cp "$CM4_ELF" "$LOG_DIR/das_stm32h755_cm4_hw_test.elf"
 cp "$CM4_MAP" "$LOG_DIR/das_stm32h755_cm4_hw_test.map"
 cp "$CUSTOM_ELF" "$LOG_DIR/das_stm32h755_custom_link_test.elf"
@@ -237,10 +241,12 @@ cp "$ROOT_DIR/cmake/targets/stm32h755_cm4.ld" "$LOG_DIR/"
 cp "$ROOT_DIR/tests/link/stm32h755/custom_cm7.ld" "$LOG_DIR/"
 if command -v arm-none-eabi-size >/dev/null 2>&1; then
   arm-none-eabi-size "$CM7_ELF" >"$LOG_DIR/cm7-elf-size.txt" 2>&1 || true
+  arm-none-eabi-size "$CLOCK_ELF" >"$LOG_DIR/cm7-clock-elf-size.txt" 2>&1 || true
   arm-none-eabi-size "$CM4_ELF" >"$LOG_DIR/cm4-elf-size.txt" 2>&1 || true
   arm-none-eabi-size "$CUSTOM_ELF" >"$LOG_DIR/custom-elf-size.txt" 2>&1 || true
 fi
 arm-none-eabi-nm -n "$CM7_ELF" >"$LOG_DIR/cm7-symbols.txt" 2>&1 || true
+arm-none-eabi-nm -n "$CLOCK_ELF" >"$LOG_DIR/cm7-clock-symbols.txt" 2>&1 || true
 arm-none-eabi-nm -n "$CM4_ELF" >"$LOG_DIR/cm4-symbols.txt" 2>&1 || true
 arm-none-eabi-nm -n "$CUSTOM_ELF" >"$LOG_DIR/custom-symbols.txt" 2>&1 || true
 
@@ -350,21 +356,30 @@ probe_core() {
 probe_core "CM7 OpenOCD probe" "$CM7_ELF" 3333 0xc27 || exit 1
 probe_core "CM4 OpenOCD probe" "$CM4_ELF" 3334 0xc24 || exit 1
 
+if run_gdb "$CLOCK_ELF" 3333 "$LOG_DIR/CM7_clock_HSI_PLL_400.log" \
+    -x "$ROOT_DIR/scripts/gdb/stm32h755_clock_case.gdb"; then
+  record "CM7 HSI/PLL 400MHz clock" PASS
+else
+  record "CM7 HSI/PLL 400MHz clock" FAIL
+  exit 1
+fi
+
 bring_up_core() {
   local core="$1" elf="$2" port="$3"
+  local prefix="${core}"
   if run_gdb "$elf" "$port" "$LOG_DIR/${core}_flash_probe.log" \
       -x "$ROOT_DIR/scripts/gdb/stm32h755_flash_probe.gdb"; then
-    record "$core CMSIS/GPIO bring-up" PASS
+    record "$prefix CMSIS/GPIO bring-up" PASS
   else
-    record "$core CMSIS/GPIO bring-up" FAIL
+    record "$prefix CMSIS/GPIO bring-up" FAIL
     return 1
   fi
 
   if run_gdb "$elf" "$port" "$LOG_DIR/${core}_startup_reset.log" \
       -x "$ROOT_DIR/scripts/gdb/stm32h755_startup_probe.gdb"; then
-    record "$core Cortex-M startup/reset" PASS
+    record "$prefix Cortex-M startup/reset" PASS
   else
-    record "$core Cortex-M startup/reset" FAIL
+    record "$prefix Cortex-M startup/reset" FAIL
     return 1
   fi
 }

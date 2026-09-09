@@ -28,7 +28,7 @@ The public target selector is currently:
 DAS_DEVICE=nucleo_h755zi_q
 ```
 
-Internally this resolves to three independent implementation layers:
+Internally this resolves to:
 
 ```text
 MCU/core backend = cortex_m
@@ -36,14 +36,13 @@ Device backend   = stm32h755
 Board backend    = nucleo_h755zi_q
 ```
 
-The selected target therefore compiles:
+The selected target currently compiles:
 
 ```text
+src/mcu/cortex_m/startup.c
 src/device/stm32h755/gpio.c
 src/board/nucleo_h755zi_q/board.c
 ```
-
-The Cortex-M source list is currently empty; upcoming core-only startup, NVIC, SysTick and cache/MPU support will be added under `src/mcu/cortex_m/`.
 
 CMake fails explicitly for unknown target values.
 
@@ -56,7 +55,7 @@ The current STM32 target uses two CMSIS boundaries:
 
 STM32 peripheral code belongs in `src/device/stm32h755/`, not `src/mcu/`.
 
-Board code belongs in `src/board/nucleo_h755zi_q/` and should not program STM32 registers directly when a device/public API exists.
+Board code belongs in `src/board/nucleo_h755zi_q/` and should not program STM32 registers directly when a public/device capability exists.
 
 ## STM32CubeH7 dependency
 
@@ -93,7 +92,7 @@ cmake -S . -B build/stm32h755 \
 cmake --build build/stm32h755 --parallel
 ```
 
-The configure output reports the composition:
+The configure output reports:
 
 ```text
 DAS composition: mcu=cortex_m, device=stm32h755, board=nucleo_h755zi_q
@@ -117,33 +116,11 @@ The archive is normally:
 build/stm32h755/libdas.a
 ```
 
-DAS compiles its own library sources with `-Wall -Wextra -Werror`.
-
-## Cross-compilation toolchain
-
-The repository provides:
-
-```text
-cmake/toolchains/arm-none-eabi.cmake
-```
-
-for the current Cortex-M7 bare-metal build.
-
-A consuming application may use its own equivalent toolchain file. DAS must be configured in the same cross-compilation build tree as the firmware using it.
+DAS compiles its own sources with `-Wall -Wextra -Werror`.
 
 ## `add_subdirectory()` integration
 
-Example layout:
-
-```text
-my-firmware/
-├── CMakeLists.txt
-├── src/
-└── third_party/
-    └── device-abstraction-stack/
-```
-
-Parent CMake:
+Example parent project:
 
 ```cmake
 set(DAS_DEVICE nucleo_h755zi_q CACHE STRING "DAS target" FORCE)
@@ -154,14 +131,14 @@ add_subdirectory(third_party/device-abstraction-stack)
 target_link_libraries(my_firmware PRIVATE das::das)
 ```
 
-Application source then uses public headers:
+Application source uses public headers:
 
 ```c
 #include <das/gpio.h>
 #include <das/board.h>
 ```
 
-Do not add `src/mcu/`, `src/device/`, or `src/board/` to application include paths. Those are implementation layers, not public interfaces.
+Do not add `src/mcu/`, `src/device/`, or `src/board/` to application include paths. Those are implementation layers.
 
 ## `FetchContent` integration
 
@@ -182,13 +159,70 @@ FetchContent_MakeAvailable(das)
 target_link_libraries(my_firmware PRIVATE das::das)
 ```
 
-Use a release tag or exact commit for reproducible products. `develop` is appropriate only when intentionally tracking active development.
+Use a release tag or exact commit for reproducible products. `develop` is appropriate only while intentionally tracking active development.
 
-## Installed-package status
+## Reusable Cortex-M startup
 
-DAS does not yet provide an installed `find_package(DAS)` package. Source integration currently uses `add_subdirectory()` or `FetchContent`.
+The library currently includes an optional reusable Cortex-M startup implementation:
 
-Install/export support is tracked separately and should preserve the same core/device/board composition model.
+```text
+src/mcu/cortex_m/startup.c
+include/das/cortex_m/startup.h
+```
+
+It provides weak definitions for:
+
+- `Reset_Handler`;
+- `Default_Handler`;
+- Cortex-M core exception handlers such as HardFault, MemManage, BusFault, UsageFault, SVC, DebugMon, PendSV and SysTick.
+
+The default reset path:
+
+1. restores `.data` from its load address;
+2. clears `.bss`;
+3. writes SCB VTOR to the linker-provided vector-table address;
+4. executes DSB/ISB barriers;
+5. calls `main()`.
+
+Because the symbols are weak, a bootloader, RTOS, or application may provide strong replacements without modifying DAS.
+
+### Linker contract
+
+If the DAS reset path is used, the final firmware linker script must export:
+
+```text
+__data_load__
+__data_start__
+__data_end__
+__bss_start__
+__bss_end__
+__vector_table_start__
+```
+
+The vector table itself is **not** supplied by the generic Cortex-M layer. The final target image owns:
+
+- initial stack entry;
+- reset vector reference;
+- Cortex-M core vectors;
+- device-specific external IRQ entries.
+
+This keeps STM32 IRQ numbering out of generic Cortex-M code.
+
+The current STM32H755 hardware qualification linker script satisfies this contract. Reusable STM32H755 linker/memory-layout support is tracked separately in issue #3.
+
+## Application-owned responsibilities
+
+Even when using the DAS reset path, linking `das::das` does not produce a complete firmware image. The final application/target still owns:
+
+- vector-table composition;
+- device-specific external IRQ vectors;
+- physical memory layout/linker script;
+- system clock configuration;
+- application `main` or RTOS entry;
+- NVIC priority/policy;
+- bootloader/application partitioning.
+
+Applications that do not want the DAS startup simply provide strong startup/exception definitions and their own linker contract.
 
 ## Compile definitions
 
@@ -199,22 +233,7 @@ CORE_CM7
 STM32H755xx
 ```
 
-These are implementation requirements. Consuming application code must not depend on them being propagated by `das::das`.
-
-## What the application still owns
-
-Linking DAS does not create a complete firmware image. At the current stage the consuming firmware owns:
-
-- startup/reset entry;
-- vector table;
-- linker script and memory layout;
-- system clock configuration;
-- C/C++ runtime setup as required;
-- application `main` or RTOS entry;
-- NVIC priority/vector policy;
-- bootloader/application partitioning.
-
-Planned work will provide optional reusable Cortex-M startup/core helpers and STM32H755 linker/clock support. Those additions must remain explicit and overridable rather than silently becoming mandatory application policy.
+These are implementation requirements. Consuming application code must not rely on them being propagated by `das::das`.
 
 ## Hardware-test build
 
@@ -236,7 +255,7 @@ The hardware-test ELF is:
 build/stm32h755/tests/hardware/stm32h755/das_stm32h755_hw_test.elf
 ```
 
-The test image currently supplies its own minimal startup and linker script.
+The test image uses the reusable DAS Cortex-M reset/runtime path while supplying its own STM32H755-specific vector table and test-local linker script.
 
 ## Full physical campaign
 
@@ -246,9 +265,15 @@ The test image currently supplies its own minimal startup and linker script.
   --clean
 ```
 
-The campaign builds, starts OpenOCD, flashes through GDB, performs automated register/physical GPIO checks, asks for visual LED confirmation, and packages a timestamped evidence archive.
+The campaign builds, starts OpenOCD, flashes through GDB, validates Cortex-M reset/runtime behavior, performs automated GPIO checks, asks for visual LED confirmation, and packages a timestamped evidence archive.
 
 See [Hardware qualification](testing.md).
+
+## Installed-package status
+
+DAS does not yet provide an installed `find_package(DAS)` package. Source integration currently uses `add_subdirectory()` or `FetchContent`.
+
+Install/export support is tracked separately.
 
 ## Configuration summary
 

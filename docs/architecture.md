@@ -1,6 +1,6 @@
 # Architecture
 
-DAS is a compile-time device abstraction stack. Its purpose is to keep application code stable while separating four concerns that are often collapsed into one vendor HAL: portable API, CPU/core architecture, silicon device peripherals, and board wiring.
+DAS is a compile-time device abstraction stack. Its purpose is to keep application code stable while separating concerns that vendor HALs often collapse together: portable API, CPU/core architecture, silicon device peripherals, and board wiring.
 
 ## Layer boundaries
 
@@ -22,7 +22,7 @@ Location:
 src/common/
 ```
 
-Hardware-independent shared behavior belongs here when multiple backends would otherwise duplicate the same policy or algorithm.
+Hardware-independent shared behavior belongs here when multiple implementations would otherwise duplicate the same policy or algorithm.
 
 ### MCU/core architecture layer
 
@@ -32,36 +32,51 @@ Location:
 src/mcu/<architecture>/
 ```
 
-For the current target:
+Current target:
 
 ```text
 src/mcu/cortex_m/
 ```
 
-This layer contains **CPU/core architecture support only**, whether implemented in C or assembly.
+This layer contains **CPU/core architecture support only**, in C and/or assembly.
 
 Valid examples:
 
-- exception/core helpers;
+- reset/runtime initialization;
+- core exception defaults;
 - NVIC access;
 - SCB helpers;
 - SysTick;
 - PRIMASK/BASEPRI helpers;
-- Cortex-M cache/MPU primitives;
-- reusable Cortex-M startup/vector primitives.
+- Cortex-M cache/MPU primitives.
 
 Invalid examples:
 
 - STM32 GPIO;
 - STM32 RCC/PWR/FLASH;
-- EXTI/SYSCFG routing;
+- STM32 EXTI/SYSCFG routing;
 - USART/UART;
 - DMA/DMAMUX;
 - STM32 timers, SPI, I2C, ADC.
 
 Those are device features, not Cortex-M features.
 
-The core layer may use CMSIS-Core definitions where useful, but must not acquire a dependency on one STM32 device.
+#### Current Cortex-M startup support
+
+`src/mcu/cortex_m/startup.c` provides a reusable optional reset/runtime path.
+
+The weak `Reset_Handler`:
+
+1. copies `.data` from `__data_load__` to the RAM range `__data_start__`..`__data_end__`;
+2. clears `__bss_start__`..`__bss_end__`;
+3. programs the architecturally defined SCB VTOR register from `__vector_table_start__`;
+4. executes DSB/ISB barriers;
+5. calls `main()`;
+6. remains in a non-returning idle loop if `main()` returns.
+
+Weak default handlers are supplied for Cortex-M core exceptions. Because they are weak, a bootloader, RTOS, or application can replace them with strong definitions.
+
+The core layer deliberately does **not** define vendor external-IRQ vector layouts. A concrete device/application image still owns its external interrupt vector table.
 
 ### Device layer
 
@@ -71,7 +86,7 @@ Location:
 src/device/<device>/
 ```
 
-For the current target:
+Current target:
 
 ```text
 src/device/stm32h755/
@@ -97,7 +112,7 @@ Location:
 src/board/<board>/
 ```
 
-For the current target:
+Current target:
 
 ```text
 src/board/nucleo_h755zi_q/
@@ -119,7 +134,7 @@ Do not turn the board layer into a one-for-one alias table for every MCU pin.
 
 ## Dependency direction
 
-The intended direction is:
+The intended conceptual direction is:
 
 ```text
 application
@@ -144,8 +159,6 @@ common logic           board mapping
                            v
                        hardware
 ```
-
-The conceptual dependency is from board semantics toward device capabilities and from device support toward reusable core primitives. In practice, public peripheral APIs are implemented by the selected device source files, while board helpers call those public APIs.
 
 Important rules:
 
@@ -172,36 +185,56 @@ Device backend   = stm32h755
 Board backend    = nucleo_h755zi_q
 ```
 
-The name of the selector is retained for compatibility while the internal composition is explicit.
+Current implementation sources:
 
-There is no runtime target discovery. Embedded firmware knows its hardware before link time, so DAS pays no runtime abstraction cost to rediscover it.
+```text
+src/mcu/cortex_m/startup.c
+src/device/stm32h755/gpio.c
+src/board/nucleo_h755zi_q/board.c
+```
+
+There is no runtime target discovery.
 
 ## CMSIS boundary
 
-For STM32H755, DAS currently consumes:
+For STM32H755, DAS consumes:
 
 ```text
 CMSIS-Core: core_cm7.h
 CMSIS device: stm32h755xx.h
 ```
 
-CMSIS-Core is appropriate for Cortex-M architectural definitions. The STM32H755 device header is appropriate only inside the device/backend and test code that needs silicon register definitions.
+CMSIS-Core is appropriate for Cortex-M architectural definitions. The STM32H755 device header is appropriate inside the device/backend and target test code that needs silicon register definitions.
 
 DAS does not compile or link STM32 HAL or LL source code.
 
-## Startup and linker ownership
+## Startup, vector-table and linker ownership
 
-The static library currently does not provide the consuming application's reset handler or linker script.
+The reusable Cortex-M startup is part of the library, but it remains **optional and overridable** because its reset/core handlers are weak.
 
-The hardware qualification image under:
+The final firmware image still owns:
+
+- the vector table itself;
+- device-specific external IRQ entries;
+- the linker script and physical memory map;
+- the symbols consumed by the reusable reset path;
+- system clock configuration;
+- application/RTOS/bootloader policy.
+
+The reusable startup expects these linker symbols:
 
 ```text
-tests/hardware/stm32h755/
+__data_load__
+__data_start__
+__data_end__
+__bss_start__
+__bss_end__
+__vector_table_start__
 ```
 
-contains a minimal test-specific startup and linker script because it must boot independently.
+The STM32H755 qualification image currently provides those symbols through its test-local linker script. Reusable STM32H755 linker/memory-layout support is tracked separately.
 
-Reusable Cortex-M startup belongs in the MCU/core layer. STM32H755 memory-map/linker support belongs to the device/build layer. Applications must remain able to override both for bootloaders, RTOSes, custom memory partitions, or special vector placement.
+This separation allows the same Cortex-M startup mechanics to coexist with custom bootloaders, RTOS startup code, alternative memory maps, or custom vector placement.
 
 ## Interrupt ownership
 
@@ -210,7 +243,7 @@ There are two distinct concerns:
 - Cortex-M NVIC/core interrupt control belongs in `src/mcu/cortex_m/`;
 - STM32H755 interrupt-source routing, such as EXTI/SYSCFG, belongs in `src/device/stm32h755/`.
 
-The current GPIO API configures the STM32 EXTI line and pending state. The test firmware currently owns the NVIC call directly; the planned Cortex-M NVIC layer will replace that architecture leakage without moving EXTI into the core layer.
+The current GPIO API configures the STM32 EXTI line and pending state. The hardware-test application still owns direct NVIC calls until the dedicated Cortex-M NVIC API is implemented.
 
 ## Qualification rule
 
@@ -222,4 +255,4 @@ Where practical, qualification should combine:
 - execution evidence: the API path actually executes;
 - physical evidence: a signal traverses a real pin/wire/peripheral path.
 
-The existing STM32H755 GPIO campaign uses physical loopback for input, open-drain, and EXTI, plus visual LED confirmation. Future peripheral drivers should follow the same standard.
+The current campaign additionally qualifies Cortex-M startup by corrupting `.data` and `.bss`, resetting the target, and verifying runtime restoration plus VTOR placement before continuing with GPIO and LED tests.

@@ -11,9 +11,8 @@ if(DAS_DEVICE STREQUAL "nucleo_h755zi_q")
     set(DAS_DEVICE_BACKEND "stm32h755")
     set(DAS_BOARD_BACKEND "nucleo_h755zi_q")
 
-    # The Cortex-M layer is intentionally empty for now. Upcoming core-only
-    # support (startup, NVIC, SysTick, cache/MPU helpers) belongs here.
-    set(DAS_MCU_SOURCES)
+    set(DAS_MCU_SOURCES
+        src/mcu/cortex_m/startup.c)
 
     set(DAS_DEVICE_SOURCES
         src/device/stm32h755/gpio.c)

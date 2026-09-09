@@ -1,8 +1,8 @@
 # Architecture
 
-DAS is a compile-time device abstraction stack. It separates portable APIs, CPU/core architecture, silicon-specific device support, board wiring, and build-time memory policy instead of collapsing them into one vendor framework.
+DAS is a compile-time device abstraction stack. It separates portable application APIs, CPU/core architecture support, silicon-specific device code, board wiring, and final firmware build policy.
 
-## Layer boundaries
+## Layers
 
 ### Public API
 
@@ -10,7 +10,7 @@ DAS is a compile-time device abstraction stack. It separates portable APIs, CPU/
 include/das/
 ```
 
-Application-facing contracts. Public headers use DAS and standard C types only; vendor/CMSIS device types do not leak here.
+Application-facing headers use DAS and standard C types. STM32/CMSIS device types must not leak into this layer.
 
 ### Common logic
 
@@ -18,23 +18,32 @@ Application-facing contracts. Public headers use DAS and standard C types only; 
 src/common/
 ```
 
-Hardware-independent behavior shared by implementations.
+Hardware-independent shared implementation belongs here.
 
-### MCU/core architecture layer
+### MCU/core architecture
 
 ```text
 src/mcu/<architecture>/
 ```
 
-Current target:
+Current architecture:
 
 ```text
 src/mcu/cortex_m/
 ```
 
-This layer contains CPU/core architecture support only, whether implemented in C or assembly. Current support includes reset/runtime initialization and weak core exception handlers. NVIC, SysTick and Cortex-M7 cache/MPU helpers belong here as they are added.
+This layer contains architecture-only code, in C and/or assembly:
 
-STM32 GPIO, RCC, USART, DMA and EXTI/SYSCFG do not belong here because they are not Cortex-M features.
+- reset/runtime mechanics;
+- core exception defaults;
+- NVIC/SCB helpers;
+- SysTick;
+- PRIMASK/BASEPRI helpers;
+- cache/MPU primitives.
+
+It must not contain STM32 peripherals such as GPIO, RCC, USART, DMA, timers or SPI.
+
+The same Cortex-M startup is used for both STM32H755 cores. Core selection changes compiler/core definitions, not the conceptual ownership of startup.
 
 ### Device layer
 
@@ -42,13 +51,24 @@ STM32 GPIO, RCC, USART, DMA and EXTI/SYSCFG do not belong here because they are 
 src/device/<device>/
 ```
 
-Current target:
+Current device:
 
 ```text
 src/device/stm32h755/
 ```
 
-This layer contains STM32H755 on-chip peripheral/register behavior. The current implementation contains GPIO and EXTI/SYSCFG routing. Future RCC/PWR/FLASH, USART, DMA/DMAMUX, timers, SPI, I2C, ADC and watchdog support belongs here.
+This layer owns STM32H755 silicon behavior:
+
+- GPIO and EXTI/SYSCFG;
+- future RCC/PWR/FLASH;
+- USART;
+- DMA/DMAMUX;
+- timers;
+- SPI/I2C;
+- ADC/watchdog;
+- dual-core silicon control where appropriate.
+
+STM32H755 contains two CPUs. Where registers have CPU-specific views, the device backend selects the correct one from `CORE_CM7` or `CORE_CM4`. For example, EXTI interrupt masks/pending state use the CPU1 or CPU2 view rather than hard-coding CPU1.
 
 ### Board layer
 
@@ -56,139 +76,192 @@ This layer contains STM32H755 on-chip peripheral/register behavior. The current 
 src/board/<board>/
 ```
 
-Current target:
+Current board:
 
 ```text
 src/board/nucleo_h755zi_q/
 ```
 
-This layer maps board-level resources to device capabilities. Current mappings are the three NUCLEO user LEDs. Future resources include the user button, connector buses, ST-LINK VCOM and physical clock-source wiring.
+This layer describes physical board wiring and named resources:
 
-### Device/build memory policy
+```text
+green LED   -> PB0 / LD1
+yellow LED  -> PE1 / LD2
+red LED     -> PB14 / LD3
+```
 
-Reusable physical memory layout is device-specific but is not C source code, so DAS keeps it under:
+Future resources include the user button, VCOM mapping, connector buses and physical clock-source wiring.
+
+### Build/target policy
+
+Physical memory maps and linker scripts are not CPU instructions and are not peripheral drivers. They live under:
 
 ```text
 cmake/targets/
 ```
 
-Current default:
+For STM32H755:
 
 ```text
-cmake/targets/stm32h755_cm7.ld
+stm32h755_cm7.ld
+stm32h755_cm4.ld
 ```
 
-The linker script models STM32H755 memory and exports the symbols expected by the reusable Cortex-M reset path. It is surfaced through the optional `das::linker` CMake interface target.
+They define default final-image placement for a selected device/core pair.
 
-This separation is deliberate:
+## Target composition
 
-```text
-Cortex-M startup mechanics       -> src/mcu/cortex_m/
-STM32H755 memory addresses       -> cmake/targets/stm32h755_cm7.ld
-STM32H755 peripherals            -> src/device/stm32h755/
-NUCLEO physical wiring           -> src/board/nucleo_h755zi_q/
-```
-
-## Dependency direction
-
-```text
-application / RTOS
-        |
-        v
-public DAS API
-        |
-   +----+-------------------+
-   |                        |
-   v                        v
-common                   board mapping
-                            |
-                            v
-                         device
-                            |
-                            v
-                        MCU/core
-                            |
-                            v
-                          CMSIS
-                            |
-                            v
-                         hardware
-
-final firmware link
-        |
-        +--> optional das::linker --> selected device memory layout
-```
-
-Important rules:
-
-1. `include/das/` exposes no STM32/CMSIS device types.
-2. `src/mcu/` contains no vendor peripheral register programming.
-3. `src/device/` contains no board connector/LED/button assumptions.
-4. `src/board/` does not duplicate device register programming.
-5. Common code depends on neither a specific device nor board.
-6. A default linker script is optional policy, not a hidden requirement of `das::das`.
-
-## Current target composition
+The public board target is:
 
 ```text
 DAS_DEVICE=nucleo_h755zi_q
-
-MCU/core backend = cortex_m
-Device backend   = stm32h755
-Board backend    = nucleo_h755zi_q
-Linker default   = cmake/targets/stm32h755_cm7.ld
 ```
 
-The code library and linker policy are separate targets:
+The CPU is selected separately:
 
 ```text
-das::das       reusable C implementation
-das::linker    optional selected -T linker script
+DAS_CORE=cm7
 ```
 
-There is no runtime target discovery.
-
-## CMSIS boundary
-
-For STM32H755 DAS consumes CMSIS-Core plus `stm32h755xx.h`. STM32 device headers stay inside device/target implementation code. DAS does not compile or link STM32 HAL or LL sources.
-
-## Startup, vector table and linker ownership
-
-The reusable Cortex-M `Reset_Handler` is weak and optional. It expects linker symbols for initialized data, zero-initialized data and vector placement.
-
-The default STM32H755 script now supplies that contract:
+or:
 
 ```text
-__data_load__
-__data_start__
-__data_end__
-__bss_start__
-__bss_end__
-__vector_table_start__
+DAS_CORE=cm4
 ```
 
-The final image still owns the actual vector-table entries, including all device-specific external IRQ vectors.
+The composition therefore becomes:
 
-Applications with a bootloader, RTOS, alternate flash origin, bank split, shared-memory scheme or special TCM placement can override `DAS_LINKER_SCRIPT` or omit `das::linker` and supply their own script.
+```text
+application
+    |
+    v
+public DAS API
+    |
+    +----------------------+
+    |                      |
+    v                      v
+common logic           board mapping
+                           |
+                           v
+                       device layer
+                           |
+                           v
+                     Cortex-M layer
+                           |
+                           v
+                        CMSIS
+```
 
-See [STM32H755 Cortex-M7 memory layout](memory-layout.md).
+At final link time there is an additional build-policy input:
+
+```text
+DAS_DEVICE + DAS_CORE
+        |
+        v
+default linker script
+        |
+        v
+final firmware ELF
+```
+
+## Why core selection is separate from device selection
+
+`STM32H755` is one device containing:
+
+```text
+CPU1: Cortex-M7
+CPU2: Cortex-M4
+```
+
+The board does not change when choosing which core image is being built. Therefore `DAS_DEVICE` should not encode `_cm7` or `_cm4` into the board name.
+
+`DAS_CORE` selects:
+
+- CPU/FPU compiler flags;
+- CMSIS core header;
+- `CORE_CM7` or `CORE_CM4`;
+- core-specific default linker layout.
+
+This makes the model extend naturally to other multi-core devices.
+
+## Startup ownership
+
+`src/mcu/cortex_m/startup.c` provides weak reusable Cortex-M reset/runtime behavior:
+
+1. copy `.data`;
+2. clear `.bss`;
+3. program VTOR;
+4. execute barriers;
+5. enter `main()`.
+
+The startup code consumes linker symbols but does not know STM32H755 addresses.
+
+The final image still owns the vector table, including device-specific external IRQ entries.
+
+## Memory ownership
+
+The default STM32H755 layouts intentionally avoid overlap:
+
+```text
+CM7:
+  flash bank 1 -> code/vector/load image
+  AXI SRAM     -> writable sections/stack
+
+CM4:
+  flash bank 2 -> code/vector/load image
+  D2 SRAM1     -> writable sections/stack
+```
+
+This is a default firmware partition, not a hard architectural restriction.
+
+Applications remain free to provide a different linker script with `DAS_LINKER_SCRIPT`.
+
+See [STM32H755 memory and linker policy](memory-layout.md).
+
+## Linker propagation
+
+`das::das` is a static archive. The archive itself is not placed into flash or RAM.
+
+The selected linker script is carried as an `INTERFACE` link option so the normal consumer contract remains:
+
+```cmake
+target_link_libraries(my_firmware PRIVATE das::das)
+```
+
+There is intentionally no `das::linker` target and no `das_configure_firmware()` helper.
 
 ## Interrupt ownership
 
-Cortex-M NVIC/core interrupt control belongs in `src/mcu/cortex_m/`. STM32H755 interrupt-source routing, such as EXTI/SYSCFG, belongs in `src/device/stm32h755/`.
+Interrupt handling spans architecture and device concerns:
 
-The current hardware-test image still owns direct NVIC calls until the dedicated Cortex-M NVIC API is implemented.
+```text
+Cortex-M NVIC/core control       -> src/mcu/cortex_m/
+STM32 EXTI/SYSCFG routing        -> src/device/stm32h755/
+application/device vector table  -> final firmware target
+```
 
-## Qualification rule
+The device backend must also respect the selected CPU's EXTI/RCC view on a dual-core STM32H755.
 
-A backend/build layer is not complete merely because it compiles.
+## Dependency rules
 
-The current campaign qualifies:
+1. `include/das/` exposes no vendor device types.
+2. `src/mcu/` contains no vendor peripheral register implementation.
+3. `src/device/` contains no board connector/LED assumptions.
+4. `src/board/` does not duplicate register backends.
+5. linker/memory policy is not placed in `src/mcu/`.
+6. applications do not include implementation files from `src/`.
+7. multi-core device code must not silently assume CPU1 when building for CPU2.
 
-- ELF/linker-map placement before hardware execution;
-- Cortex-M runtime reconstruction across reset;
-- register configuration and execution state;
-- physical GPIO/EXTI signal paths;
+## Qualification
+
+Compilation alone is not sufficient evidence.
+
+Current qualification combines:
+
+- static CM7 linker-layout validation;
+- static CM4 linker-layout validation;
+- physical CM7 startup/reset validation;
+- physical GPIO/EXTI loopback;
 - visible board LED behavior.
 
-The memory-layout check verifies the generated map/ELF before OpenOCD is even started, while the startup test then proves those linker symbols work on the actual MCU after reset.
+CM4 physical boot/release, shared memory and HSEM are intentionally deferred to the dual-core work because those require coordinated CPU1/CPU2 behavior rather than merely a correct CM4 ELF.

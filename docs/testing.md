@@ -1,14 +1,15 @@
 # Hardware qualification
 
-DAS treats physical-target testing as part of backend qualification, not as an optional demonstration after the code has already declared itself correct.
+DAS treats target testing as part of backend qualification. The STM32H755 campaign now separates **static image/layout qualification** from **physical execution qualification** so the CM4 linker work does not pretend that CPU2 has already been booted on hardware.
 
 Current target:
 
 ```text
-Board: NUCLEO-H755ZI-Q
-MCU:   STM32H755
-Core:  Cortex-M7
-Debug: ST-LINK + OpenOCD + GDB
+Board:      NUCLEO-H755ZI-Q
+Device:     STM32H755
+Physical:   Cortex-M7 / CPU1
+Static:     Cortex-M7 + Cortex-M4 image/link layouts
+Debug:      ST-LINK + OpenOCD + GDB
 ```
 
 ## Running the campaign
@@ -19,93 +20,163 @@ Debug: ST-LINK + OpenOCD + GDB
   --clean
 ```
 
-The campaign builds the test image, validates the generated memory layout, starts OpenOCD, probes the board, flashes the ELF, runs automated GDB cases, pauses for GPIO wiring, asks for LED confirmation, and packages the evidence.
+Example:
 
-## What is tested
-
-### 1. STM32H755 memory layout
-
-Before touching the board, the campaign runs:
-
-```text
-scripts/check_stm32h755_memory_layout.sh
+```bash
+./scripts/stm32h755_test_campaign.sh \
+  /home/dev/STM32Cube/Repository/STM32CubeH7/ \
+  --clean
 ```
 
-against the generated ELF and map file. It checks:
-
-- required linker/startup symbols exist in the ELF and map;
-- vector table begins at `0x08000000`;
-- `.data` load image resides in flash;
-- `.data` and `.bss` reside in AXI SRAM;
-- stack top is `0x24080000`;
-- heap/static bounds do not overlap the reserved stack.
-
-The hardware-test target links the same reusable script exposed to applications through `das::linker`:
+The campaign builds two independent images before touching the board:
 
 ```text
-cmake/targets/stm32h755_cm7.ld
+CM7 hardware image
+    DAS_CORE=cm7
+    default linker: stm32h755_cm7.ld
+
+CM4 linker-smoke image
+    DAS_CORE=cm4
+    default linker: stm32h755_cm4.ld
 ```
 
-### 2. Board/OpenOCD probe
+The CM4 image is **not flashed or executed** by this campaign. Physical CM4 boot/release, HSEM and shared-memory qualification belong to the dual-core work.
 
-GDB attaches through OpenOCD and verifies Cortex-M7 CPUID before flashing. Failure stops the campaign without programming a new image.
+## 1. STM32H755 CM7 memory layout
 
-### 3. Flash and firmware bring-up
+The actual CM7 hardware-test ELF and map are checked before OpenOCD starts.
 
-The ELF is loaded and checked with `compare-sections`; the campaign then verifies boot, heartbeat, fault state, and expected GPIO clocks/modes.
+Expected default placement:
 
-### 4. Cortex-M startup/reset
+```text
+vector table    0x08000000
+code/load image flash bank 1
+.data/.bss      AXI SRAM
+stack top       0x24080000
+```
 
-GDB deliberately corrupts variables in `.data` and `.bss`, resets the target, and verifies:
+The checker also requires the Cortex-M startup symbols and verifies heap/static data do not overlap the reserved stack.
+
+## 2. STM32H755 CM4 memory layout
+
+A separate CM4 ELF is cross-compiled and linked using `DAS_CORE=cm4`.
+
+Expected default placement:
+
+```text
+vector table    0x08100000
+code/load image flash bank 2
+.data/.bss      D2 SRAM1
+stack top       0x30020000
+```
+
+This statically qualifies:
+
+- Cortex-M4/FPU compiler selection;
+- `CORE_CM4` CMSIS device view;
+- CM4 linker script selection through `das::das`;
+- startup symbol contract;
+- non-overlapping default CM4 flash/RAM placement.
+
+It does **not** prove CPU2 reset/release or runtime execution.
+
+## 3. Board/OpenOCD probe
+
+Before flashing, GDB attaches through OpenOCD and checks the physical CPU1 core identity.
+
+Expected Cortex-M part number:
+
+```text
+0xC27 -> Cortex-M7
+```
+
+This step is non-destructive. If attachment fails, the campaign stops before programming a new image.
+
+## 4. Flash and firmware bring-up
+
+The campaign:
+
+- loads the CM7 ELF;
+- runs GDB `compare-sections`;
+- resets/runs the target;
+- checks that firmware booted;
+- checks the heartbeat advances;
+- checks no fault/error evidence was recorded;
+- checks expected GPIO clocks/modes.
+
+## 5. Cortex-M startup/reset
+
+GDB deliberately changes variables in `.data` and `.bss`, resets CPU1, then verifies:
 
 - `.data` is restored from flash;
-- `.bss` is cleared;
+- `.bss` is zeroed;
 - SCB VTOR equals `__vector_table_start__`;
 - `main()` is reached again;
-- heartbeat advances;
+- the heartbeat advances;
 - no startup/fault error is recorded.
 
-This links the build-time memory contract to actual reset/runtime behavior on silicon.
+The same reusable startup source is buildable for CM4, but CM4 runtime execution is not claimed here.
 
-### 5. GPIO pull-up
+## 6-10. GPIO qualification
 
-With D3/PE13 electrically disconnected, the internal pull-up must produce a high physical input state.
+### Pull-up
 
-### 6. GPIO pull-down
+D3 / PE13 is disconnected and configured with the internal pull-up. The physical input must read high.
 
-The same disconnected input configured pull-down must read low.
+### Pull-down
 
-### 7. GPIO loopback low/high
+The same disconnected input is configured with the internal pull-down. The physical input must read low.
 
-A physical jumper carries low and high levels from D4/PE14 output to D3/PE13 input.
+### Loopback low/high
 
-### 8. GPIO open-drain
-
-The same loopback verifies driven-low and released/high open-drain behavior.
-
-### 9. GPIO EXTI rising/falling
-
-The output generates physical edges into the EXTI input and the campaign requires rising and falling IRQ evidence.
-
-### 10-14. Board LEDs
-
-The campaign checks all-off, green-only, yellow-only, red-only and synchronized blinking. Software/register evidence is combined with human visual confirmation.
-
-## Required GPIO wiring
+Connect:
 
 ```text
 CN10 D4 / PE14 / pin 8   ---- jumper ----   CN10 D3 / PE13 / pin 10
        output                                   input / EXTI13
 ```
 
-For pull-up/down tests D3/PE13 must be disconnected. Do not connect either test pin to 3V3, 5V or GND unless a future test explicitly requires it.
+The signal must leave one pad, traverse the jumper and be read through the other pad.
+
+### Open-drain
+
+The same loopback validates driven-low and released/high behavior.
+
+### EXTI rising/falling
+
+The output generates physical edges into the input. The campaign requires real rising and falling interrupt delivery.
+
+For the CM7 physical image the STM32H755 backend uses the CPU1 RCC/EXTI register view. The same backend is compiled for the CPU2 view in the CM4 static build.
+
+Do not connect either loopback pin to 3V3, 5V or GND.
+
+## 11-15. Board LEDs
+
+The physical CM7 image checks:
+
+- all LEDs off;
+- green only;
+- yellow only;
+- red only;
+- all three blinking together.
+
+Static states combine software/register evidence with visual confirmation. Blinking combines an advancing firmware counter with visual confirmation.
+
+Board mapping:
+
+| LED | GPIO | Active state |
+| --- | --- | --- |
+| LD1 green | PB0 | high |
+| LD2 yellow | PE1 | high |
+| LD3 red | PB14 | high |
 
 ## Expected summary
 
-A complete campaign now contains **14 acceptance points**:
+A complete campaign contains **15 acceptance points**:
 
 ```text
-STM32H755 memory layout          PASS
+STM32H755 CM7 memory layout     PASS
+STM32H755 CM4 memory layout     PASS
 Board/OpenOCD probe             PASS
 CMSIS/GPIO bring-up             PASS
 Cortex-M startup/reset          PASS
@@ -121,66 +192,87 @@ LED red only                    PASS
 LED all blink                   PASS
 ```
 
-Any failure makes the campaign exit nonzero.
+The script exits nonzero if any acceptance point fails.
 
 ## Evidence bundle
 
-Every campaign creates a timestamped directory and `.tar.gz` archive under:
+Every campaign creates a timestamped directory under:
 
 ```text
 build/stm32h755/campaign/
 ```
 
-Important contents now include:
+and packages it as:
+
+```text
+das-stm32h755-campaign-<UTC timestamp>.tar.gz
+```
+
+The bundle includes, when available:
 
 ```text
 summary.txt
 metadata.txt
 build.log
-memory_layout.log
-stm32h755_cm7.ld
-das_stm32h755_hw_test.map
-das_stm32h755_hw_test.elf
-symbols.txt
-elf-size.txt
+cm4_link_build.log
 openocd.log
+
+cm7_memory_layout.log
+cm4_memory_layout.log
 board_probe.log
 flash_probe.log
 cortex_m_startup_reset.log
 GPIO_*.log
 LED_*.log
-final_all_off.log
+
+stm32h755_cm7.ld
+stm32h755_cm4.ld
+
+das_stm32h755_cm7_hw_test.elf
+das_stm32h755_cm7_hw_test.map
+das_stm32h755_cm4_link_test.elf
+das_stm32h755_cm4_link_test.map
+
+cm7-symbols.txt
+cm4-symbols.txt
+cm7-elf-size.txt
+cm4-elf-size.txt
 ```
 
-The archive is produced even on failure after logging starts. `metadata.txt` records the DAS commit, tool versions, STM32CubeH7 commit when available, and the linker-script path/hash.
+`metadata.txt` records DAS and STM32Cube revisions when available, tool versions, the two linker-script hashes and host information.
 
 ## Build-only mode
 
+The existing helper builds the physical CM7 image only:
+
 ```bash
-./scripts/build_stm32h755.sh /path/to/STM32CubeH7 --clean
+./scripts/build_stm32h755.sh \
+  /path/to/STM32CubeH7 \
+  --clean
 ```
+
+The full campaign additionally creates the CM4 static linker-smoke build.
 
 ## Reusing an existing build
 
-Use `--no-build` when the expected ELF/map already exists. It cannot be combined with `--clean`.
+`--no-build` reuses both the existing CM7 hardware image and CM4 link-test image. If either ELF/map is missing, the campaign stops rather than silently skipping that qualification.
+
+`--clean` and `--no-build` are mutually exclusive.
 
 ## Recovery
 
-Destructive recovery remains a separate explicit operation:
+If bad firmware makes normal attachment troublesome, recovery is explicit and separate:
 
 ```bash
 ./scripts/stm32h755_recover.sh
 ```
 
-A failed qualification run never silently mass-erases the target.
+The qualification campaign never performs an implicit mass erase.
 
-## Qualification principles
+## Qualification boundary
 
-A useful DAS acceptance test should answer:
+For CM7, the campaign proves both static placement and physical execution.
 
-1. Did build/link policy put code and data where intended?
-2. Did reset reconstruct the expected runtime state?
-3. Did DAS request and execute the intended peripheral configuration?
-4. Did the physical resource behave correctly?
+For CM4, #3 proves only that a coherent CM4 image can be compiled and linked with the selected memory policy. Physical CPU2 execution requires coordinated dual-core initialization and is therefore tracked by #20.
 
-Combining linker-map evidence, GDB state, physical loopback and visual observation gives failures enough context to diagnose instead of merely producing a red badge and emotional damage.
+That distinction is intentional. A valid linker map is evidence about addresses, not evidence that the second processor magically started itself out of politeness.

@@ -4,6 +4,16 @@
 
 #include "stm32h755xx.h"
 
+#if defined(CORE_CM7)
+#define DAS_RCC_CORE RCC_C1
+#define DAS_EXTI_CORE EXTI_D1
+#elif defined(CORE_CM4)
+#define DAS_RCC_CORE RCC_C2
+#define DAS_EXTI_CORE EXTI_D2
+#else
+#error "STM32H755 GPIO backend requires CORE_CM7 or CORE_CM4"
+#endif
+
 static GPIO_TypeDef* gpio_port(das_gpio_port_t port) {
     switch (port) {
         case DAS_GPIO_PORT_A: return GPIOA;
@@ -244,8 +254,8 @@ das_result_t das_gpio_interrupt_configure(das_gpio_pin_t pin,
         return DAS_ERROR_INVALID_ARGUMENT;
     }
 
-    RCC_C1->APB4ENR |= RCC_APB4ENR_SYSCFGEN;
-    (void)RCC_C1->APB4ENR;
+    DAS_RCC_CORE->APB4ENR |= RCC_APB4ENR_SYSCFGEN;
+    (void)DAS_RCC_CORE->APB4ENR;
     __DSB();
 
     const uint32_t exti_index = (uint32_t)pin.pin / 4u;
@@ -267,8 +277,8 @@ das_result_t das_gpio_interrupt_configure(das_gpio_pin_t pin,
         EXTI->FTSR1 &= ~line;
     }
 
-    EXTI->IMR1 &= ~line;
-    EXTI->PR1 = line;
+    DAS_EXTI_CORE->IMR1 &= ~line;
+    DAS_EXTI_CORE->PR1 = line;
     __DSB();
     return DAS_OK;
 }
@@ -280,9 +290,9 @@ das_result_t das_gpio_interrupt_enable(das_gpio_pin_t pin, bool enabled) {
     }
     const uint32_t line = UINT32_C(1) << pin.pin;
     if (enabled) {
-        EXTI->IMR1 |= line;
+        DAS_EXTI_CORE->IMR1 |= line;
     } else {
-        EXTI->IMR1 &= ~line;
+        DAS_EXTI_CORE->IMR1 &= ~line;
     }
     __DSB();
     return DAS_OK;
@@ -293,7 +303,7 @@ bool das_gpio_interrupt_pending(das_gpio_pin_t pin) {
     if (resolve_pin(pin, &unused_port) != DAS_OK) {
         return false;
     }
-    return (EXTI->PR1 & (UINT32_C(1) << pin.pin)) != 0u;
+    return (DAS_EXTI_CORE->PR1 & (UINT32_C(1) << pin.pin)) != 0u;
 }
 
 das_result_t das_gpio_interrupt_clear(das_gpio_pin_t pin) {
@@ -301,7 +311,7 @@ das_result_t das_gpio_interrupt_clear(das_gpio_pin_t pin) {
     if (resolve_pin(pin, &unused_port) != DAS_OK) {
         return DAS_ERROR_INVALID_ARGUMENT;
     }
-    EXTI->PR1 = UINT32_C(1) << pin.pin;
+    DAS_EXTI_CORE->PR1 = UINT32_C(1) << pin.pin;
     __DSB();
     return DAS_OK;
 }

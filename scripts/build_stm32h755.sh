@@ -11,6 +11,9 @@ usage() {
 Usage:
   scripts/build_stm32h755.sh /path/to/STM32CubeH7 [--clean]
   scripts/build_stm32h755.sh --stm32h7-root /path/to/STM32CubeH7 [--clean]
+
+Builds the physical STM32H755 CM7 qualification image. CM4 linker
+qualification is performed separately by the full hardware campaign.
 USAGE
 }
 
@@ -42,6 +45,7 @@ cmake -S "$ROOT_DIR" -B "$BUILD_DIR" \
   -DCMAKE_TOOLCHAIN_FILE="$ROOT_DIR/cmake/toolchains/arm-none-eabi.cmake" \
   -DCMAKE_BUILD_TYPE=Debug \
   -DDAS_DEVICE=nucleo_h755zi_q \
+  -DDAS_CORE=cm7 \
   -DSTM32_CUBE_H7_DIR="$STM32_CUBE_H7_DIR" \
   -DDAS_BUILD_HARDWARE_TESTS=ON
 cmake --build "$BUILD_DIR" --target das_stm32h755_hw_test --parallel

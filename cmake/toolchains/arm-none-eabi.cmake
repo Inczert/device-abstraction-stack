@@ -2,6 +2,19 @@ set(CMAKE_SYSTEM_NAME Generic)
 set(CMAKE_SYSTEM_PROCESSOR arm)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 
+if(NOT DEFINED DAS_CORE)
+    set(DAS_CORE "cm7" CACHE STRING "CPU core selected for a multi-core DAS device")
+endif()
+
+if(DAS_CORE STREQUAL "cm7")
+    set(DAS_MCU_FLAGS "-mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard")
+elseif(DAS_CORE STREQUAL "cm4")
+    set(DAS_MCU_FLAGS "-mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard")
+else()
+    message(FATAL_ERROR
+        "Unsupported DAS_CORE='${DAS_CORE}' in arm-none-eabi toolchain; expected cm7 or cm4")
+endif()
+
 find_program(ARM_NONE_EABI_GCC arm-none-eabi-gcc REQUIRED)
 find_program(ARM_NONE_EABI_AR arm-none-eabi-ar REQUIRED)
 find_program(ARM_NONE_EABI_RANLIB arm-none-eabi-ranlib REQUIRED)
@@ -18,8 +31,8 @@ set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE NEVER)
 
-set(DAS_MCU_FLAGS "-mcpu=cortex-m7 -mthumb -mfpu=fpv5-d16 -mfloat-abi=hard")
-set(CMAKE_C_FLAGS_INIT "${DAS_MCU_FLAGS} -ffreestanding -fno-builtin -ffunction-sections -fdata-sections")
+set(CMAKE_C_FLAGS_INIT
+    "${DAS_MCU_FLAGS} -ffreestanding -fno-builtin -ffunction-sections -fdata-sections")
 set(CMAKE_ASM_FLAGS_INIT "${DAS_MCU_FLAGS} -x assembler-with-cpp")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "${DAS_MCU_FLAGS} -Wl,--gc-sections")
 

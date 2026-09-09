@@ -1,27 +1,38 @@
 # Cortex-M core backend
 
-This directory is the Cortex-M CPU/core implementation layer.
+This directory contains **Cortex-M architecture code only**. It deliberately contains no STM32 peripheral implementation.
 
-It intentionally contains no STM32 peripheral code. Device-specific interrupt routing, clocks, GPIO, serial peripherals and DMA belong under `src/device/<device>/`.
+The same architecture layer is shared by the STM32H755 Cortex-M7 and Cortex-M4 builds.
 
 ## Current support
 
-`startup.c` provides an optional reusable Cortex-M reset/runtime path:
+`startup.c` provides an optional reusable reset/runtime path:
 
-- copies `.data` from its load address into RAM;
-- clears `.bss`;
-- programs the architecturally defined SCB VTOR register from `__vector_table_start__`;
-- executes DSB/ISB barriers;
-- calls the application's `main()`;
-- provides weak default handlers for Cortex-M core exceptions.
+- copy `.data` from its linker-defined load address into RAM;
+- clear `.bss`;
+- set SCB VTOR from `__vector_table_start__`;
+- execute DSB/ISB barriers;
+- call `main()`;
+- remain in a non-returning loop if `main()` returns;
+- provide weak default handlers for Cortex-M core exceptions.
 
-`Reset_Handler` and the default exception handlers are weak. Applications with a bootloader, RTOS startup, custom runtime initialization, or their own exception policy can replace them with strong definitions.
+The reset/core handlers are weak so an RTOS, bootloader or application can provide strong replacements.
 
-The Cortex-M layer does **not** define STM32 external interrupt vectors. A concrete target image owns its device-specific vector-table layout.
+## What this layer does not know
+
+The Cortex-M startup code does not know:
+
+- STM32H755 flash addresses;
+- which flash bank a core image uses;
+- AXI/D2 SRAM placement;
+- STM32 external IRQ numbers;
+- Nucleo board wiring.
+
+Those belong to device/build/board layers.
 
 ## Linker contract
 
-The startup path expects:
+If the DAS reset path is used, the final linker script must export:
 
 ```text
 __data_load__
@@ -32,16 +43,33 @@ __bss_end__
 __vector_table_start__
 ```
 
-For STM32H755 CM7, DAS now provides a compatible default script at:
+The default STM32H755 scripts provide that contract for both selected cores:
 
 ```text
-cmake/targets/stm32h755_cm7.ld
+DAS_CORE=cm7 -> cmake/targets/stm32h755_cm7.ld
+DAS_CORE=cm4 -> cmake/targets/stm32h755_cm4.ld
 ```
 
-through the optional `das::linker` target. The linker script remains device/build policy rather than Cortex-M source because the physical addresses belong to STM32H755, not to the ARM core architecture.
+A custom `DAS_LINKER_SCRIPT` may provide different physical addresses while retaining the same startup contract.
 
-Applications can override or omit that linker target without replacing the generic Cortex-M startup implementation.
+## Core selection
 
-## Planned core work
+`DAS_CORE` selects compiler/core details outside this source file:
 
-Upcoming Cortex-M-only work includes NVIC helpers, SysTick/timebase support, and Cortex-M7 cache/MPU helpers.
+```text
+cm7 -> Cortex-M7 + FPv5-D16 + CORE_CM7
+cm4 -> Cortex-M4 + FPv4-SP-D16 + CORE_CM4
+```
+
+This keeps one reusable Cortex-M startup implementation while the device backend and build system select the appropriate CPU-specific views and memory policy.
+
+## Planned architecture work
+
+Upcoming core-only features include:
+
+- NVIC helpers;
+- SysTick/timebase;
+- interrupt masking helpers;
+- Cortex-M7 cache/MPU support where architecture-specific.
+
+STM32 RCC, GPIO, EXTI, USART, DMA and other peripherals belong under `src/device/stm32h755/`, not here.

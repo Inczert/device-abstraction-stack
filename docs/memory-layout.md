@@ -1,181 +1,220 @@
-# STM32H755 Cortex-M7 memory layout
+# STM32H755 memory and linker policy
 
-DAS provides a reusable default linker script for bare-metal STM32H755 Cortex-M7 images:
+DAS provides default linker scripts for both CPU cores of the STM32H755. They are build-time device/core policy, not part of the generic Cortex-M implementation.
 
 ```text
 cmake/targets/stm32h755_cm7.ld
+cmake/targets/stm32h755_cm4.ld
 ```
 
-It replaces the linker script that would normally be generated or copied out of a CubeIDE/CubeMX project for the supported default layout. It is intentionally optional: a bootloader, RTOS, partitioned image, bank-specific update scheme, or application with special placement requirements may use its own linker script instead.
+The defaults are intended to make a simple bare-metal image link without CubeIDE/CubeMX-generated files while remaining easy to replace for a real product.
 
-## Device memory map
+## Core selection
 
-The default script models the STM32H755 on-chip memories documented by ST in RM0399 and the STM32H755xI datasheet.
+The NUCLEO-H755ZI-Q target is selected with both a board and a CPU core:
 
-| Region | Origin | Size | Default use |
-| --- | ---: | ---: | --- |
-| ITCM | `0x00000000` | 64 KiB | exposed, no default section placement |
-| FLASH | `0x08000000` | 2048 KiB | vector table, code, read-only data, initialized-data load image |
-| DTCM | `0x20000000` | 128 KiB | exposed, no default section placement |
-| AXISRAM | `0x24000000` | 512 KiB | `.data`, `.bss`, `.noinit`, heap bounds, stack |
-| SRAM1 | `0x30000000` | 128 KiB | exposed, no default section placement |
-| SRAM2 | `0x30020000` | 128 KiB | exposed, no default section placement |
-| SRAM3 | `0x30040000` | 32 KiB | exposed, no default section placement |
-| SRAM4 | `0x38000000` | 64 KiB | exposed, no default section placement |
-| Backup SRAM | `0x38800000` | 4 KiB | exposed, no default section placement |
-
-The two physical 1 MiB flash banks are represented as one contiguous 2 MiB `FLASH` region in the default script. Applications that need bank-specific placement should provide a custom linker script.
-
-References:
-
-- ST RM0399, *STM32H745/755 and STM32H747/757 advanced Arm-based 32-bit MCUs*, memory map table;
-- ST STM32H755xI datasheet, embedded SRAM and flash-memory descriptions.
-
-## Default section placement
-
-The reusable script places:
-
-```text
-FLASH
-  .isr_vector
-  .text
-  .rodata
-  .ARM.extab
-  .ARM.exidx
-  load image of .data
-
-AXISRAM
-  .data
-  .bss
-  .noinit
-  heap range
-  reserved stack range at the top of AXI SRAM
+```cmake
+-DAS_DEVICE=nucleo_h755zi_q
+-DDAS_CORE=cm7
 ```
 
-The vector table starts at `0x08000000` and the output section is aligned to 1024 bytes so the script remains suitable for a complete STM32H755 vector table, not merely the small qualification table currently used by the test firmware.
+or:
 
-Other memory regions are deliberately declared but are not populated automatically. DAS will not silently move data into TCM or shared SRAM and then require startup/cache/coherency machinery the application never asked for.
+```cmake
+-DAS_DEVICE=nucleo_h755zi_q
+-DDAS_CORE=cm4
+```
 
-## Startup symbol contract
+`DAS_CORE` also selects the compiler/FPU flags, CMSIS core header, `CORE_CM7`/`CORE_CM4` device definition, and the default linker script.
 
-The linker script exports the symbols consumed by the reusable Cortex-M startup path:
+## Default dual-core partition
+
+The STM32H755 contains 2 MiB of internal flash arranged as two 1 MiB banks. DAS uses a deliberately non-overlapping default:
+
+| Core | Code/vector flash | Writable default RAM | Stack top |
+| --- | --- | --- | --- |
+| CM7 | bank 1, `0x08000000..0x080FFFFF` | AXI SRAM, `0x24000000..0x2407FFFF` | `0x24080000` |
+| CM4 | bank 2, `0x08100000..0x081FFFFF` | D2 SRAM1, `0x30000000..0x3001FFFF` | `0x30020000` |
+
+This is a safe default partition, not a claim that each core can only access those regions.
+
+The split avoids two independently linked images owning the same flash and RAM ranges.
+
+### CM7 script
+
+`stm32h755_cm7.ld` models:
+
+- ITCM;
+- flash bank 1 and bank 2;
+- DTCM;
+- AXI SRAM;
+- SRAM1, SRAM2, SRAM3;
+- SRAM4;
+- backup SRAM.
+
+Normal sections are placed as:
 
 ```text
+flash bank 1
+    .isr_vector
+    .text
+    .rodata
+    .ARM.extab / .ARM.exidx
+    .data load image
+
+AXI SRAM
+    .data
+    .bss
+    .noinit
+    heap bounds
+    reserved stack
+```
+
+### CM4 script
+
+`stm32h755_cm4.ld` deliberately avoids the M7 TCM regions. It models:
+
+- flash bank 1 and bank 2;
+- SRAM1, SRAM2, SRAM3;
+- SRAM4;
+- backup SRAM.
+
+Normal sections are placed as:
+
+```text
+flash bank 2
+    .isr_vector
+    .text
+    .rodata
+    .ARM.extab / .ARM.exidx
+    .data load image
+
+D2 SRAM1
+    .data
+    .bss
+    .noinit
+    heap bounds
+    reserved stack
+```
+
+Actual CM4 boot/release sequencing is not a linker problem. Physical CM4 execution, HSEM/shared-memory policy, and coordinated dual-core startup are tracked separately by the dual-core work.
+
+## Startup contract
+
+Both scripts export the symbols consumed by the reusable Cortex-M reset path:
+
+```text
+__vector_table_start__
+__vector_table_end__
+
 __data_load__
 __data_start__
 __data_end__
+
 __bss_start__
 __bss_end__
-__vector_table_start__
-```
 
-Additional useful boundaries are exported:
-
-```text
-__vector_table_end__
 __noinit_start__
 __noinit_end__
-__StackLimit
-__StackTop
+
 __HeapBase
 __HeapLimit
-__end__
+
+__StackLimit
+__StackTop
 ```
 
-The default stack top is:
+The Cortex-M startup code knows what these symbols mean. It does not know their STM32 addresses.
+
+That separation is intentional:
 
 ```text
-0x24080000
+Cortex-M startup mechanics    src/mcu/cortex_m/
+STM32H755 memory addresses    cmake/targets/stm32h755_*.ld
 ```
 
-which is the end of AXI SRAM and matches the previously hardware-qualified DAS image.
+## How the linker script reaches the firmware
 
-## Stack and heap policy
+`libdas.a` itself is a static archive. It is not assigned final flash/RAM addresses when the archive is created.
 
-The default linker script reserves 16 KiB at the top of AXI SRAM for the downward-growing Cortex-M stack:
+The linker script matters when the final executable is linked:
 
 ```text
-__stack_size__ = 16 KiB
+DAS objects ─┐
+app objects ─┼─> final link + selected .ld ─> firmware.elf
+libdas.a ────┘
 ```
 
-The heap boundaries cover the remaining free AXI SRAM between static sections and the reserved stack:
+DAS therefore attaches the selected linker script as an **INTERFACE link option** of `das::das`. A normal application needs only:
 
-```text
-__HeapBase  = end of static/noinit data
-__HeapLimit = __StackLimit
+```cmake
+target_link_libraries(my_firmware PRIVATE das::das)
 ```
 
-DAS does not provide a heap allocator merely because those boundaries exist.
+There is no `das::linker` library target and no firmware-configuration helper.
 
-The stack reservation can be changed at link time, for example:
+## Custom linker script
+
+The default can be replaced at configure time:
+
+```bash
+cmake ... \
+  -DDAS_DEVICE=nucleo_h755zi_q \
+  -DDAS_CORE=cm7 \
+  -DDAS_LINKER_SCRIPT=/absolute/or/relative/path/application.ld
+```
+
+or from a parent `CMakeLists.txt`:
+
+```cmake
+set(DAS_LINKER_SCRIPT
+    "${CMAKE_CURRENT_SOURCE_DIR}/linker/application.ld"
+    CACHE FILEPATH "Application linker script" FORCE)
+
+add_subdirectory(third_party/device-abstraction-stack)
+target_link_libraries(my_firmware PRIVATE das::das)
+```
+
+An empty `DAS_LINKER_SCRIPT` means: use the default selected by `DAS_DEVICE + DAS_CORE`.
+
+Custom layouts are expected for cases such as:
+
+- bootloaders;
+- A/B image slots;
+- a different flash-bank split;
+- code/data in TCM;
+- external SDRAM;
+- explicit DMA/non-cacheable sections;
+- CM7/CM4 shared-memory windows;
+- a different stack/heap policy.
+
+If the DAS reusable startup is retained, the custom script must still provide its linker-symbol contract. If the application also replaces startup, it may define a completely different contract.
+
+## Stack and heap
+
+Both default scripts reserve 16 KiB for the reset/application stack. The value can be overridden at final link time:
 
 ```cmake
 target_link_options(my_firmware PRIVATE
     -Wl,--defsym=__stack_size__=32768)
 ```
 
-The linker asserts that static data/heap bounds do not overlap the reserved stack.
+The scripts assert that static data/heap bounds do not overlap the reserved stack.
 
-## Using the default linker target
+DAS does not provide a heap allocator. `__HeapBase` and `__HeapLimit` are boundaries available to an application/runtime that chooses to use them.
 
-DAS exposes an optional interface target:
+## Qualification
 
-```cmake
-das::linker
-```
+The hardware campaign statically validates both core layouts before touching the board.
 
-A complete firmware using the default memory policy can link:
+For CM7 it checks the actual hardware-test ELF and then executes that image on the NUCLEO-H755ZI-Q.
 
-```cmake
-target_link_libraries(my_firmware PRIVATE
-    das::das
-    das::linker)
-```
+For CM4 it builds a separate non-executed linker-smoke ELF and validates:
 
-`das::linker` propagates only the selected `-T` linker script. It does not force `--gc-sections`, libc selection, map-file naming, or other application link policy.
+- vector address `0x08100000`;
+- `.data` load image in flash bank 2;
+- `.data`/`.bss` in SRAM1;
+- stack top `0x30020000`;
+- startup symbols and heap/stack ordering.
 
-## Overriding the default script
-
-There are two supported approaches.
-
-### Select another script through DAS
-
-Set `DAS_LINKER_SCRIPT` before adding DAS:
-
-```cmake
-set(DAS_LINKER_SCRIPT
-    "${CMAKE_CURRENT_SOURCE_DIR}/linker/application.ld"
-    CACHE FILEPATH "" FORCE)
-
-add_subdirectory(third_party/device-abstraction-stack)
-
-target_link_libraries(my_firmware PRIVATE das::das das::linker)
-```
-
-### Own the linker invocation completely
-
-Do not link `das::linker`:
-
-```cmake
-target_link_libraries(my_firmware PRIVATE das::das)
-target_link_options(my_firmware PRIVATE
-    -T${CMAKE_CURRENT_SOURCE_DIR}/linker/application.ld)
-```
-
-A custom script must provide whatever symbols are required by the startup implementation the application chooses. If the DAS Cortex-M `Reset_Handler` is used, it must satisfy the startup symbol contract above.
-
-## Hardware qualification
-
-The STM32H755 hardware campaign links its test image through `das::linker`. The old test-local linker script has been removed.
-
-Before OpenOCD is started, the campaign checks the ELF and linker map for:
-
-- required startup/memory symbols;
-- vector table at `0x08000000`;
-- initialized-data load image in flash;
-- `.data` and `.bss` in AXI SRAM;
-- stack top at `0x24080000`;
-- valid heap/stack separation;
-- a non-empty map containing the expected linker symbols.
-
-The resulting `memory_layout.log`, linker map, ELF, symbol table, and the exact linker script are included in the campaign evidence archive.
+CM4 physical boot is intentionally deferred to the dual-core issue. A linker map can prove placement; it cannot prove that CPU2 was correctly released from reset.

@@ -4,6 +4,7 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STM32_CUBE_H7_DIR="${STM32_CUBE_H7_DIR:-}"
 BUILD_DIR="${DAS_STM32_BUILD_DIR:-$ROOT_DIR/build/stm32h755}"
+CM4_BUILD_DIR=""
 OPENOCD_SCRIPTS="${OPENOCD_SCRIPTS:-/usr/share/openocd/scripts}"
 DEBUG_TIMEOUT=30
 CLEAN=0
@@ -31,7 +32,7 @@ Options:
   --openocd-scripts DIR   OpenOCD scripts directory.
   --debug-timeout SEC     GDB timeout per case (default: 30).
   --clean                 Clean before building.
-  --no-build              Reuse the existing hardware-test ELF.
+  --no-build              Reuse existing CM7 hardware and CM4 link-test ELFs.
   -h, --help              Show help.
 USAGE
 }
@@ -77,6 +78,8 @@ if (( CLEAN != 0 )); then
   rm -rf -- "$BUILD_DIR"
 fi
 
+CM4_BUILD_DIR="$BUILD_DIR/cm4-link"
+
 STAMP="$(date -u +'%Y%m%dT%H%M%SZ')"
 CAMPAIGN_ROOT="$BUILD_DIR/campaign"
 LOG_DIR="$CAMPAIGN_ROOT/$STAMP"
@@ -85,6 +88,7 @@ mkdir -p "$LOG_DIR"
 OPENOCD_LOG="$LOG_DIR/openocd.log"
 SUMMARY="$LOG_DIR/summary.txt"
 BUILD_LOG="$LOG_DIR/build.log"
+CM4_BUILD_LOG="$LOG_DIR/cm4_link_build.log"
 METADATA="$LOG_DIR/metadata.txt"
 
 cleanup_openocd() {
@@ -134,14 +138,17 @@ trap 'exit 143' TERM
   if command -v git >/dev/null 2>&1; then
     echo "DAS commit: $(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
   fi
-  echo "Build dir: $BUILD_DIR"
+  echo "CM7 build dir: $BUILD_DIR"
+  echo "CM4 static-link build dir: $CM4_BUILD_DIR"
   echo "STM32CubeH7: ${STM32_CUBE_H7_DIR:-not supplied}"
   if [[ -n "$STM32_CUBE_H7_DIR" ]] && command -v git >/dev/null 2>&1; then
     echo "STM32CubeH7 commit: $(git -C "$STM32_CUBE_H7_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
   fi
-  echo "Linker script: $ROOT_DIR/cmake/targets/stm32h755_cm7.ld"
+  echo "CM7 default linker: $ROOT_DIR/cmake/targets/stm32h755_cm7.ld"
+  echo "CM4 default linker: $ROOT_DIR/cmake/targets/stm32h755_cm4.ld"
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$ROOT_DIR/cmake/targets/stm32h755_cm7.ld" 2>/dev/null || true
+    sha256sum "$ROOT_DIR/cmake/targets/stm32h755_cm4.ld" 2>/dev/null || true
   fi
   echo "GDB: $GDB_BIN"
   "$GDB_BIN" --version 2>/dev/null | head -n 1 || true
@@ -160,23 +167,54 @@ if (( SKIP_BUILD == 0 )); then
   BUILD_RC=${PIPESTATUS[0]}
   set -e
   if (( BUILD_RC != 0 )); then
-    echo "STM32H755 build failed with exit code $BUILD_RC" >&2
+    echo "STM32H755 CM7 hardware build failed with exit code $BUILD_RC" >&2
     exit "$BUILD_RC"
   fi
+
+  set +e
+  {
+    cmake -S "$ROOT_DIR" -B "$CM4_BUILD_DIR" \
+      -DCMAKE_TOOLCHAIN_FILE="$ROOT_DIR/cmake/toolchains/arm-none-eabi.cmake" \
+      -DCMAKE_BUILD_TYPE=Debug \
+      -DDAS_DEVICE=nucleo_h755zi_q \
+      -DDAS_CORE=cm4 \
+      -DSTM32_CUBE_H7_DIR="$STM32_CUBE_H7_DIR" \
+      -DDAS_BUILD_LINK_TESTS=ON \
+      -DDAS_BUILD_HARDWARE_TESTS=OFF
+    cmake --build "$CM4_BUILD_DIR" --target das_stm32h755_link_test --parallel
+  } 2>&1 | tee "$CM4_BUILD_LOG"
+  CM4_BUILD_RC=${PIPESTATUS[0]}
+  set -e
+  if (( CM4_BUILD_RC != 0 )); then
+    echo "STM32H755 CM4 static linker build failed with exit code $CM4_BUILD_RC" >&2
+    exit "$CM4_BUILD_RC"
+  fi
 else
-  echo "Build skipped; reusing existing hardware-test ELF." | tee "$BUILD_LOG"
+  echo "Build skipped; reusing existing CM7 hardware and CM4 link-test ELFs." | tee "$BUILD_LOG"
 fi
 
 ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.elf"
 MAP_FILE="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.map"
-[[ -s "$ELF" ]] || { echo "Hardware-test ELF not found: $ELF" >&2; exit 1; }
-cp "$ELF" "$LOG_DIR/" 2>/dev/null || true
-[[ ! -f "$MAP_FILE" ]] || cp "$MAP_FILE" "$LOG_DIR/"
-cp "$ROOT_DIR/cmake/targets/stm32h755_cm7.ld" "$LOG_DIR/" 2>/dev/null || true
+CM4_ELF="$CM4_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.elf"
+CM4_MAP="$CM4_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.map"
+
+[[ -s "$ELF" ]] || { echo "CM7 hardware-test ELF not found: $ELF" >&2; exit 1; }
+[[ -s "$MAP_FILE" ]] || { echo "CM7 hardware-test map not found: $MAP_FILE" >&2; exit 1; }
+[[ -s "$CM4_ELF" ]] || { echo "CM4 link-test ELF not found: $CM4_ELF" >&2; exit 1; }
+[[ -s "$CM4_MAP" ]] || { echo "CM4 link-test map not found: $CM4_MAP" >&2; exit 1; }
+
+cp "$ELF" "$LOG_DIR/das_stm32h755_cm7_hw_test.elf"
+cp "$MAP_FILE" "$LOG_DIR/das_stm32h755_cm7_hw_test.map"
+cp "$CM4_ELF" "$LOG_DIR/das_stm32h755_cm4_link_test.elf"
+cp "$CM4_MAP" "$LOG_DIR/das_stm32h755_cm4_link_test.map"
+cp "$ROOT_DIR/cmake/targets/stm32h755_cm7.ld" "$LOG_DIR/"
+cp "$ROOT_DIR/cmake/targets/stm32h755_cm4.ld" "$LOG_DIR/"
 if command -v arm-none-eabi-size >/dev/null 2>&1; then
-  arm-none-eabi-size "$ELF" >"$LOG_DIR/elf-size.txt" 2>&1 || true
+  arm-none-eabi-size "$ELF" >"$LOG_DIR/cm7-elf-size.txt" 2>&1 || true
+  arm-none-eabi-size "$CM4_ELF" >"$LOG_DIR/cm4-elf-size.txt" 2>&1 || true
 fi
-arm-none-eabi-nm -n "$ELF" >"$LOG_DIR/symbols.txt" 2>&1 || true
+arm-none-eabi-nm -n "$ELF" >"$LOG_DIR/cm7-symbols.txt" 2>&1 || true
+arm-none-eabi-nm -n "$CM4_ELF" >"$LOG_DIR/cm4-symbols.txt" 2>&1 || true
 
 safe_log_name() {
   local name="$1"
@@ -209,7 +247,7 @@ wait_for_enter() {
 
 record() {
   local name="$1" status="$2"
-  printf '%-28s %s\n' "$name" "$status" | tee -a "$SUMMARY"
+  printf '%-30s %s\n' "$name" "$status" | tee -a "$SUMMARY"
   if [[ "$status" == PASS ]]; then ((PASS_COUNT += 1)); else ((FAIL_COUNT += 1)); fi
 }
 
@@ -225,12 +263,21 @@ run_gdb() {
   (( gdb_rc == 0 && tee_rc == 0 )) && grep -q '^RESULT: PASS$' "$log"
 }
 
-if "$ROOT_DIR/scripts/check_stm32h755_memory_layout.sh" "$ELF" "$MAP_FILE" \
-    2>&1 | tee "$LOG_DIR/memory_layout.log"; then
-  record "STM32H755 memory layout" PASS
+if "$ROOT_DIR/scripts/check_stm32h755_memory_layout.sh" --core cm7 "$ELF" "$MAP_FILE" \
+    2>&1 | tee "$LOG_DIR/cm7_memory_layout.log"; then
+  record "STM32H755 CM7 memory layout" PASS
 else
-  record "STM32H755 memory layout" FAIL
-  echo "Reusable STM32H755 linker/memory-layout validation failed; hardware execution is skipped." >&2
+  record "STM32H755 CM7 memory layout" FAIL
+  echo "CM7 linker/memory-layout validation failed; hardware execution is skipped." >&2
+  exit 1
+fi
+
+if "$ROOT_DIR/scripts/check_stm32h755_memory_layout.sh" --core cm4 "$CM4_ELF" "$CM4_MAP" \
+    2>&1 | tee "$LOG_DIR/cm4_memory_layout.log"; then
+  record "STM32H755 CM4 memory layout" PASS
+else
+  record "STM32H755 CM4 memory layout" FAIL
+  echo "CM4 linker/memory-layout validation failed; hardware execution is skipped." >&2
   exit 1
 fi
 

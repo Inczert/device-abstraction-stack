@@ -1,23 +1,22 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /*
- * Default STM32H755 Cortex-M7 bare-metal memory layout.
+ * Default STM32H755 Cortex-M4 bare-metal memory layout.
  *
- * The dual-core-safe default keeps the CM7 image in flash bank 1 and ordinary
- * writable sections in AXI SRAM. Flash bank 2 and D2 SRAM remain available for
- * a CM4 image/shared-memory policy. Applications with a bootloader, custom
- * partitions, TCM placement, external RAM, or another stack policy should set
- * DAS_LINKER_SCRIPT to their own linker script.
+ * The dual-core-safe default keeps the CM4 image in flash bank 2 and ordinary
+ * writable sections in D2 SRAM1. This deliberately avoids the CM7 default
+ * image in flash bank 1 and AXI SRAM. Actual CM4 boot/release sequencing is a
+ * separate dual-core concern and is not implied by this linker script.
+ *
+ * Applications with custom flash partitions, shared-memory windows, or another
+ * RAM/stack policy should set DAS_LINKER_SCRIPT to their own linker script.
  */
 
 ENTRY(Reset_Handler)
 
 MEMORY
 {
-    ITCM     (rwx) : ORIGIN = 0x00000000, LENGTH = 64K
-    FLASH    (rx)  : ORIGIN = 0x08000000, LENGTH = 1024K
-    FLASH2   (rx)  : ORIGIN = 0x08100000, LENGTH = 1024K
-    DTCM     (rwx) : ORIGIN = 0x20000000, LENGTH = 128K
-    AXISRAM  (rwx) : ORIGIN = 0x24000000, LENGTH = 512K
+    FLASH1   (rx)  : ORIGIN = 0x08000000, LENGTH = 1024K
+    FLASH    (rx)  : ORIGIN = 0x08100000, LENGTH = 1024K
     SRAM1    (rwx) : ORIGIN = 0x30000000, LENGTH = 128K
     SRAM2    (rwx) : ORIGIN = 0x30020000, LENGTH = 128K
     SRAM3    (rwx) : ORIGIN = 0x30040000, LENGTH = 32K
@@ -26,10 +25,10 @@ MEMORY
 }
 
 PROVIDE(__stack_size__ = 16K);
-__StackTop = ORIGIN(AXISRAM) + LENGTH(AXISRAM);
+__StackTop = ORIGIN(SRAM1) + LENGTH(SRAM1);
 __StackLimit = __StackTop - __stack_size__;
-ASSERT(__StackLimit >= ORIGIN(AXISRAM),
-       "STM32H755 CM7 stack reservation exceeds AXI SRAM")
+ASSERT(__StackLimit >= ORIGIN(SRAM1),
+       "STM32H755 CM4 stack reservation exceeds SRAM1")
 
 SECTIONS
 {
@@ -71,7 +70,7 @@ SECTIONS
         *(.data*)
         . = ALIGN(8);
         __data_end__ = .;
-    } > AXISRAM AT > FLASH
+    } > SRAM1 AT > FLASH
     __data_load__ = LOADADDR(.data);
 
     .bss (NOLOAD) :
@@ -82,7 +81,7 @@ SECTIONS
         *(COMMON)
         . = ALIGN(8);
         __bss_end__ = .;
-    } > AXISRAM
+    } > SRAM1
 
     .noinit (NOLOAD) :
     {
@@ -91,7 +90,7 @@ SECTIONS
         *(.noinit*)
         . = ALIGN(8);
         __noinit_end__ = .;
-    } > AXISRAM
+    } > SRAM1
 
     . = ALIGN(8);
     __end__ = .;
@@ -99,7 +98,7 @@ SECTIONS
     __HeapLimit = __StackLimit;
 
     ASSERT(__HeapBase <= __HeapLimit,
-           "STM32H755 CM7 AXI SRAM overflow: static data overlaps reserved stack")
+           "STM32H755 CM4 SRAM1 overflow: static data overlaps reserved stack")
 
     /DISCARD/ :
     {

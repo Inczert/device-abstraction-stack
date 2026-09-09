@@ -1,32 +1,26 @@
 # Porting DAS
 
-DAS grows by composing independent CPU/core, device, board, and build-time memory-policy layers behind stable public APIs. A port should preserve those boundaries instead of introducing vendor-specific types into application code.
-
-## Porting model
+DAS targets are composed from independent architecture, device, board and build-policy pieces.
 
 ```text
 MCU/core architecture
         +
-Device/silicon implementation
+silicon device
         +
-Board mapping
+board
         +
-Device memory/link policy
+selected CPU/core on multi-core devices
         =
-DAS target
+DAS build target
 ```
 
-Current target:
+Current example:
 
 ```text
-Cortex-M
-+ STM32H755
-+ NUCLEO-H755ZI-Q
-+ STM32H755 CM7 default linker layout
-= DAS_DEVICE=nucleo_h755zi_q
+Cortex-M + STM32H755 + NUCLEO-H755ZI-Q + CM7/CM4
 ```
 
-## 1. Add or reuse the MCU/core layer
+## MCU/core architecture layer
 
 Location:
 
@@ -34,11 +28,20 @@ Location:
 src/mcu/<architecture>/
 ```
 
-This layer contains CPU/core architecture support only, in C and/or assembly: exception mechanics, core interrupt helpers, architectural timers, barriers, cache/MPU primitives, and reusable startup mechanics.
+The layer contains architecture-only behavior such as:
 
-It must not contain vendor peripheral implementations such as STM32 GPIO, RCC, USART, DMA, timers, SPI, I2C or ADC.
+- reset/runtime mechanics;
+- core exceptions;
+- NVIC/SCB;
+- core timers such as SysTick;
+- cache/MPU primitives;
+- architectural barriers/masking.
 
-## 2. Add the device layer
+It must not contain vendor peripherals.
+
+A multi-core device may contain two cores from the same architecture family. In that case shared architecture code should remain shared rather than being copied into device-specific directories.
+
+## Device layer
 
 Location:
 
@@ -46,11 +49,15 @@ Location:
 src/device/<device>/
 ```
 
-This layer implements silicon-specific peripherals using the selected device's register definitions. Device headers may be used internally, but vendor types must not leak into public DAS headers.
+This layer owns on-chip device behavior.
 
-A device implementation should validate arguments, configure only the hardware it owns, avoid board policy, use atomic operations where available, avoid hidden heap/RTOS dependencies, and return explicit errors/timeouts instead of hanging indefinitely.
+For STM32H755 that includes GPIO, RCC/PWR/FLASH, EXTI/SYSCFG, USART, DMA, timers, SPI/I2C, ADC, watchdog, HSEM and other silicon features.
 
-## 3. Add the board layer
+Device code may use vendor CMSIS device headers internally.
+
+For multi-core silicon, check whether registers have CPU-specific views. A backend must not silently use CPU1 registers when it is being compiled for CPU2.
+
+## Board layer
 
 Location:
 
@@ -58,127 +65,165 @@ Location:
 src/board/<board>/
 ```
 
-The board layer maps physical resources such as LEDs, buttons, connector buses, VCOM, fixed enables and clock-source wiring onto generic/device capabilities.
+The board layer describes physical resources and wiring:
 
-Do not use the board layer as a second register backend or as a one-for-one alias table for every MCU pin.
+- LEDs/buttons;
+- connector functions;
+- VCOM;
+- fixed enables/chip selects;
+- board oscillators;
+- onboard sensors/transceivers.
 
-## 4. Add device/build memory policy
+It should consume device/public APIs rather than duplicate register programming.
 
-Physical flash/RAM addresses belong to the silicon target, not the CPU architecture. Reusable linker scripts therefore live under:
+## Core selection
+
+If one device supports multiple executable cores, add an explicit build selector rather than encoding the core into the board name.
+
+For STM32H755:
+
+```text
+DAS_DEVICE=nucleo_h755zi_q
+DAS_CORE=cm7 | cm4
+```
+
+Core selection may control:
+
+- compiler CPU/FPU options;
+- CMSIS core header;
+- device preprocessor core macro;
+- core-specific device register views;
+- default final-image linker script.
+
+Use separate CMake build directories for different cores.
+
+## Linker/build policy
+
+Physical flash/RAM addresses do not belong in generic CPU code.
+
+Place default target linker scripts under:
 
 ```text
 cmake/targets/
 ```
 
-For STM32H755 CM7:
+A device/core pair may have different defaults:
 
 ```text
-cmake/targets/stm32h755_cm7.ld
+stm32h755_cm7.ld
+stm32h755_cm4.ld
 ```
 
-A new device port should define a default memory layout only when DAS can state it clearly and qualify it. The script should export the symbols required by the selected startup implementation and expose useful stack/heap/noinit boundaries.
+The static DAS library should remain the consumer-facing target. Linker policy can be propagated transitively from `das::das` to the final executable.
 
-Keep the linker policy optional. A bootloader, RTOS, bank-partitioned image or special memory-placement application must be able to omit the DAS linker target and use its own script.
+Do not create pseudo-library names for linker scripts.
 
-## 5. Extend CMake composition
+Provide a single override such as:
 
-The selected public target should resolve explicitly to its implementation pieces and default linker script.
+```text
+DAS_LINKER_SCRIPT=/path/to/custom.ld
+```
 
-Conceptually:
+so applications with bootloaders, RTOS layouts, external RAM or custom partitions remain supported.
+
+A reusable linker script that uses the DAS Cortex-M startup should export the startup-symbol contract documented in `docs/memory-layout.md`.
+
+## CMake composition
+
+A target should resolve its pieces explicitly. Conceptually:
 
 ```cmake
-if(DAS_DEVICE STREQUAL "nucleo_h755zi_q")
-    set(DAS_MCU_BACKEND cortex_m)
-    set(DAS_DEVICE_BACKEND stm32h755)
-    set(DAS_BOARD_BACKEND nucleo_h755zi_q)
-    set(DAS_DEFAULT_LINKER_SCRIPT .../stm32h755_cm7.ld)
-endif()
+DAS_DEVICE -> device + board
+DAS_CORE   -> CPU flags + CMSIS core + core macro + linker default
 ```
 
-DAS keeps code and link policy separate:
+Only selected target sources should be compiled.
 
-```text
-das::das       reusable implementation
-das::linker    optional selected linker script
-```
+As the target matrix grows, the composition may move into dedicated CMake modules, but the dependency graph must remain visible.
 
-Only sources required for the selected target should be compiled.
+## External dependencies
 
-## 6. Define low-level dependencies
+For Cortex-M targets, prefer:
 
-For Cortex-M targets CMSIS is the preferred boundary where practical:
+- CMSIS-Core for architectural definitions;
+- vendor CMSIS device headers for register definitions.
 
-- CMSIS-Core for CPU/core definitions;
-- vendor CMSIS device headers for device registers.
+Document:
 
-Document required headers, root paths, preprocessor symbols, ABI/toolchain constraints and whether vendor source files are linked. Avoid importing a complete SDK when register definitions are sufficient.
+- required checkout/package;
+- include paths;
+- preprocessor symbols;
+- compiler ABI/FPU flags;
+- whether any vendor source files are linked.
 
-## 7. Keep responsibilities separated
+Avoid importing an entire vendor SDK if register definitions are sufficient.
 
-```text
-CPU startup mechanics       -> src/mcu/<architecture>/
-Peripheral implementation   -> src/device/<device>/
-Board wiring                -> src/board/<board>/
-Flash/RAM/linker layout      -> cmake/targets/
-```
+## Startup and vector tables
 
-Applications remain free to override startup and linker behavior for bootloaders, RTOSes, custom partitions and vector placement.
+Reusable architecture startup belongs in `src/mcu/`.
 
-## 8. Add qualification
+Device-specific external IRQ numbering and the final vector table belong to the concrete target image.
 
-A port is not complete because it compiles.
+A custom application may replace the DAS weak startup and use a different linker contract.
 
-Create physical qualification under:
+## Hardware qualification
 
-```text
-tests/hardware/<target>/
-```
+Compilation is not sufficient for a hardware backend.
 
-Qualification should combine build/link evidence, execution state and physical behavior. Examples include:
+Qualification should combine, where possible:
 
-- linker layout: ELF/map symbol/address checks;
-- startup: dirty `.data`/`.bss`, reset, verify restoration;
-- GPIO input/output: physical loopback;
-- pulls: undriven input;
-- EXTI: physical edge into an interrupt input;
-- UART/SPI: loopback;
-- timers/PWM: capture or external measurement;
-- DMA: pattern integrity plus completion/error evidence.
+- register/configuration evidence;
+- runtime execution evidence;
+- physical I/O evidence.
 
-## 9. Package evidence
+For a multi-core device distinguish:
 
-Hardware campaigns should preserve enough information to diagnose failures after the target is disconnected. The STM32H755 campaign packages build/tool metadata, the exact linker script, ELF, linker map, symbol table, OpenOCD log, per-case logs, summary and exit status.
+1. **static core-image qualification**: compiler flags, linker placement, symbol contract;
+2. **physical core qualification**: reset/release, execution, interrupts;
+3. **dual-core qualification**: shared memory, HSEM, inter-core signaling and coordinated lifecycle.
+
+This prevents a basic linker issue from absorbing the entire multi-core bring-up scope.
+
+## Evidence bundles
+
+Hardware campaigns should preserve:
+
+- build logs;
+- compiler/CMake/OpenOCD/GDB versions;
+- source revision;
+- external CMSIS revision when available;
+- linker scripts;
+- ELF/map files;
+- symbol tables;
+- per-test debugger logs;
+- summary and exit status.
 
 ## Port acceptance checklist
 
-Before marking a target supported:
+Before marking a new target supported:
 
 - [ ] public API remains vendor-type free;
-- [ ] core code contains no vendor peripheral implementation;
-- [ ] device code contains no board wiring assumptions;
-- [ ] board code does not duplicate device register programming;
-- [ ] CMake composes core/device/board layers explicitly;
-- [ ] default memory/link policy is documented or intentionally absent;
-- [ ] custom linker/startup remains possible;
-- [ ] external dependencies and ABI constraints are documented;
-- [ ] warnings are treated as errors;
-- [ ] target firmware boots independently;
-- [ ] linker/startup/configuration evidence passes;
-- [ ] physical I/O is exercised where feasible;
-- [ ] evidence is archived;
+- [ ] architecture layer contains no vendor peripheral code;
+- [ ] device layer contains no board assumptions;
+- [ ] board layer does not duplicate register backends;
+- [ ] core selection is explicit where required;
+- [ ] compiler/core ABI flags are correct;
+- [ ] linker/memory policy is documented and overridable;
+- [ ] startup/linker symbol contract is satisfied;
+- [ ] host/cross-build validation passes;
+- [ ] physical behavior is tested where feasible;
+- [ ] evidence is packaged;
 - [ ] documentation/support matrix is updated.
 
-## Adding a new peripheral API
+## Adding a peripheral
 
 Recommended order:
 
-1. define generic public types and semantics;
+1. define generic public semantics;
 2. decide what policy remains application-owned;
 3. implement one device backend;
-4. add MCU/core helpers only when genuinely architectural;
-5. add board mappings only for real board semantics;
-6. build a physical qualification path;
+4. add architecture helpers only for genuinely architectural behavior;
+5. add board mappings only for real physical board semantics;
+6. add static and physical qualification;
 7. update API/integration documentation;
-8. replicate the backend on other silicon.
-
-This keeps the public API driven by real hardware behavior rather than vendor brochure feature lists.
+8. replicate the backend on other devices.

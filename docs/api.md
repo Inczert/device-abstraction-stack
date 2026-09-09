@@ -12,6 +12,7 @@ Current public headers:
 
 ```text
 include/das/result.h
+include/das/clock.h
 include/das/irq.h
 include/das/gpio.h
 include/das/board.h
@@ -28,11 +29,38 @@ include/das/cortex_m/startup.h
 typedef enum das_result {
     DAS_OK = 0,
     DAS_ERROR_INVALID_ARGUMENT = -1,
-    DAS_ERROR_UNSUPPORTED = -2
+    DAS_ERROR_UNSUPPORTED = -2,
+    DAS_ERROR_TIMEOUT = -3
 } das_result_t;
 ```
 
-`DAS_ERROR_INVALID_ARGUMENT` covers invalid handles, pins, enum values, null output pointers and unsupported numeric ranges. `DAS_ERROR_UNSUPPORTED` is reserved for a valid generic operation not provided by a selected backend.
+`DAS_ERROR_INVALID_ARGUMENT` covers invalid handles, pins, enum values, null output pointers and unsupported numeric ranges. `DAS_ERROR_UNSUPPORTED` is used when a valid generic operation or requested profile is unavailable on the selected backend/board. `DAS_ERROR_TIMEOUT` reports a bounded hardware transition that did not reach its required state.
+
+## Clock API
+
+```c
+#include <das/clock.h>
+```
+
+Applications select a frequency in hertz. PLL dividers, voltage scaling, FLASH latency, bus prescalers and physical board power configuration remain backend details.
+
+```c
+das_result_t das_clock_set_frequency(uint32_t frequency_hz);
+das_result_t das_clock_get_frequency(uint32_t* frequency_hz);
+bool das_clock_frequency_supported(uint32_t frequency_hz);
+size_t das_clock_get_supported_frequencies(uint32_t* frequencies_hz,
+                                           size_t capacity);
+```
+
+A typical application can therefore do:
+
+```c
+if (das_clock_frequency_supported(400000000u)) {
+    (void)das_clock_set_frequency(400000000u);
+}
+```
+
+The NUCLEO-H755ZI-Q backend currently advertises 64, 200, 300 and 400 MHz. On the stock board 480 MHz is deliberately not advertised because the default direct-SMPS power path is limited to the VOS1 operating range. See [Clock control](clocks.md).
 
 ## Interrupt-controller API
 
@@ -188,7 +216,6 @@ Convenience initialization:
 das_result_t das_gpio_input_init(
     das_gpio_pin_t pin,
     das_gpio_pull_t pull);
-
 das_result_t das_gpio_output_init(
     das_gpio_pin_t pin,
     bool initial_high);

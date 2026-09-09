@@ -1,6 +1,6 @@
 # Hardware qualification
 
-DAS treats target testing as part of backend qualification. The STM32H755 campaign combines static linker/image checks with physical execution on **both** Cortex-M cores and packages all evidence into one archive.
+DAS treats target testing as part of backend qualification. The STM32H755 campaign combines host-side linker/image checks with physical execution on **both** Cortex-M cores and packages all evidence into one archive.
 
 Current target:
 
@@ -32,12 +32,16 @@ Example:
 
 ## Build phase
 
-Before OpenOCD starts, the campaign builds three independent images:
+Before OpenOCD starts, the campaign builds:
 
 ```text
 CM7 hardware image
     DAS_CORE=cm7
     default linker: stm32h755_cm7.ld
+
+CM7 clock-profile image
+    DAS_CORE=cm7
+    public DAS clock-profile API
 
 CM4 hardware image
     DAS_CORE=cm4
@@ -50,7 +54,17 @@ CM7 custom-link smoke image
 
 The custom-link fixture starts at `0x08020000` and exists solely to prove linker-script override propagation through `das::das`.
 
-## Static memory-layout checks
+## Host-only static checks
+
+The first three acceptance points are static checks of generated ELF/map files. They do **not** access ST-LINK or the board:
+
+```text
+STM32H755 CM7 memory layout
+STM32H755 CM4 memory layout
+Custom linker override
+```
+
+These are expected to pass even if the physical NUCLEO is disconnected. Hardware qualification begins only when the campaign starts OpenOCD and probes CPU1/CPU2.
 
 ### CM7 default
 
@@ -104,7 +118,7 @@ The two GDB servers are:
 :3334 -> STM32H755 cpu1 -> Cortex-M4 / CPU2
 ```
 
-Both cores are probed before either hardware image is programmed.
+Both cores are probed before either normal hardware image is programmed.
 
 Expected CPUID part numbers:
 
@@ -112,6 +126,23 @@ Expected CPUID part numbers:
 CM7 -> 0xC27
 CM4 -> 0xC24
 ```
+
+## Clock-profile qualification
+
+After the physical probes, the campaign loads a dedicated CM7 clock image. It tests the public `das_clock_*()` path rather than programming a raw PLL fixture directly.
+
+For the stock NUCLEO-H755ZI-Q it must:
+
+- advertise 64, 200, 300 and 400 MHz;
+- reject 480 MHz;
+- select and read back each advertised frequency;
+- configure the board's direct-SMPS supply path before VOS changes;
+- confirm `ACTVOSRDY` and `VOSRDY`;
+- finish at 400 MHz;
+- derive 400 MHz CM7, 200 MHz HCLK/CM4 and 100 MHz APB1..4 from live RCC state;
+- continue executing with a nonzero heartbeat.
+
+The clock image is separate so the subsequent GPIO/IRQ campaign can reload its own qualified image instead of inheriting clock-test state accidentally.
 
 ## Core bring-up and startup checks
 
@@ -175,7 +206,7 @@ The visual LED qualification remains on CM7:
 - red only;
 - all three blinking together.
 
-The board mapping is shared between the two cores, while CM4 GPIO output/input is already exercised physically through the loopback tests. Repeating five human visual confirmations on CM4 would add ceremony rather than coverage.
+The board mapping is shared between the two cores, while CM4 GPIO output/input is already exercised physically through the loopback tests.
 
 Board mapping:
 
@@ -187,14 +218,15 @@ Board mapping:
 
 ## Expected summary
 
-A complete expanded campaign contains **24 acceptance points**:
+A complete expanded campaign contains **25 acceptance points**:
 
 ```text
-STM32H755 CM7 memory layout      PASS
-STM32H755 CM4 memory layout      PASS
-Custom linker override           PASS
-CM7 OpenOCD probe                PASS
-CM4 OpenOCD probe                PASS
+STM32H755 CM7 memory layout      PASS   [host/static]
+STM32H755 CM4 memory layout      PASS   [host/static]
+Custom linker override           PASS   [host/static]
+CM7 OpenOCD probe                PASS   [hardware]
+CM4 OpenOCD probe                PASS   [hardware]
+CM7 board clock profiles         PASS   [hardware]
 CM7 CMSIS/GPIO bring-up          PASS
 CM7 Cortex-M startup/reset       PASS
 CM7 GPIO pull-up                 PASS
@@ -220,7 +252,7 @@ The script exits nonzero if any acceptance point fails.
 
 ## Wiring sequence
 
-The campaign asks for four fixture states:
+The GPIO portion asks for four fixture states:
 
 1. CM7 pull tests: D3 disconnected;
 2. CM7 loopback/EXTI tests: D4 connected to D3;
@@ -253,6 +285,7 @@ custom_memory_layout.log
 
 CM7_OpenOCD_probe.log
 CM4_OpenOCD_probe.log
+CM7_clock_*.log
 CM7_flash_probe.log
 CM4_flash_probe.log
 CM7_startup_reset.log
@@ -265,6 +298,8 @@ stm32h755_cm7.ld
 stm32h755_cm4.ld
 custom_cm7.ld
 
+das_stm32h755_cm7_clock_test.elf
+das_stm32h755_cm7_clock_test.map
 das_stm32h755_cm7_hw_test.elf
 das_stm32h755_cm7_hw_test.map
 das_stm32h755_cm4_hw_test.elf
@@ -272,9 +307,11 @@ das_stm32h755_cm4_hw_test.map
 das_stm32h755_custom_link_test.elf
 das_stm32h755_custom_link_test.map
 
+cm7-clock-symbols.txt
 cm7-symbols.txt
 cm4-symbols.txt
 custom-symbols.txt
+cm7-clock-elf-size.txt
 cm7-elf-size.txt
 cm4-elf-size.txt
 custom-elf-size.txt
@@ -293,7 +330,7 @@ Build either physical image directly:
 
 ## Reusing an existing build
 
-`--no-build` reuses the CM7 hardware image, CM4 hardware image and custom-link image. If any ELF/map is missing, the campaign stops rather than silently reducing coverage.
+`--no-build` reuses the CM7 hardware/clock images, CM4 hardware image and custom-link image. If any ELF/map is missing, the campaign stops rather than silently reducing coverage.
 
 `--clean` and `--no-build` are mutually exclusive.
 
@@ -309,6 +346,6 @@ Recovery keeps the conservative HLA/single-core OpenOCD path. The normal campaig
 
 ## Qualification boundary
 
-After a successful 24-case campaign DAS can claim that both STM32H755 cores physically execute the current startup and GPIO/EXTI paths.
+After a successful 25-case campaign DAS can claim that the stock board clock-profile path and both STM32H755 cores' startup/GPIO/EXTI paths execute physically on the NUCLEO-H755ZI-Q.
 
 It still cannot claim that a production CM7 application correctly boots/releases CM4, coordinates clock-domain initialization, arbitrates shared memory or uses HSEM correctly. Those remain dual-core system features and are tracked separately.

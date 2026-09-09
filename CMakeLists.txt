@@ -43,10 +43,12 @@ if(DAS_DEVICE STREQUAL "nucleo_h755zi_q")
     set(DAS_DEVICE_SOURCES
         src/device/stm32h755/gpio.c
         src/device/stm32h755/gpio_irq.c
-        src/device/stm32h755/clock.c)
+        src/device/stm32h755/clock.c
+        src/device/stm32h755/power.c)
 
     set(DAS_BOARD_SOURCES
-        src/board/nucleo_h755zi_q/board.c)
+        src/board/nucleo_h755zi_q/board.c
+        src/board/nucleo_h755zi_q/clock.c)
 else()
     message(FATAL_ERROR "Unsupported DAS_DEVICE='${DAS_DEVICE}'")
 endif()
@@ -101,7 +103,10 @@ add_library(das::das ALIAS das)
 
 target_include_directories(das
     PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-    PRIVATE "${DAS_CMSIS_CORE_INCLUDE}" "${DAS_CMSIS_DEVICE_INCLUDE}")
+    PRIVATE
+        "${DAS_CMSIS_CORE_INCLUDE}"
+        "${DAS_CMSIS_DEVICE_INCLUDE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/device/${DAS_DEVICE_BACKEND}")
 target_compile_definitions(das PRIVATE
     ${DAS_CORE_DEFINE}
     STM32H755xx

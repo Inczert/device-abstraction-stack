@@ -17,6 +17,7 @@ The current STM32 path uses **CMSIS definitions directly**, without STM32 HAL/LL
 | Startup | reusable weak Cortex-M reset/runtime path |
 | Linker | default STM32H755 CM7 and CM4 layouts plus custom override qualification |
 | Interrupts | device-agnostic IRQ handles/control; CMSIS NVIC backend on Cortex-M |
+| Clock | standard board-frequency API with STM32H755 RCC/PWR/FLASH backend, pending final hardware qualification |
 | GPIO | input/output, pulls, push-pull/open-drain, AF configuration, EXTI |
 | Board API | green/yellow/red user LEDs |
 | Debug/test | dual-core OpenOCD + GDB + packaged evidence campaign |
@@ -76,11 +77,11 @@ src/mcu/cortex_m/
 
 src/device/stm32h755/
     STM32H755 silicon/peripherals
-    GPIO/EXTI now, RCC/UART/DMA/etc. later
+    GPIO/EXTI and RCC/PWR/FLASH clock engine now, UART/DMA/etc. later
 
 src/board/nucleo_h755zi_q/
-    physical Nucleo resources
-    LEDs now, button/VCOM/connectors/etc. later
+    physical Nucleo resources and board policy
+    LEDs and standard clock profiles now, button/VCOM/connectors/etc. later
 
 cmake/targets/
     final firmware memory/linker policy
@@ -152,6 +153,31 @@ target_link_libraries(my_firmware PRIVATE das::das)
 
 There is no separate linker pseudo-library. `libdas.a` has no final physical addresses by itself; the selected linker script is propagated through `das::das` and applies when the final ELF is linked.
 
+## Clock model
+
+Applications request a standard board frequency in hertz instead of calculating PLL dividers:
+
+```c
+#include <das/clock.h>
+
+if (das_clock_frequency_supported(400000000u)) {
+    (void)das_clock_set_frequency(400000000u);
+}
+```
+
+The NUCLEO-H755ZI-Q backend currently advertises:
+
+```text
+64 MHz
+200 MHz
+300 MHz
+400 MHz
+```
+
+The board layer owns the physical supply/source policy. The STM32H755 device layer owns RCC, PWR, FLASH, PLL and bus-divider programming. On the stock board the default direct-SMPS power path is limited to the VOS1 operating range, so 480 MHz is not advertised.
+
+See [Clock control](docs/clocks.md).
+
 ## Interrupt model
 
 Applications use DAS interrupt handles rather than CMSIS/vendor interrupt numbers:
@@ -220,6 +246,7 @@ Current public headers:
 
 ```text
 include/das/result.h
+include/das/clock.h
 include/das/irq.h
 include/das/gpio.h
 include/das/board.h
@@ -238,13 +265,7 @@ Run the full STM32H755 campaign:
     --clean
 ```
 
-The campaign builds three images:
-
-```text
-CM7 hardware image        DAS_CORE=cm7, default CM7 linker
-CM4 hardware image        DAS_CORE=cm4, default CM4 linker
-custom-link smoke image   DAS_CORE=cm7, custom linker override
-```
+The campaign builds the CM7/CM4 hardware images, the custom-linker smoke image, and a dedicated CM7 clock-profile image. The clock image exercises the public 64/200/300/400 MHz profile path before the established GPIO/IRQ qualification continues.
 
 It uses one direct-DAP OpenOCD session:
 
@@ -253,9 +274,11 @@ GDB :3333 -> STM32H755 Cortex-M7 / CPU1
 GDB :3334 -> STM32H755 Cortex-M4 / CPU2
 ```
 
-Both cores are physically exercised for startup, GPIO pulls, loopback, open-drain and EXTI. The EXTI case also qualifies the public DAS IRQ controller path: source-to-handle resolution, enable/query, priority set/get, controller pending set/query/clear, and real edge delivery.
+Both cores are physically exercised for startup, GPIO pulls, loopback, open-drain and EXTI. The EXTI case also qualifies the public DAS IRQ controller path.
 
-The current complete campaign contains **24 acceptance points** and packages both core images, all linker-layout evidence, GDB/OpenOCD logs and the final summary into one timestamped `.tar.gz`.
+The expanded complete campaign contains **25 acceptance points** and packages both core images, clock/profile evidence, linker-layout evidence, GDB/OpenOCD logs and the final summary into one timestamped `.tar.gz`.
+
+The first three acceptance points are host-only linker/layout checks. They intentionally do not require a connected board; hardware qualification starts with the OpenOCD probes.
 
 Important boundary: CM4 execution is currently debugger-driven. Production CM7-to-CM4 boot/release sequencing, HSEM and shared-memory coordination remain separate dual-core system work.
 
@@ -265,6 +288,7 @@ See [Hardware qualification](docs/testing.md).
 
 - [Architecture](docs/architecture.md)
 - [Building and integration](docs/integration.md)
+- [Clock control](docs/clocks.md)
 - [Interrupt model](docs/interrupts.md)
 - [STM32H755 memory/linker policy](docs/memory-layout.md)
 - [Public API reference](docs/api.md)

@@ -1,58 +1,133 @@
-# STM32H755 clock control
+# Clock control
 
 DAS owns the STM32H755 clock transition instead of relying on a CubeMX-generated `SystemClock_Config()`.
 
-This is device-layer functionality. CMSIS device register definitions remain the low-level vocabulary; HAL/LL and generated Cube projects are not required.
+CMSIS device register definitions remain the low-level vocabulary. HAL/LL and generated Cube projects are not required.
 
-## Ownership
+## Public API
+
+Normal applications select a standard frequency, not PLL dividers:
+
+```c
+#include <das/clock.h>
+
+das_result_t result = das_clock_set_frequency(400000000u);
+```
+
+The selected board advertises its supported values:
+
+```c
+uint32_t frequencies[8];
+size_t count = das_clock_get_supported_frequencies(frequencies, 8);
+```
+
+or a caller can query one value directly:
+
+```c
+if (das_clock_frequency_supported(300000000u)) {
+    (void)das_clock_set_frequency(300000000u);
+}
+```
+
+`das_clock_get_frequency()` returns the live primary/system frequency after the transition.
+
+The public contract intentionally contains no STM32 PLL M/N/P/Q/R values, voltage-scale selections, FLASH wait states, RCC register fields, or board power-supply settings. Those are backend problems.
+
+On a multi-core device the requested value is the primary/system frequency. Secondary-core and bus clocks can be derived from it and may run more slowly.
+
+## NUCLEO-H755ZI-Q standard profiles
+
+The board currently exposes:
+
+```text
+64 MHz
+200 MHz
+300 MHz
+400 MHz
+```
+
+The initial profiles use the internal 64 MHz HSI as their source. This keeps frequency selection independent of ST-LINK MCO configuration while the board clock-source policy is still being expanded.
+
+The 200/300/400 MHz profiles use PLL1 internally. DAS selects the PLL and bus dividers automatically.
+
+The default NUCLEO-H755ZI-Q hardware uses the STM32H755 direct-SMPS core-supply path. DAS therefore configures direct SMPS before changing voltage scaling. This is a physical board constraint, not something application code should have to know.
+
+The STM32H755 silicon can operate faster than 400 MHz, but the stock NUCLEO-H755ZI-Q direct-SMPS configuration is intentionally limited to 400 MHz. A 480 MHz CPU1 profile requires an LDO power path and corresponding board hardware configuration, so `480000000` is not advertised or accepted by the stock-board backend.
+
+## Layer ownership
 
 ```text
 application
     |
     v
-board clock profile                 future #7
+das_clock_set_frequency()
     |
     v
-STM32H755 device clock engine       src/device/stm32h755/
+NUCLEO-H755ZI-Q profile policy
+src/board/nucleo_h755zi_q/clock.c
+    |
+    +-- supported standard frequencies
+    +-- direct-SMPS board policy
+    +-- profile -> device configuration
+    |
+    v
+STM32H755 device clock/power engine
+src/device/stm32h755/
     |
     +-- RCC
-    +-- PWR voltage scale
-    +-- FLASH latency/program delay
+    +-- PWR
+    +-- FLASH
     |
     v
 CMSIS device definitions
 ```
 
-The device engine intentionally does not know whether a NUCLEO board has an HSE crystal, an ST-LINK clock input, a bypass source, or a particular jumper position. Those are board facts and belong to the board profile layer.
+This split matters because the STM32H755 does not know whether a board is wired for direct SMPS, LDO, an HSE crystal, ST-LINK MCO, or an external clock input. Device code knows how to operate the silicon; board code chooses the physically valid policy.
 
-The current device configuration type is private to the STM32H755 backend. Normal applications are not expected to choose raw PLL M/N/P/Q/R values. Public, convenient board profiles are tracked separately in #7.
+## Power-supply startup requirement
+
+STM32H755 starts after POR in a limited Run* state. Before changing VOS, firmware must select a power-supply configuration and wait until `ACTVOSRDY` indicates a valid core supply.
+
+Because DAS supplies its own startup rather than using ST's `system_stm32h7xx.c`, DAS must perform that step itself.
+
+For the stock NUCLEO-H755ZI-Q the board layer selects direct SMPS. The device helper:
+
+1. accepts the reset/unlocked Run* supply state;
+2. transitions it to direct SMPS;
+3. refuses to rewrite an already locked incompatible supply configuration;
+4. waits for `PWR_CSR1_ACTVOSRDY` with a bounded timeout.
+
+Refusing an incompatible locked state is deliberate. Applying a power configuration that does not match the physical board can make subsequent debug access fail.
+
+The failed campaign from `dcff1e86fde3759b3352c7e158421e6be7e9bd2c` exposed exactly this missing startup step: the test remained at the 64 MHz reset clock and returned `DAS_ERROR_TIMEOUT` before any bus dividers were changed.
 
 ## CPU ownership
 
 STM32H755 system clocks are shared silicon resources. The current policy is:
 
 - CM7 / CPU1 may apply a global clock configuration;
-- CM4 / CPU2 may read the effective tree but `stm32h755_clock_apply()` returns `DAS_ERROR_UNSUPPORTED`;
-- production CM7-to-CM4 lifecycle and shared-clock coordination remain part of the dual-core work in #20.
+- CM4 / CPU2 may query the effective tree but frequency changes return `DAS_ERROR_UNSUPPORTED`;
+- production CM7-to-CM4 lifecycle and shared-clock coordination remain part of #20.
 
-This prevents two independently executing cores from casually reprogramming the same PLL because apparently a dual-core microcontroller did not already contain enough opportunities for excitement.
+Two cores independently rewriting one PLL would be technically possible in the same sense that putting two steering wheels in a car is technically possible.
 
-## Supported sources
+## Device clock engine
 
-The initial engine supports:
+The private STM32H755 configuration supports:
 
-- HSI, fixed at 64 MHz;
+- HSI;
 - HSE crystal/resonator input;
 - HSE bypass input;
-- PLL1 as the system-clock source.
+- PLL1;
+- D1/AHB/APB prescalers;
+- VOS1;
+- FLASH read latency and programming delay;
+- bounded oscillator/power/clock-switch waits;
+- live clock-tree readback.
 
-For HSE, the caller must supply the physical source frequency. RCC registers indicate that HSE is selected, but they cannot tell software what oscillator was soldered onto the board.
+For HSE, device code must be told the physical external source frequency. RCC registers can report that HSE is selected but cannot identify what frequency exists on the pin.
 
-The accepted HSE input range is currently 4 to 48 MHz.
-
-## Managed operating envelope
-
-The first implementation deliberately supports a conservative STM32H755 performance envelope rather than attempting every legal voltage/frequency combination at once:
+The current managed envelope is:
 
 ```text
 CM7 / D1 core      <= 400 MHz
@@ -60,33 +135,30 @@ HCLK / CM4         <= 200 MHz
 APB1..4            <= 100 MHz
 voltage scale      = VOS1
 FLASH latency      = 4 wait states
-FLASH write delay  = 185..225 MHz HCLK range
 ```
 
-Configurations outside this envelope return `DAS_ERROR_UNSUPPORTED` or `DAS_ERROR_INVALID_ARGUMENT` rather than being applied optimistically.
+The public standard profiles currently keep VOS1 for all selectable frequencies. This favors simple, safe transitions over power optimization. Per-profile voltage scaling can be added later without changing the application API.
 
 ## Safe transition sequence
 
-For a CM7 clock change the backend:
+After the board power path is valid, the device clock engine:
 
 1. validates source, PLL and divider values;
-2. switches SYSCLK to HSI and waits for the switch to complete;
+2. switches SYSCLK to HSI;
 3. requests VOS1 and waits for `VOSRDY`;
-4. raises FLASH read latency and programming delay before increasing frequency;
-5. installs conservative D1/AHB/APB divisors;
-6. starts the selected oscillator;
-7. disables/reconfigures/restarts PLL1 when requested;
-8. switches SYSCLK to the requested source and waits for status confirmation;
+4. raises FLASH latency/programming delay before increasing frequency;
+5. installs safe D1/AHB/APB divisors;
+6. configures the selected oscillator;
+7. disables/reconfigures/restarts PLL1 when required;
+8. switches SYSCLK to the requested source;
 9. executes DSB/ISB barriers;
-10. derives the effective tree from the live RCC registers and verifies it matches the requested configuration.
+10. derives the effective tree from live RCC state and verifies the result.
 
-Every oscillator/power/switch wait is bounded by `wait_limit`. A transition that never reaches its ready state returns `DAS_ERROR_TIMEOUT` instead of hanging forever.
+All hardware waits are bounded. A transition that does not complete returns `DAS_ERROR_TIMEOUT`.
 
-`DAS_ERROR_TIMEOUT` is a common DAS result because future peripheral operations will need the same failure semantics.
+## Live readback
 
-## Clock readback
-
-The internal readback returns:
+The internal device readback derives:
 
 ```text
 SYSCLK
@@ -99,29 +171,25 @@ APB3
 APB4
 ```
 
-The values are derived from the live source, PLL and prescaler registers, not copied from the requested configuration.
+from the actual RCC source, PLL and prescaler registers.
 
-Peripheral kernel clocks are intentionally not generalized prematurely. UART, SPI, timers and other peripherals can have dedicated RCC muxes and special rules. Their effective kernel clocks should be added alongside those device drivers rather than pretending every peripheral is simply its APB clock.
+Peripheral kernel clocks are intentionally handled with the peripheral that owns them. UART, SPI and timers have dedicated muxes and special rules, so pretending every peripheral clock is merely its APB frequency would be a charming source of future bugs.
 
-## Hardware qualification profile
+## Hardware qualification
 
-Issue #6 uses an HSI-only high-performance profile so device-layer qualification does not depend on NUCLEO-specific HSE wiring:
+The dedicated CM7 clock image now exercises the public frequency-selection path rather than a raw PLL fixture.
 
-```text
-source          HSI 64 MHz
-PLL1 M          8
-PLL1 reference  8 MHz
-PLL1 N          100
-VCO             800 MHz
-PLL1 P          2
-SYSCLK / CM7    400 MHz
-D1 prescaler    /1
-AHB prescaler   /2
-HCLK / CM4      200 MHz
-APB1..4         /2
-APB1..4         100 MHz
-```
+It must:
 
-The campaign uses a separate CM7 clock-test image. It applies the profile, continues executing at the new frequency, reads the live tree back, and requires the exact expected frequencies. The target is reset before the normal GPIO/IRQ campaign, keeping clock qualification isolated from unrelated tests.
+- enumerate exactly the four stock-board profiles;
+- reject 480 MHz;
+- transition through 64, 200, 300 and 400 MHz;
+- query each requested system frequency successfully;
+- finish at 400 MHz;
+- derive 400 MHz CM7, 200 MHz HCLK/CM4 and 100 MHz APB1..4 from live RCC state;
+- confirm direct SMPS, `ACTVOSRDY` and `VOSRDY`;
+- continue executing after the transitions.
 
-The board-specific HSE/bypass profile comes next in #7.
+The normal GPIO/IRQ images are then reloaded, keeping clock qualification isolated from the rest of the campaign.
+
+The host-only linker/layout checks at the beginning of the campaign do not require a connected board. They are valid static tests and may pass even when hardware is absent; hardware execution starts with the OpenOCD probes.

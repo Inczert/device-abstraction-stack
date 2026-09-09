@@ -55,6 +55,11 @@ typedef struct stm32h755_clock_frequencies {
  * DAS_ERROR_UNSUPPORTED. The current managed envelope uses VOS1 and four FLASH
  * wait states and accepts configurations up to 400 MHz CM7, 200 MHz HCLK/CM4,
  * and 100 MHz on APB1..4.
+ *
+ * The physical core-supply path must already be configured and ACTVOSRDY must
+ * be valid before this function changes voltage scaling. That supply choice is
+ * board policy; the NUCLEO-H755ZI-Q public clock API prepares direct SMPS
+ * before calling this device-level function.
  */
 das_result_t stm32h755_clock_apply(const stm32h755_clock_config_t* config);
 

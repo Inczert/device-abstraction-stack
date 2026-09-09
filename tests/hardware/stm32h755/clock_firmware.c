@@ -1,13 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#include <das/clock.h>
 #include <das/cortex_m/startup.h>
 #include <das/result.h>
 
 #include "clock_internal.h"
+#include "stm32h755xx.h"
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define DAS_CLOCK_TEST_MAGIC UINT32_C(0x44415343)
+
+#define DAS_CLOCK_PROFILE_64  (UINT32_C(1) << 0u)
+#define DAS_CLOCK_PROFILE_200 (UINT32_C(1) << 1u)
+#define DAS_CLOCK_PROFILE_300 (UINT32_C(1) << 2u)
+#define DAS_CLOCK_PROFILE_400 (UINT32_C(1) << 3u)
+#define DAS_CLOCK_PROFILE_ALL (DAS_CLOCK_PROFILE_64 | DAS_CLOCK_PROFILE_200 | \
+                               DAS_CLOCK_PROFILE_300 | DAS_CLOCK_PROFILE_400)
 
 extern uint32_t __StackTop;
 
@@ -31,6 +42,10 @@ typedef struct das_clock_test_evidence {
     volatile uint32_t booted;
     volatile int32_t apply_result;
     volatile int32_t query_result;
+    volatile int32_t unsupported_result;
+    volatile uint32_t failed_frequency_hz;
+    volatile uint32_t profile_mask;
+    volatile uint32_t supported_count;
     volatile uint32_t system_hz;
     volatile uint32_t cm7_hz;
     volatile uint32_t cm4_hz;
@@ -39,6 +54,10 @@ typedef struct das_clock_test_evidence {
     volatile uint32_t apb2_hz;
     volatile uint32_t apb3_hz;
     volatile uint32_t apb4_hz;
+    volatile uint32_t pwr_cr3;
+    volatile uint32_t pwr_csr1;
+    volatile uint32_t pwr_d3cr;
+    volatile uint32_t power_ready;
     volatile uint32_t heartbeat;
 } das_clock_test_evidence_t;
 
@@ -46,29 +65,68 @@ volatile das_clock_test_evidence_t g_das_clock_test_evidence = {
     .magic = DAS_CLOCK_TEST_MAGIC,
     .apply_result = DAS_ERROR_UNSUPPORTED,
     .query_result = DAS_ERROR_UNSUPPORTED,
+    .unsupported_result = DAS_OK,
 };
 
-int main(void) {
-    const stm32h755_clock_config_t config = {
-        .source = STM32H755_CLOCK_SOURCE_HSI,
-        .source_hz = 0u,
-        .use_pll1 = true,
-        .pll_m = 8u,
-        .pll_n = 100u,
-        .pll_p = 2u,
-        .pll_q = 4u,
-        .pll_r = 2u,
-        .d1_core_divider = 1u,
-        .ahb_divider = 2u,
-        .apb1_divider = 2u,
-        .apb2_divider = 2u,
-        .apb3_divider = 2u,
-        .apb4_divider = 2u,
-        .wait_limit = UINT32_C(1000000),
-    };
-
-    const das_result_t apply_result = stm32h755_clock_apply(&config);
+static bool test_profile(uint32_t frequency_hz, uint32_t flag) {
+    const das_result_t apply_result = das_clock_set_frequency(frequency_hz);
     g_das_clock_test_evidence.apply_result = apply_result;
+    if (apply_result != DAS_OK) {
+        g_das_clock_test_evidence.failed_frequency_hz = frequency_hz;
+        return false;
+    }
+
+    uint32_t observed_hz = 0u;
+    const das_result_t query_result = das_clock_get_frequency(&observed_hz);
+    g_das_clock_test_evidence.query_result = query_result;
+    if (query_result != DAS_OK || observed_hz != frequency_hz) {
+        g_das_clock_test_evidence.failed_frequency_hz = frequency_hz;
+        return false;
+    }
+
+    g_das_clock_test_evidence.profile_mask |= flag;
+    return true;
+}
+
+int main(void) {
+    uint32_t supported[4] = {0};
+    g_das_clock_test_evidence.supported_count =
+        (uint32_t)das_clock_get_supported_frequencies(
+            supported,
+            sizeof(supported) / sizeof(supported[0]));
+
+    const bool supported_list_ok =
+        g_das_clock_test_evidence.supported_count == 4u &&
+        supported[0] == UINT32_C(64000000) &&
+        supported[1] == UINT32_C(200000000) &&
+        supported[2] == UINT32_C(300000000) &&
+        supported[3] == UINT32_C(400000000) &&
+        das_clock_frequency_supported(UINT32_C(64000000)) &&
+        das_clock_frequency_supported(UINT32_C(200000000)) &&
+        das_clock_frequency_supported(UINT32_C(300000000)) &&
+        das_clock_frequency_supported(UINT32_C(400000000)) &&
+        !das_clock_frequency_supported(UINT32_C(480000000));
+
+    if (!supported_list_ok) {
+        g_das_clock_test_evidence.failed_frequency_hz = UINT32_C(1);
+        g_das_clock_test_evidence.booted = 1u;
+        for (;;) {
+            ++g_das_clock_test_evidence.heartbeat;
+        }
+    }
+
+    if (!test_profile(UINT32_C(64000000), DAS_CLOCK_PROFILE_64) ||
+        !test_profile(UINT32_C(200000000), DAS_CLOCK_PROFILE_200) ||
+        !test_profile(UINT32_C(300000000), DAS_CLOCK_PROFILE_300) ||
+        !test_profile(UINT32_C(400000000), DAS_CLOCK_PROFILE_400)) {
+        g_das_clock_test_evidence.booted = 1u;
+        for (;;) {
+            ++g_das_clock_test_evidence.heartbeat;
+        }
+    }
+
+    g_das_clock_test_evidence.unsupported_result =
+        das_clock_set_frequency(UINT32_C(480000000));
 
     stm32h755_clock_frequencies_t frequencies = {0};
     const das_result_t query_result =
@@ -82,6 +140,20 @@ int main(void) {
     g_das_clock_test_evidence.apb2_hz = frequencies.apb2_hz;
     g_das_clock_test_evidence.apb3_hz = frequencies.apb3_hz;
     g_das_clock_test_evidence.apb4_hz = frequencies.apb4_hz;
+
+    g_das_clock_test_evidence.pwr_cr3 = PWR->CR3;
+    g_das_clock_test_evidence.pwr_csr1 = PWR->CSR1;
+    g_das_clock_test_evidence.pwr_d3cr = PWR->D3CR;
+    g_das_clock_test_evidence.power_ready =
+        ((PWR->CR3 & (PWR_CR3_SMPSEN | PWR_CR3_LDOEN | PWR_CR3_BYPASS)) ==
+         PWR_CR3_SMPSEN) &&
+        ((PWR->CSR1 & PWR_CSR1_ACTVOSRDY) != 0u) &&
+        ((PWR->D3CR & PWR_D3CR_VOSRDY) != 0u);
+
+    if (g_das_clock_test_evidence.profile_mask != DAS_CLOCK_PROFILE_ALL) {
+        g_das_clock_test_evidence.failed_frequency_hz = UINT32_C(2);
+    }
+
     g_das_clock_test_evidence.booted = 1u;
 
     for (;;) {

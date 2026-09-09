@@ -10,23 +10,23 @@ static das_gpio_pin_t invalid_pin(void) {
 }
 
 static bool button_valid(das_board_button_t button) {
-    return button < DAS_BOARD_BUTTON_COUNT;
+    return (unsigned)button < (unsigned)DAS_BOARD_BUTTON_COUNT;
 }
 
 static bool uart_valid(das_board_uart_resource_t resource) {
-    return resource < DAS_BOARD_UART_COUNT;
+    return (unsigned)resource < (unsigned)DAS_BOARD_UART_COUNT;
 }
 
 static bool i2c_valid(das_board_i2c_resource_t resource) {
-    return resource < DAS_BOARD_I2C_COUNT;
+    return (unsigned)resource < (unsigned)DAS_BOARD_I2C_COUNT;
 }
 
 static bool spi_valid(das_board_spi_resource_t resource) {
-    return resource < DAS_BOARD_SPI_COUNT;
+    return (unsigned)resource < (unsigned)DAS_BOARD_SPI_COUNT;
 }
 
 static bool gpio_resource_valid(das_board_gpio_resource_t resource) {
-    return resource < DAS_BOARD_GPIO_COUNT;
+    return (unsigned)resource < (unsigned)DAS_BOARD_GPIO_COUNT;
 }
 
 static const das_gpio_pin_t BUTTON_PINS[DAS_BOARD_BUTTON_COUNT] = {

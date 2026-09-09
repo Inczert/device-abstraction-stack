@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include <das/board.h>
+#include <das/cortex_m/startup.h>
 #include <das/gpio.h>
 
 #include "stm32h755xx.h"
@@ -9,6 +10,8 @@
 
 #define DAS_HW_MAGIC UINT32_C(0x44415331)
 #define DAS_HW_ERROR_HARDFAULT UINT32_C(0xe0030001)
+#define DAS_HW_ERROR_STARTUP UINT32_C(0x3001)
+#define DAS_STARTUP_DATA_EXPECTED UINT32_C(0x13579bdf)
 
 #define DAS_GPIO_FLAG_LOOPBACK_LOW       (UINT32_C(1) << 0u)
 #define DAS_GPIO_FLAG_LOOPBACK_HIGH      (UINT32_C(1) << 1u)
@@ -19,19 +22,12 @@
 #define DAS_GPIO_FLAG_EXTI_RISING        (UINT32_C(1) << 6u)
 #define DAS_GPIO_FLAG_EXTI_FALLING       (UINT32_C(1) << 7u)
 
-/* Arduino D4 -> D3 jumper for GPIO electrical-path qualification. */
+/* CN10 D4 -> D3 jumper for GPIO electrical-path qualification. */
 static const das_gpio_pin_t GPIO_TEST_OUTPUT = {DAS_GPIO_PORT_E, 14u}; /* D4 */
 static const das_gpio_pin_t GPIO_TEST_INPUT = {DAS_GPIO_PORT_E, 13u};  /* D3 */
 
 extern uint32_t __StackTop;
-extern uint32_t __data_load__;
-extern uint32_t __data_start__;
-extern uint32_t __data_end__;
-extern uint32_t __bss_start__;
-extern uint32_t __bss_end__;
 
-void Reset_Handler(void);
-void HardFault_Handler(void);
 void EXTI15_10_IRQHandler(void);
 
 #define DAS_VECTOR_EXTI15_10 (16 + EXTI15_10_IRQn)
@@ -40,7 +36,15 @@ __attribute__((section(".isr_vector"), used, aligned(256)))
 const uintptr_t g_das_vector_table[DAS_VECTOR_EXTI15_10 + 1] = {
     [0] = (uintptr_t)&__StackTop,
     [1] = (uintptr_t)&Reset_Handler,
+    [2] = (uintptr_t)&NMI_Handler,
     [3] = (uintptr_t)&HardFault_Handler,
+    [4] = (uintptr_t)&MemManage_Handler,
+    [5] = (uintptr_t)&BusFault_Handler,
+    [6] = (uintptr_t)&UsageFault_Handler,
+    [11] = (uintptr_t)&SVC_Handler,
+    [12] = (uintptr_t)&DebugMon_Handler,
+    [14] = (uintptr_t)&PendSV_Handler,
+    [15] = (uintptr_t)&SysTick_Handler,
     [DAS_VECTOR_EXTI15_10] = (uintptr_t)&EXTI15_10_IRQHandler,
 };
 
@@ -79,22 +83,14 @@ typedef struct das_hw_evidence {
     volatile uint32_t exti_falling_count;
 } das_hw_evidence_t;
 
+/* Explicit .data/.bss probes used by the Cortex-M reset qualification. */
+volatile uint32_t g_das_startup_data_probe = DAS_STARTUP_DATA_EXPECTED;
+volatile uint32_t g_das_startup_bss_probe;
+
 volatile uint32_t g_das_hw_command = DAS_HW_COMMAND_IDLE;
 volatile das_hw_evidence_t g_das_hw_evidence = {
     .magic = DAS_HW_MAGIC,
 };
-
-static void memory_init(void) {
-    uint32_t* source = &__data_load__;
-    uint32_t* destination = &__data_start__;
-    while (destination < &__data_end__) {
-        *destination++ = *source++;
-    }
-    destination = &__bss_start__;
-    while (destination < &__bss_end__) {
-        *destination++ = 0u;
-    }
-}
 
 static void short_delay(void) {
     for (volatile uint32_t i = 0u; i < UINT32_C(20000); ++i) {
@@ -274,7 +270,13 @@ static void apply_gpio_command(uint32_t command) {
     capture_registers();
 }
 
-static void firmware_main(void) {
+int main(void) {
+    if (g_das_startup_data_probe != DAS_STARTUP_DATA_EXPECTED ||
+        g_das_startup_bss_probe != 0u) {
+        g_das_hw_evidence.error = DAS_HW_ERROR_STARTUP;
+        for (;;) { __NOP(); }
+    }
+
     if (das_board_led_init_all(false) != DAS_OK) {
         g_das_hw_evidence.error = UINT32_C(0x1001);
         for (;;) { __NOP(); }
@@ -320,15 +322,6 @@ static void firmware_main(void) {
             capture_registers();
         }
     }
-}
-
-void Reset_Handler(void) {
-    memory_init();
-    SCB->VTOR = (uint32_t)(uintptr_t)g_das_vector_table;
-    __DSB();
-    __ISB();
-    firmware_main();
-    for (;;) { __NOP(); }
 }
 
 void HardFault_Handler(void) {

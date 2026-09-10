@@ -12,7 +12,7 @@ CPU2:     Cortex-M4
 Debug:    ST-LINK direct DAP + OpenOCD + GDB
 ```
 
-Debugger-driven CM4 execution proves the CM4 image and supported device paths on the real CPU2. It does not yet prove production CM7-to-CM4 boot/release, HSEM, shared-memory ownership or cache-coherency policy.
+Debugger-driven CM4 execution proves the CM4 image and supported device paths on the real CPU2. It does not yet prove production CM7-to-CM4 boot/release, HSEM or shared-memory ownership policy.
 
 ## Testing model
 
@@ -28,9 +28,10 @@ Focused scripts remain useful for fast iteration:
 ./scripts/stm32h755_timer_test.sh /path/to/STM32CubeH7
 ./scripts/stm32h755_spi_test.sh   /path/to/STM32CubeH7
 ./scripts/stm32h755_i2c_test.sh   /path/to/STM32CubeH7
+./scripts/stm32h755_dma_test.sh   /path/to/STM32CubeH7
 ```
 
-The full campaign should be rerun whenever shared startup, clock, GPIO, RCC, IRQ, timebase, board-resource or device-backend changes could affect previously qualified functionality.
+The full campaign should be rerun whenever shared startup, clock, GPIO, RCC, IRQ, timebase, DMA/cache, board-resource or device-backend changes could affect previously qualified functionality.
 
 ## Running the full campaign
 
@@ -65,7 +66,7 @@ UART loopback
 
 jumper B, leave connected:
 Arduino D11 / MOSI / PB5  <->  Arduino D12 / MISO / PA6
-SPI loopback
+SPI loopback and SPI-DMA loopback
 
 jumper C, leave connected:
 Arduino D15 / PB8 / I2C_A_SCL  <->  Zio D69 / PF14 / I2C_B_SCL
@@ -84,7 +85,7 @@ B1 USER: released
 
 Leave SPI D13/SCK/PA5 and D10/CS/PD14 otherwise unconnected. Never connect the loopback signal pins to 3V3, 5V or GND.
 
-The UART, SPI and I2C fixtures remain connected for the entire run. Their pins do not overlap the D3/D4 qualification fixture.
+The UART, SPI and I2C fixtures remain connected for the entire run. DMA reuses the SPI MOSI-to-MISO fixture and requires no additional wiring. Their pins do not overlap the D3/D4 qualification fixture.
 
 ### Single D4/D3 transition
 
@@ -113,6 +114,7 @@ CM7 monotonic-time image
 CM7 UART image
 CM7 SPI image
 CM7 I2C image
+CM7 DMA/cache image
 CM7 timer/PWM image
 CM7 clock-profile image
 CM7 board-resource/button image
@@ -122,6 +124,7 @@ CM4 monotonic-time image
 CM4 UART image
 CM4 SPI image
 CM4 I2C image
+CM4 DMA/cache image
 CM4 timer/PWM image
 
 CM7 custom-link smoke image
@@ -205,6 +208,22 @@ The 7O1 case protects the contract that `data_bits` excludes parity. STM32 parit
 
 The persistent physical fixture connects D11/MOSI/PB5 to D12/MISO/PA6. Both cores verify all four SPI modes, MSB/LSB-first operation, 1/2/4/8 MHz SCK requests, transfer lengths 1/7/31/64, receive-only fill, transmit-only discard, explicit active-low chip-select semantics and exact equality across 111 looped-back bytes.
 
+## DMA/cache qualification
+
+DMA reuses the persistent SPI D11/PB5 MOSI to D12/PA6 MISO loopback. Each core runs the dedicated DMA/cache image and verifies:
+
+- opaque DMA allocation/configuration/release;
+- generic DMA IRQ resolution;
+- 256-byte memory-to-memory integrity and zero remaining elements;
+- completion/error state tracking;
+- 192-byte full-duplex SPI1 DMA transfer at 4 MHz through DMAMUX1/DMA1;
+- exact physical MOSI-to-MISO equality;
+- continued execution after the transfer sequence.
+
+CM7 additionally verifies D-cache availability, enabled state, 32-byte cache-line size, explicit TX clean and RX clean/invalidate behavior. CM4 verifies the same public maintenance API with the expected no-D-cache behavior.
+
+The focused qualifier passed 2/2 on commit `6cf59835d52c3a2d1d74ac6aa9d8f0cc44bb95ae`: CM7 completed with `flags=0x3f`, 256 memory-DMA bytes and 192 SPI-DMA bytes at 400 MHz; CM4 completed the same transfers at 64 MHz with no D-cache. The same cases are now standing campaign acceptance points.
+
 ## I2C qualification
 
 I2C loopback is not meaningful, so the campaign uses two real I2C controllers on the same STM32H755:
@@ -254,9 +273,9 @@ all three blinking
 
 CM4 already proves physical GPIO output through the electrical loopback path, so duplicating the five human LED checks on CPU2 adds ceremony rather than coverage.
 
-## Expected 36-case summary
+## Expected 38-case summary
 
-After I2C promotion the campaign contains **36 acceptance points**:
+After DMA/cache promotion the campaign contains **38 acceptance points**:
 
 ```text
 STM32H755 CM7 memory layout       PASS   [host/static]
@@ -273,6 +292,8 @@ CM7 UART loopback                 PASS
 CM4 UART loopback                 PASS
 CM7 SPI loopback                  PASS
 CM4 SPI loopback                  PASS
+CM7 DMA/cache                     PASS
+CM4 DMA/cache                     PASS
 CM7 I2C controller/target         PASS
 CM4 I2C controller/target         PASS
 
@@ -303,11 +324,11 @@ CM7 timer/PWM                     PASS
 CM4 timer/PWM                     PASS
 ```
 
-The completed baseline before I2C campaign integration is the 34/34 SPI campaign at commit `3aca1f4de4bf6753a8772ef2a4f4d238bcd0a68d`. The 36-case state becomes the new completed baseline only after an archive from the exact I2C integration head passes completely.
+The completed baseline before DMA/cache campaign integration is the 36/36 campaign. The 38-case state becomes the new completed baseline only after an archive from the exact DMA integration head passes completely.
 
 ## Evidence bundle
 
-The archive includes the summary, metadata, build logs, OpenOCD log, per-case GDB logs, ELF/map files, symbol/size dumps, linker scripts and all dedicated peripheral images. `--no-build` requires every expected image; missing artifacts are errors rather than silently reducing coverage.
+The archive includes the summary, metadata, build logs, OpenOCD log, per-case GDB logs, ELF/map files, symbol/size dumps, linker scripts and all dedicated peripheral images. `--no-build` requires every expected image, including both DMA/cache images; missing artifacts are errors rather than silently reducing coverage.
 
 ## Recovery
 
@@ -321,6 +342,6 @@ The normal campaign never performs an implicit mass erase.
 
 ## Qualification boundary
 
-After a successful 36-case run DAS can claim physically regression-qualified linker, startup, clock/power, monotonic time, semantic board resources, GPIO/IRQ, polling UART, SPI, I2C and the periodic-timer/PWM baseline on both cores.
+After a successful 38-case run DAS can claim physically regression-qualified linker, startup, clock/power, monotonic time, semantic board resources, GPIO/IRQ, polling UART, SPI, I2C, DMA/cache coherency and the periodic-timer/PWM baseline on both cores.
 
-That still does not imply DMA/cache coherency, timer input capture, production dual-core lifecycle/HSEM/shared-memory coordination, or later ADC/watchdog/flash services. Those remain separate work.
+That still does not imply timer input capture, production dual-core lifecycle/HSEM/shared-memory coordination, or later ADC/watchdog/flash services. Those remain separate work.

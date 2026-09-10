@@ -24,4 +24,67 @@ HardRT currently expects generic `__RAM_START__`/`__RAM_END__` linker symbols fo
 
 The example has one LED task and one UART task. Only the UART task owns the console; applications with multiple UART users should serialize access with an RTOS mutex or central I/O task because the current DAS UART API does not provide internal task-level locking.
 
+## UART destination
+
+The UART task initializes `DAS_BOARD_UART_STLINK_VCP`. On the NUCLEO-H755ZI-Q board mapping this resolves to USART3 on PD8 (TX) and PD9 (RX), routed through the on-board ST-LINK Virtual COM Port. The same USB connection used for ST-LINK/OpenOCD therefore also exposes the UART to the host as a serial device.
+
+Runtime configuration:
+
+```text
+UART:    USART3
+TX:      PD8
+RX:      PD9
+Host:    ST-LINK Virtual COM Port
+Format:  115200 8N1
+Message: HardRT + DAS alive\r\n
+Period:  1 second
+```
+
+On Linux, prefer the stable `/dev/serial/by-id/...` symlink over assuming a particular `/dev/ttyACM0` number.
+
+## Build and flash
+
+When `hardrt/` and `device-abstraction-stack/` are sibling checkouts, the helper finds HardRT automatically:
+
+```bash
+./scripts/build_and_flash_hardrt_uart.sh \
+    /home/dev/STM32Cube/Repository/STM32CubeH7/
+```
+
+Otherwise specify the checkout explicitly:
+
+```bash
+./scripts/build_and_flash_hardrt_uart.sh \
+    /home/dev/STM32Cube/Repository/STM32CubeH7/ \
+    --hardrt-root /path/to/hardrt
+```
+
+The helper performs the same external-consumer flow as CI:
+
+1. cross-build and install `libdas.a` for STM32H755 CM7;
+2. cross-build and install `libhardrt.a` for the Cortex-M port;
+3. configure `examples/hardrt_uart` only through the generated DAS and HardRT CMake packages;
+4. build `das_hardrt_uart.elf`;
+5. flash CM7 with OpenOCD while keeping CM4 halted;
+6. report the detected ST-LINK VCP device when available.
+
+To attach a simple serial monitor immediately after flashing:
+
+```bash
+./scripts/build_and_flash_hardrt_uart.sh \
+    /home/dev/STM32Cube/Repository/STM32CubeH7/ \
+    --monitor
+```
+
+A serial device can also be supplied explicitly:
+
+```bash
+./scripts/build_and_flash_hardrt_uart.sh \
+    /home/dev/STM32Cube/Repository/STM32CubeH7/ \
+    --serial-port /dev/ttyACM0 \
+    --monitor
+```
+
+At runtime the green LED changes state every 250 ms and the UART task writes `HardRT + DAS alive` once per second.
+
 CI cross-links this example against current HardRT `main` and verifies that the final ELF contains HardRT's strong `HardFault_Handler`, `PendSV_Handler` and `SysTick_Handler` plus the DAS vector table.

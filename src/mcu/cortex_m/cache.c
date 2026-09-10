@@ -34,18 +34,18 @@ static das_result_t cache_range(const void* address,
 
     const uintptr_t start = (uintptr_t)address;
     if (size > UINTPTR_MAX - start) {
-        return DAS_ERROR_OUT_OF_RANGE;
+        return DAS_ERROR_INVALID_ARGUMENT;
     }
     const uintptr_t end = start + size;
     const uintptr_t mask = (uintptr_t)DAS_CORTEX_M_DCACHE_LINE_SIZE - 1u;
     const uintptr_t first = start & ~mask;
     if (end > UINTPTR_MAX - mask) {
-        return DAS_ERROR_OUT_OF_RANGE;
+        return DAS_ERROR_INVALID_ARGUMENT;
     }
     const uintptr_t last = (end + mask) & ~mask;
     const uintptr_t span = last - first;
     if (span > (uintptr_t)INT32_MAX) {
-        return DAS_ERROR_OUT_OF_RANGE;
+        return DAS_ERROR_INVALID_ARGUMENT;
     }
 
     *aligned_address = first;

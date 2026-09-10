@@ -33,7 +33,7 @@ Options:
   --openocd-scripts DIR   OpenOCD scripts directory.
   --debug-timeout SEC     GDB timeout per case (default: 30).
   --clean                 Clean before building.
-  --no-build              Reuse existing CM7/CM4 hardware, time, clock, button, and custom-link ELFs.
+  --no-build              Reuse existing CM7/CM4 hardware, time, clock, button, UART, and custom-link ELFs.
   -h, --help              Show help.
 USAGE
 }
@@ -152,10 +152,12 @@ trap 'exit 143' TERM
   echo "CM4 default linker: $ROOT_DIR/cmake/targets/stm32h755_cm4.ld"
   echo "Custom linker fixture: $ROOT_DIR/tests/link/stm32h755/custom_cm7.ld"
   echo "OpenOCD dual-core config: $ROOT_DIR/scripts/openocd_h755_dual_core.cfg"
+  echo "UART fixture: Arduino D1/TX/PB6 -> Arduino D0/RX/PB7"
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$ROOT_DIR/cmake/targets/stm32h755_cm7.ld" 2>/dev/null || true
     sha256sum "$ROOT_DIR/cmake/targets/stm32h755_cm4.ld" 2>/dev/null || true
     sha256sum "$ROOT_DIR/tests/link/stm32h755/custom_cm7.ld" 2>/dev/null || true
+    sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_uart_case.gdb" 2>/dev/null || true
   fi
   echo "GDB: $GDB_BIN"
   "$GDB_BIN" --version 2>/dev/null | head -n 1 || true
@@ -212,13 +214,15 @@ if (( SKIP_BUILD == 0 )); then
     exit "$CUSTOM_BUILD_RC"
   fi
 else
-  echo "Build skipped; reusing existing CM7/CM4 hardware, time, clock, button, and custom-link ELFs." | tee "$BUILD_LOG"
+  echo "Build skipped; reusing existing CM7/CM4 hardware, time, clock, button, UART, and custom-link ELFs." | tee "$BUILD_LOG"
 fi
 
 CM7_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.elf"
 CM7_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.map"
 CM7_TIME_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.elf"
 CM7_TIME_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.map"
+CM7_UART_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.elf"
+CM7_UART_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.map"
 CLOCK_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_clock_test.elf"
 CLOCK_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_clock_test.map"
 BUTTON_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_button_test.elf"
@@ -227,10 +231,12 @@ CM4_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.elf"
 CM4_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.map"
 CM4_TIME_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.elf"
 CM4_TIME_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.map"
+CM4_UART_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.elf"
+CM4_UART_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.map"
 CUSTOM_ELF="$CUSTOM_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.elf"
 CUSTOM_MAP="$CUSTOM_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.map"
 
-for path in "$CM7_ELF" "$CM7_MAP" "$CM7_TIME_ELF" "$CM7_TIME_MAP" "$CLOCK_ELF" "$CLOCK_MAP" "$BUTTON_ELF" "$BUTTON_MAP" "$CM4_ELF" "$CM4_MAP" "$CM4_TIME_ELF" "$CM4_TIME_MAP" "$CUSTOM_ELF" "$CUSTOM_MAP"; do
+for path in "$CM7_ELF" "$CM7_MAP" "$CM7_TIME_ELF" "$CM7_TIME_MAP" "$CM7_UART_ELF" "$CM7_UART_MAP" "$CLOCK_ELF" "$CLOCK_MAP" "$BUTTON_ELF" "$BUTTON_MAP" "$CM4_ELF" "$CM4_MAP" "$CM4_TIME_ELF" "$CM4_TIME_MAP" "$CM4_UART_ELF" "$CM4_UART_MAP" "$CUSTOM_ELF" "$CUSTOM_MAP"; do
   [[ -s "$path" ]] || { echo "Expected campaign artifact not found: $path" >&2; exit 1; }
 done
 
@@ -238,6 +244,8 @@ cp "$CM7_ELF" "$LOG_DIR/das_stm32h755_cm7_hw_test.elf"
 cp "$CM7_MAP" "$LOG_DIR/das_stm32h755_cm7_hw_test.map"
 cp "$CM7_TIME_ELF" "$LOG_DIR/das_stm32h755_cm7_time_test.elf"
 cp "$CM7_TIME_MAP" "$LOG_DIR/das_stm32h755_cm7_time_test.map"
+cp "$CM7_UART_ELF" "$LOG_DIR/das_stm32h755_cm7_uart_test.elf"
+cp "$CM7_UART_MAP" "$LOG_DIR/das_stm32h755_cm7_uart_test.map"
 cp "$CLOCK_ELF" "$LOG_DIR/das_stm32h755_cm7_clock_test.elf"
 cp "$CLOCK_MAP" "$LOG_DIR/das_stm32h755_cm7_clock_test.map"
 cp "$BUTTON_ELF" "$LOG_DIR/das_stm32h755_cm7_button_test.elf"
@@ -246,6 +254,8 @@ cp "$CM4_ELF" "$LOG_DIR/das_stm32h755_cm4_hw_test.elf"
 cp "$CM4_MAP" "$LOG_DIR/das_stm32h755_cm4_hw_test.map"
 cp "$CM4_TIME_ELF" "$LOG_DIR/das_stm32h755_cm4_time_test.elf"
 cp "$CM4_TIME_MAP" "$LOG_DIR/das_stm32h755_cm4_time_test.map"
+cp "$CM4_UART_ELF" "$LOG_DIR/das_stm32h755_cm4_uart_test.elf"
+cp "$CM4_UART_MAP" "$LOG_DIR/das_stm32h755_cm4_uart_test.map"
 cp "$CUSTOM_ELF" "$LOG_DIR/das_stm32h755_custom_link_test.elf"
 cp "$CUSTOM_MAP" "$LOG_DIR/das_stm32h755_custom_link_test.map"
 cp "$ROOT_DIR/cmake/targets/stm32h755_cm7.ld" "$LOG_DIR/"
@@ -254,18 +264,22 @@ cp "$ROOT_DIR/tests/link/stm32h755/custom_cm7.ld" "$LOG_DIR/"
 if command -v arm-none-eabi-size >/dev/null 2>&1; then
   arm-none-eabi-size "$CM7_ELF" >"$LOG_DIR/cm7-elf-size.txt" 2>&1 || true
   arm-none-eabi-size "$CM7_TIME_ELF" >"$LOG_DIR/cm7-time-elf-size.txt" 2>&1 || true
+  arm-none-eabi-size "$CM7_UART_ELF" >"$LOG_DIR/cm7-uart-elf-size.txt" 2>&1 || true
   arm-none-eabi-size "$CLOCK_ELF" >"$LOG_DIR/cm7-clock-elf-size.txt" 2>&1 || true
   arm-none-eabi-size "$BUTTON_ELF" >"$LOG_DIR/cm7-button-elf-size.txt" 2>&1 || true
   arm-none-eabi-size "$CM4_ELF" >"$LOG_DIR/cm4-elf-size.txt" 2>&1 || true
   arm-none-eabi-size "$CM4_TIME_ELF" >"$LOG_DIR/cm4-time-elf-size.txt" 2>&1 || true
+  arm-none-eabi-size "$CM4_UART_ELF" >"$LOG_DIR/cm4-uart-elf-size.txt" 2>&1 || true
   arm-none-eabi-size "$CUSTOM_ELF" >"$LOG_DIR/custom-elf-size.txt" 2>&1 || true
 fi
 arm-none-eabi-nm -n "$CM7_ELF" >"$LOG_DIR/cm7-symbols.txt" 2>&1 || true
 arm-none-eabi-nm -n "$CM7_TIME_ELF" >"$LOG_DIR/cm7-time-symbols.txt" 2>&1 || true
+arm-none-eabi-nm -n "$CM7_UART_ELF" >"$LOG_DIR/cm7-uart-symbols.txt" 2>&1 || true
 arm-none-eabi-nm -n "$CLOCK_ELF" >"$LOG_DIR/cm7-clock-symbols.txt" 2>&1 || true
 arm-none-eabi-nm -n "$BUTTON_ELF" >"$LOG_DIR/cm7-button-symbols.txt" 2>&1 || true
 arm-none-eabi-nm -n "$CM4_ELF" >"$LOG_DIR/cm4-symbols.txt" 2>&1 || true
 arm-none-eabi-nm -n "$CM4_TIME_ELF" >"$LOG_DIR/cm4-time-symbols.txt" 2>&1 || true
+arm-none-eabi-nm -n "$CM4_UART_ELF" >"$LOG_DIR/cm4-uart-symbols.txt" 2>&1 || true
 arm-none-eabi-nm -n "$CUSTOM_ELF" >"$LOG_DIR/custom-symbols.txt" 2>&1 || true
 
 safe_log_name() {
@@ -383,6 +397,18 @@ run_time_case() {
   fi
 }
 
+run_uart_case() {
+  local label="$1" elf="$2" port="$3"
+  local log="$LOG_DIR/$(safe_log_name "$label").log"
+  if run_gdb "$elf" "$port" "$log" \
+      -x "$ROOT_DIR/scripts/gdb/stm32h755_uart_case.gdb"; then
+    record "$label" PASS
+  else
+    record "$label" FAIL
+    return 1
+  fi
+}
+
 run_button_case() {
   local label="CM7 user button input/EXTI"
 
@@ -482,9 +508,13 @@ fi
 
 run_button_case || exit 1
 
+wait_for_enter "UART loopback: remove any D3-to-D4 qualification jumper, then connect ONE jumper between Arduino D1/TX/PB6 and Arduino D0/RX/PB7. Do not connect either signal to 3V3, 5V, or GND."
+run_uart_case "CM7 UART loopback" "$CM7_UART_ELF" 3333 || exit 1
+run_uart_case "CM4 UART loopback" "$CM4_UART_ELF" 3334 || exit 1
+
 bring_up_core "CM7" "$CM7_ELF" 3333 || exit 1
 
-wait_for_enter "CM7 pull tests: leave CN10 D3 / PE13 / pin 10 electrically DISCONNECTED. Remove any jumper or shield drive from that pin."
+wait_for_enter "CM7 pull tests: leave CN10 D3 / PE13 / pin 10 electrically DISCONNECTED. Remove any jumper or shield drive from that pin. The D1-to-D0 UART jumper may remain connected."
 automated_gpio_case "CM7" "$CM7_ELF" 3333 "GPIO pull-up" 7 4
 automated_gpio_case "CM7" "$CM7_ELF" 3333 "GPIO pull-down" 8 8
 

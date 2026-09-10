@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#include <das/board_resources.h>
-#include <das/uart.h>
+#include <das/das.h>
 
-#include <stddef.h>
 #include <stdint.h>
 
 int main(void) {

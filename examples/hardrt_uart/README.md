@@ -1,8 +1,6 @@
 # HardRT + DAS UART example
 
-This example demonstrates one ownership model for using [HardRT](https://github.com/ExoSpaceLabs/hardrt) as the Cortex-M scheduler while DAS owns board clocking and peripherals.
-
-The reference integration targets **HardRT 0.5.1 or a compatible newer 0.5.x release**. HardRT 0.5.1 is the current validated baseline for this example and includes the current Cortex-M scheduler/ISR, diagnostics, IPC, event/notification, and packaging improvements used by the integration.
+This example demonstrates one ownership model for using [HardRT](https://github.com/ExoSpaceLabs/hardrt) 0.5.1 as the Cortex-M scheduler while DAS owns board clocking and peripherals.
 
 Both dependencies are consumed as installed CMake packages:
 
@@ -10,6 +8,36 @@ Both dependencies are consumed as installed CMake packages:
 find_package(DAS CONFIG REQUIRED)
 find_package(HardRT 0.5.1 CONFIG REQUIRED)
 target_link_libraries(das_hardrt_uart PRIVATE HardRT::hardrt das::das)
+```
+
+The application uses the convenience umbrella header:
+
+```c
+#include <das/das.h>
+```
+
+`das/das.h` exposes the normal application-facing DAS API. Architecture-specific startup/vector customization remains explicit through `das/cortex_m/startup.h`.
+
+## Initialization structure
+
+The example keeps `main()` focused on orchestration. DAS clock, board LED and UART setup live in a local `das_init()` helper. RTOS setup lives in `rtos_init()`, including the DAS-to-HardRT monotonic-time bridge because that bridge can only be established once HardRT owns and initializes SysTick.
+
+```text
+das_init()
+    -> DAS clock profile
+    -> query live core frequency
+    -> DAS board LED
+    -> DAS ST-LINK UART
+
+rtos_init()
+    -> hrt_init(core_hz from DAS)
+    -> das_time_set_source(hrt_now_ms)
+
+main()
+    -> das_init()
+    -> rtos_init()
+    -> create tasks
+    -> hrt_start()
 ```
 
 ## Ownership
@@ -61,8 +89,6 @@ Otherwise specify the checkout explicitly:
     --hardrt-root /path/to/hardrt
 ```
 
-The helper builds the supplied HardRT checkout as an installed Cortex-M package. The final example configuration then enforces the `HardRT 0.5.1` package requirement, so an older 0.5.0 installation cannot silently become the reference runtime.
-
 The helper performs the same external-consumer flow as CI:
 
 1. cross-build and install `libdas.a` for STM32H755 CM7;
@@ -91,4 +117,4 @@ A serial device can also be supplied explicitly:
 
 At runtime the green LED changes state every 250 ms and the UART task writes `HardRT + DAS alive` once per second.
 
-CI cross-links this example against current HardRT `main` and verifies that the final ELF contains HardRT's strong `HardFault_Handler`, `PendSV_Handler` and `SysTick_Handler` plus the DAS vector table.
+CI cross-links this example against current HardRT 0.5.1 and verifies that the final ELF contains HardRT's strong `HardFault_Handler`, `PendSV_Handler` and `SysTick_Handler` plus the DAS vector table.

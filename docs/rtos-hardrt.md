@@ -1,8 +1,6 @@
 # HardRT integration
 
-DAS and HardRT can be used together on STM32H755 without giving both libraries ownership of the same Cortex-M facilities. The current DAS reference integration targets **HardRT 0.5.1 or a compatible newer 0.5.x release**. HardRT 0.5.1 is the validated baseline used for the current Cortex-M scheduler/ISR, diagnostics, IPC, event/notification, and CMake package integration.
-
-The reference model is:
+DAS and HardRT can be used together on STM32H755 without giving both libraries ownership of the same Cortex-M facilities. The current reference baseline is HardRT **0.5.1**.
 
 ```text
 DAS                         HardRT
@@ -118,4 +116,4 @@ target_link_options(app PRIVATE
 
 The DAS default vector table stays useful here: the application does not need to copy a full STM32 vector table just to let HardRT replace the core handlers it owns.
 
-CI cross-builds the reference HardRT+DAS CM7 application and checks the final ELF for HardRT's strong scheduler/fault handlers, the DAS vector section and RAM-boundary symbols.
+CI cross-builds the reference HardRT+DAS CM7 application against HardRT 0.5.1 and checks the final ELF for HardRT's strong scheduler/fault handlers, the DAS vector section and RAM-boundary symbols.

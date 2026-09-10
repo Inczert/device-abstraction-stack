@@ -269,25 +269,34 @@ static das_result_t transfer_dma_chunk(SPI_TypeDef* registers,
         return result;
     }
 
+    /* Match the STM32H7 full-duplex DMA startup order: keep request gates
+       closed until the corresponding DMA stream has been armed. */
     registers->CR1 &= ~SPI_CR1_SPE;
+    registers->CFG1 &= ~(SPI_CFG1_RXDMAEN | SPI_CFG1_TXDMAEN);
     registers->IFCR = DAS_STM32H755_SPI_CLEAR_FLAGS;
-    registers->CR2 = count & SPI_CR2_TSIZE;
-    registers->CFG1 |= SPI_CFG1_RXDMAEN | SPI_CFG1_TXDMAEN;
 
     result = das_dma_start(rx_dma,
                            (const void*)&registers->RXDR,
                            &rx[offset],
                            count);
-    if (result == DAS_OK) {
-        result = das_dma_start(tx_dma,
-                               &tx[offset],
-                               (void*)&registers->TXDR,
-                               count);
-    }
     if (result != DAS_OK) {
         dma_pair_cleanup(registers, rx_dma, tx_dma);
         return result;
     }
+    registers->CFG1 |= SPI_CFG1_RXDMAEN;
+
+    result = das_dma_start(tx_dma,
+                           &tx[offset],
+                           (void*)&registers->TXDR,
+                           count);
+    if (result != DAS_OK) {
+        dma_pair_cleanup(registers, rx_dma, tx_dma);
+        return result;
+    }
+
+    registers->CR2 = count & SPI_CR2_TSIZE;
+    registers->CFG1 |= SPI_CFG1_TXDMAEN;
+    __DSB();
 
     registers->CR1 |= SPI_CR1_SSI | SPI_CR1_SPE;
     registers->CR1 |= SPI_CR1_CSTART;

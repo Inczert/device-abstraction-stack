@@ -21,11 +21,13 @@ Peripheral development uses two levels of physical testing:
 1. a focused qualifier while a peripheral is being implemented or debugged;
 2. after that focused test passes, the same firmware/GDB acceptance case is promoted into the main hardware campaign as standing regression coverage.
 
-Current focused scripts remain useful for fast iteration:
+Focused scripts remain useful for fast iteration:
 
 ```bash
 ./scripts/stm32h755_uart_test.sh  /path/to/STM32CubeH7
 ./scripts/stm32h755_timer_test.sh /path/to/STM32CubeH7
+./scripts/stm32h755_spi_test.sh   /path/to/STM32CubeH7
+./scripts/stm32h755_i2c_test.sh   /path/to/STM32CubeH7
 ```
 
 The full campaign should be rerun whenever shared startup, clock, GPIO, RCC, IRQ, timebase, board-resource or device-backend changes could affect previously qualified functionality.
@@ -48,45 +50,51 @@ The archive is also produced after a logged failure.
 
 ## Fixture choreography
 
-The campaign deliberately groups tests by physical wiring state. Once a jumper is installed, the script does not ask for the same connection again unless a later test genuinely requires a different state.
+The campaign groups tests by physical wiring state. Persistent serial fixtures are installed once at the beginning and are not mentioned again unless they genuinely need to change. D3/D4 remains free until both-core pull tests have completed, then one final fixture transition enables GPIO loopback and PWM qualification.
 
 ### Initial setup
 
-Before OpenOCD starts, the campaign asks for one initial hardware setup:
+Before OpenOCD starts, install these fixtures:
 
 ```text
 NUCLEO-H755ZI-Q connected through ST-LINK USB
 
-jumper A, install now and leave connected:
+jumper A, leave connected:
 Arduino D1 / TX / PB6  <->  Arduino D0 / RX / PB7
+UART loopback
+
+jumper B, leave connected:
+Arduino D11 / MOSI / PB5  <->  Arduino D12 / MISO / PA6
+SPI loopback
+
+jumper C, leave connected:
+Arduino D15 / PB8 / I2C_A_SCL  <->  Zio D69 / PF14 / I2C_B_SCL
+                                      CN9 pin 19
+
+jumper D, leave connected:
+Arduino D14 / PB9 / I2C_A_SDA  <->  Zio D68 / PF15 / I2C_B_SDA
+                                      CN9 pin 21
 
 D3 / PE13: disconnected
 D4 / PE14: disconnected
 
-jumper B: keep ready for the later D4 <-> D3 transition
+jumper E: keep ready for the later D4 <-> D3 transition
 B1 USER: released
 ```
 
-D1/D0 remains connected for the entire run. UART therefore needs no later wiring prompt.
+Leave SPI D13/SCK/PA5 and D10/CS/PD14 otherwise unconnected. Never connect the loopback signal pins to 3V3, 5V or GND.
 
-The campaign first completes every acceptance point that requires D3 to be electrically free, including both-core pull-up/pull-down qualification.
+The UART, SPI and I2C fixtures remain connected for the entire run. Their pins do not overlap the D3/D4 qualification fixture.
 
 ### Single D4/D3 transition
 
-The campaign then asks exactly once to install jumper B:
+After all tests requiring D3 to be electrically free have completed, the campaign asks exactly once to install jumper E:
 
 ```text
 CN10 D4 / PE14  <->  CN10 D3 / PE13
 ```
 
-From that point onward both jumpers remain installed:
-
-```text
-D1 / PB6  <-> D0 / PB7     UART fixture
-D4 / PE14 <-> D3 / PE13    GPIO + PWM fixture
-```
-
-The D4/D3 connection is then reused without further reconnect prompts by:
+From that point onward all five jumpers remain installed. D4/D3 is reused by:
 
 - CM4 GPIO loopback/open-drain/EXTI;
 - CM7 GPIO loopback/open-drain/EXTI;
@@ -95,16 +103,16 @@ The D4/D3 connection is then reused without further reconnect prompts by:
 
 The campaign may reflash/re-arm a core when changing test images. That is software fixture choreography and is not counted as an additional acceptance point.
 
-Never connect the loopback signals to 3V3, 5V or GND.
-
 ## Build products
 
-The current campaign builds and archives:
+The campaign builds and archives dedicated images for both cores where appropriate:
 
 ```text
 CM7 hardware image
 CM7 monotonic-time image
 CM7 UART image
+CM7 SPI image
+CM7 I2C image
 CM7 timer/PWM image
 CM7 clock-profile image
 CM7 board-resource/button image
@@ -112,12 +120,14 @@ CM7 board-resource/button image
 CM4 hardware image
 CM4 monotonic-time image
 CM4 UART image
+CM4 SPI image
+CM4 I2C image
 CM4 timer/PWM image
 
 CM7 custom-link smoke image
 ```
 
-The normal CM7/CM4 images use the selected DAS linker scripts. The custom-link image exists to prove that the linker override propagates through `das::das`.
+The normal CM7/CM4 images use the selected DAS linker scripts. The custom-link image proves that the linker override propagates through `das::das`.
 
 ## Host-only checks
 
@@ -155,15 +165,7 @@ CM4 CPUID part -> 0xC24
 
 ## Monotonic-time qualification
 
-Each core verifies:
-
-- missing-source behavior;
-- external/application time-source injection;
-- wrap-safe elapsed/deadline handling;
-- rejection of intervals outside the safe half-range;
-- CMSIS SysTick initialization from the live executing-core clock;
-- a 100 ms delay measured against DWT cycles within 5%;
-- continued execution.
+Each core verifies missing-source behavior, external/application time-source injection, wrap-safe elapsed/deadline handling, safe-interval rejection, CMSIS SysTick initialization from the live executing-core clock, a 100 ms delay measured against DWT cycles within 5%, and continued execution.
 
 CM7 first selects the qualified 400 MHz board profile. CM4 independently derives its own live core clock.
 
@@ -188,30 +190,35 @@ ST-LINK VCP              -> PD8 / PD9
 Arduino UART             -> PB6 / PB7
 Arduino I2C              -> PB8 / PB9
 Arduino SPI              -> PA5 / PA6 / PB5, CS PD14
-Arduino PWM D4            -> PE14
+Arduino PWM D4           -> PE14
 ```
 
 The B1 case uses the public board-button and generic IRQ APIs and checks released, pressed, press EXTI, released again and release EXTI. Mechanical bounce is tolerated; at least one event is required rather than an exact edge count.
 
 ## UART qualification
 
-The persistent fixture is:
-
-```text
-Arduino D1 / TX / PB6  <->  Arduino D0 / RX / PB7
-```
-
-Both cores verify:
-
-- finite receive timeout;
-- semantic board-resource and opaque-handle setup;
-- baud generation from the live clock tree;
-- 115200 8N1;
-- 57600 8E2;
-- 38400 7O1;
-- 34 deterministic bytes with exact application-byte equality.
+The persistent fixture is D1/TX/PB6 to D0/RX/PB7. Both cores verify finite receive timeout, semantic board-resource/opaque-handle setup, baud generation from the live clock tree, 115200 8N1, 57600 8E2, 38400 7O1, and 34 deterministic bytes with exact application-byte equality.
 
 The 7O1 case protects the contract that `data_bits` excludes parity. STM32 parity storage must not leak into the byte returned by DAS.
+
+## SPI qualification
+
+The persistent physical fixture connects D11/MOSI/PB5 to D12/MISO/PA6. Both cores verify all four SPI modes, MSB/LSB-first operation, 1/2/4/8 MHz SCK requests, transfer lengths 1/7/31/64, receive-only fill, transmit-only discard, explicit active-low chip-select semantics and exact equality across 111 looped-back bytes.
+
+## I2C qualification
+
+I2C loopback is not meaningful, so the campaign uses two real I2C controllers on the same STM32H755:
+
+```text
+DAS controller under test                 test-only target
+
+D15 / PB8 / I2C1_SCL  ---------------->  D69 / PF14 / I2C4_SCL
+                                           CN9 pin 19
+D14 / PB9 / I2C1_SDA  ---------------->  D68 / PF15 / I2C4_SDA
+                                           CN9 pin 21
+```
+
+The test-only I2C4 endpoint is interrupt serviced and is not exposed as a public DAS board resource. Each core verifies 100 kHz and 400 kHz timing derived from the live kernel clock, probe of target `0x52`, expected NACK at `0x53`, physical write, physical read, repeated-START write/read, exact equality across 70 checked application bytes, zero target-side bus/arbitration/overrun errors and continued execution.
 
 ## GPIO qualification
 
@@ -229,17 +236,7 @@ The EXTI case also validates the public `das_irq_*()` controller path: enable st
 
 ## Timer/PWM qualification
 
-Issue #10 keeps a focused qualifier but is also part of the main campaign after its first successful physical run.
-
-Each core runs a dedicated timer/PWM image using the already-installed D4/D3 fixture. The image verifies:
-
-- a 1 kHz periodic timer derived from the live DAS clock model;
-- start/stop and counter behavior;
-- TIM2 update interrupt delivery through generic `das_irq_t` control;
-- 100 update intervals measured with DWT cycles within 5%;
-- a 1 kHz PWM output on semantic Arduino D4;
-- physical D4-to-D3 observation at 25%, 50% and 75% duty;
-- PWM frequency/duty readback and continued execution.
+Each core runs a dedicated timer/PWM image using the already-installed D4/D3 fixture. It verifies a 1 kHz periodic timer derived from the live DAS clock model, start/stop and counter behavior, TIM2 update interrupt delivery through generic `das_irq_t`, 100 update intervals measured with DWT cycles within 5%, a 1 kHz PWM output on semantic Arduino D4, physical D4-to-D3 observation at 25%, 50% and 75% duty, frequency/duty readback and continued execution.
 
 D3 is deliberately used as a GPIO observation input. Input-capture support is not introduced merely to make the test fixture more elaborate.
 
@@ -257,9 +254,9 @@ all three blinking
 
 CM4 already proves physical GPIO output through the electrical loopback path, so duplicating the five human LED checks on CPU2 adds ceremony rather than coverage.
 
-## Expected 32-case summary
+## Expected 36-case summary
 
-The timer-integrated campaign contains **32 acceptance points**:
+After I2C promotion the campaign contains **36 acceptance points**:
 
 ```text
 STM32H755 CM7 memory layout       PASS   [host/static]
@@ -274,6 +271,10 @@ CM7 HSI/PLL 400MHz clock          PASS
 CM7 user button input/EXTI        PASS
 CM7 UART loopback                 PASS
 CM4 UART loopback                 PASS
+CM7 SPI loopback                  PASS
+CM4 SPI loopback                  PASS
+CM7 I2C controller/target         PASS
+CM4 I2C controller/target         PASS
 
 CM7 CMSIS/GPIO bring-up           PASS
 CM7 Cortex-M startup/reset        PASS
@@ -302,20 +303,11 @@ CM7 timer/PWM                     PASS
 CM4 timer/PWM                     PASS
 ```
 
-The most recent fully qualified baseline before timer integration remains the 30/30 UART campaign. The 32-case state becomes the new baseline only after an archive from the exact integration head passes completely.
+The completed baseline before I2C campaign integration is the 34/34 SPI campaign at commit `3aca1f4de4bf6753a8772ef2a4f4d238bcd0a68d`. The 36-case state becomes the new completed baseline only after an archive from the exact I2C integration head passes completely.
 
 ## Evidence bundle
 
-The archive includes the summary, metadata, build logs, OpenOCD log, per-case GDB logs, ELF/map files, symbol/size dumps, linker scripts and the dedicated UART/timer/PWM images. Timer evidence is stored as:
-
-```text
-CM7_timer_PWM.log
-CM4_timer_PWM.log
-das_stm32h755_cm7_timer_test.elf/.map
-das_stm32h755_cm4_timer_test.elf/.map
-```
-
-`--no-build` requires every expected image, including UART and timer/PWM images. Missing artifacts are errors rather than silently reducing coverage.
+The archive includes the summary, metadata, build logs, OpenOCD log, per-case GDB logs, ELF/map files, symbol/size dumps, linker scripts and all dedicated peripheral images. `--no-build` requires every expected image; missing artifacts are errors rather than silently reducing coverage.
 
 ## Recovery
 
@@ -329,6 +321,6 @@ The normal campaign never performs an implicit mass erase.
 
 ## Qualification boundary
 
-After a successful 32-case run DAS can claim physically regression-qualified linker, startup, clock/power, monotonic time, semantic board resources, GPIO/IRQ, polling UART and the #10 periodic-timer/PWM baseline on both cores.
+After a successful 36-case run DAS can claim physically regression-qualified linker, startup, clock/power, monotonic time, semantic board resources, GPIO/IRQ, polling UART, SPI, I2C and the periodic-timer/PWM baseline on both cores.
 
-That still does not imply DMA, input capture, production dual-core lifecycle/HSEM/shared-memory coordination, or unimplemented SPI/I2C transfers. Those remain separate work.
+That still does not imply DMA/cache coherency, timer input capture, production dual-core lifecycle/HSEM/shared-memory coordination, or later ADC/watchdog/flash services. Those remain separate work.

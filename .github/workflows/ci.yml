@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+env:
+  STM32_CUBE_H7_REF: f5c0b7a2b1f6eb26fde150f72edb2d7deb647066
+  STM32_CMSIS_H7_REF: e8d40ae6e2fa06afe5b46d24756f141b363342a7
+
 jobs:
   host-contract:
     name: Host contract
@@ -35,17 +39,31 @@ jobs:
         core: [cm7, cm4]
     steps:
       - uses: actions/checkout@v4
-      - name: Checkout STM32CubeH7 CMSIS headers
+      - name: Checkout qualified CMSIS-Core headers
         uses: actions/checkout@v4
         with:
           repository: STMicroelectronics/STM32CubeH7
+          ref: ${{ env.STM32_CUBE_H7_REF }}
           path: .ci/STM32CubeH7
           fetch-depth: 1
           sparse-checkout: |
             Drivers/CMSIS/Core/Include
             Drivers/CMSIS/Include
-            Drivers/CMSIS/Device/ST/STM32H7xx/Include
           sparse-checkout-cone-mode: false
+      - name: Checkout qualified STM32H7 CMSIS device headers
+        uses: actions/checkout@v4
+        with:
+          repository: STMicroelectronics/cmsis-device-h7
+          ref: ${{ env.STM32_CMSIS_H7_REF }}
+          path: .ci/cmsis-device-h7
+          fetch-depth: 1
+      - name: Assemble STM32CubeH7 CMSIS include layout
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/.ci/STM32CubeH7/Drivers/CMSIS/Device/ST/STM32H7xx"
+          ln -s "$GITHUB_WORKSPACE/.ci/cmsis-device-h7/Include" \
+            "$GITHUB_WORKSPACE/.ci/STM32CubeH7/Drivers/CMSIS/Device/ST/STM32H7xx/Include"
+          test -f "$GITHUB_WORKSPACE/.ci/STM32CubeH7/Drivers/CMSIS/Core/Include/core_cm7.h"
+          test -f "$GITHUB_WORKSPACE/.ci/STM32CubeH7/Drivers/CMSIS/Device/ST/STM32H7xx/Include/stm32h755xx.h"
       - name: Install ARM toolchain
         run: |
           sudo apt-get update
@@ -102,17 +120,31 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Checkout STM32CubeH7 CMSIS headers
+      - name: Checkout qualified CMSIS-Core headers
         uses: actions/checkout@v4
         with:
           repository: STMicroelectronics/STM32CubeH7
+          ref: ${{ env.STM32_CUBE_H7_REF }}
           path: .ci/STM32CubeH7
           fetch-depth: 1
           sparse-checkout: |
             Drivers/CMSIS/Core/Include
             Drivers/CMSIS/Include
-            Drivers/CMSIS/Device/ST/STM32H7xx/Include
           sparse-checkout-cone-mode: false
+      - name: Checkout qualified STM32H7 CMSIS device headers
+        uses: actions/checkout@v4
+        with:
+          repository: STMicroelectronics/cmsis-device-h7
+          ref: ${{ env.STM32_CMSIS_H7_REF }}
+          path: .ci/cmsis-device-h7
+          fetch-depth: 1
+      - name: Assemble STM32CubeH7 CMSIS include layout
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/.ci/STM32CubeH7/Drivers/CMSIS/Device/ST/STM32H7xx"
+          ln -s "$GITHUB_WORKSPACE/.ci/cmsis-device-h7/Include" \
+            "$GITHUB_WORKSPACE/.ci/STM32CubeH7/Drivers/CMSIS/Device/ST/STM32H7xx/Include"
+          test -f "$GITHUB_WORKSPACE/.ci/STM32CubeH7/Drivers/CMSIS/Core/Include/core_cm7.h"
+          test -f "$GITHUB_WORKSPACE/.ci/STM32CubeH7/Drivers/CMSIS/Device/ST/STM32H7xx/Include/stm32h755xx.h"
       - name: Checkout HardRT
         uses: actions/checkout@v4
         with:

@@ -6,7 +6,7 @@ project(das_hardrt_uart LANGUAGES C)
 # table; strong HardRT handlers replace DAS's weak core-handler defaults.
 set(DAS_USE_DEFAULT_VECTOR_TABLE ON)
 find_package(DAS 0.1 CONFIG REQUIRED)
-find_package(HardRT 0.5 CONFIG REQUIRED)
+find_package(HardRT 0.5.1 CONFIG REQUIRED)
 
 if(NOT DAS_PACKAGE_CORE STREQUAL "cm7")
     message(FATAL_ERROR "The current HardRT+DAS reference example targets CM7")

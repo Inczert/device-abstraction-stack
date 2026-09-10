@@ -1,6 +1,6 @@
 # Hardware qualification
 
-DAS treats target testing as part of backend qualification. The STM32H755 campaign combines host-side linker/image checks with physical execution on both Cortex-M cores and packages all evidence into one archive.
+DAS treats physical target testing as part of backend qualification. The STM32H755 campaign combines host-side linker/image checks with execution on both Cortex-M cores and packages the evidence into one timestamped archive.
 
 Current target:
 
@@ -12,18 +12,25 @@ CPU2:     Cortex-M4
 Debug:    ST-LINK direct DAP + OpenOCD + GDB
 ```
 
-Debugger-driven CM4 execution proves that the CM4 image and supported core/device paths work on the real CPU2. It does not yet prove production CM7-to-CM4 boot/release, HSEM or shared-memory coordination.
+Debugger-driven CM4 execution proves the CM4 image and supported device paths on the real CPU2. It does not yet prove production CM7-to-CM4 boot/release, HSEM, shared-memory ownership or cache-coherency policy.
 
 ## Testing model
 
-Peripheral work uses two levels of hardware testing:
+Peripheral development uses two levels of physical testing:
 
-1. a focused qualifier while that peripheral is actively being developed;
-2. once the focused qualifier passes, the same physical case is promoted into the main hardware campaign and becomes part of the regression baseline.
+1. a focused qualifier while a peripheral is being implemented or debugged;
+2. after that focused test passes, the same firmware/GDB acceptance case is promoted into the main hardware campaign as standing regression coverage.
 
-For UART, `scripts/stm32h755_uart_test.sh` remains the fast standalone test. The main campaign now runs the same CM7/CM4 UART firmware and GDB acceptance logic as two additional regression points. Shared changes to clocks, GPIO alternate functions, RCC, startup, timeouts or the STM32H755 backend can therefore be checked against UART without maintaining a second manual procedure.
+Current focused scripts remain useful for fast iteration:
 
-## Running the campaign
+```bash
+./scripts/stm32h755_uart_test.sh  /path/to/STM32CubeH7
+./scripts/stm32h755_timer_test.sh /path/to/STM32CubeH7
+```
+
+The full campaign should be rerun whenever shared startup, clock, GPIO, RCC, IRQ, timebase, board-resource or device-backend changes could affect previously qualified functionality.
+
+## Running the full campaign
 
 ```bash
 ./scripts/stm32h755_test_campaign.sh \
@@ -31,35 +38,90 @@ For UART, `scripts/stm32h755_uart_test.sh` remains the fast standalone test. The
   --clean
 ```
 
-Every run produces one timestamped archive under:
+Every run produces a timestamped evidence archive under:
 
 ```text
 build/stm32h755/campaign/
 ```
 
-The archive is also created when a test fails after campaign logging has started.
+The archive is also produced after a logged failure.
+
+## Fixture choreography
+
+The campaign deliberately groups tests by physical wiring state. Once a jumper is installed, the script does not ask for the same connection again unless a later test genuinely requires a different state.
+
+### Initial setup
+
+Before OpenOCD starts, the campaign asks for one initial hardware setup:
+
+```text
+NUCLEO-H755ZI-Q connected through ST-LINK USB
+
+jumper A, install now and leave connected:
+Arduino D1 / TX / PB6  <->  Arduino D0 / RX / PB7
+
+D3 / PE13: disconnected
+D4 / PE14: disconnected
+
+jumper B: keep ready for the later D4 <-> D3 transition
+B1 USER: released
+```
+
+D1/D0 remains connected for the entire run. UART therefore needs no later wiring prompt.
+
+The campaign first completes every acceptance point that requires D3 to be electrically free, including both-core pull-up/pull-down qualification.
+
+### Single D4/D3 transition
+
+The campaign then asks exactly once to install jumper B:
+
+```text
+CN10 D4 / PE14  <->  CN10 D3 / PE13
+```
+
+From that point onward both jumpers remain installed:
+
+```text
+D1 / PB6  <-> D0 / PB7     UART fixture
+D4 / PE14 <-> D3 / PE13    GPIO + PWM fixture
+```
+
+The D4/D3 connection is then reused without further reconnect prompts by:
+
+- CM4 GPIO loopback/open-drain/EXTI;
+- CM7 GPIO loopback/open-drain/EXTI;
+- CM7 timer/PWM qualification;
+- CM4 timer/PWM qualification.
+
+The campaign may reflash/re-arm a core when changing test images. That is software fixture choreography and is not counted as an additional acceptance point.
+
+Never connect the loopback signals to 3V3, 5V or GND.
 
 ## Build products
 
-The expanded campaign builds:
+The current campaign builds and archives:
 
 ```text
 CM7 hardware image
 CM7 monotonic-time image
 CM7 UART image
+CM7 timer/PWM image
 CM7 clock-profile image
 CM7 board-resource/button image
+
 CM4 hardware image
 CM4 monotonic-time image
 CM4 UART image
+CM4 timer/PWM image
+
 CM7 custom-link smoke image
 ```
 
-The normal CM7 and CM4 hardware images use their respective default linker scripts. The custom-link image uses `tests/link/stm32h755/custom_cm7.ld` and exists solely to prove the linker-script override propagated through `das::das`.
+The normal CM7/CM4 images use the selected DAS linker scripts. The custom-link image exists to prove that the linker override propagates through `das::das`.
 
-## Host-only acceptance points
+## Host-only checks
 
-The first three checks do not access ST-LINK or the physical board:
+The first three acceptance points do not touch ST-LINK or the physical board:
 
 ```text
 STM32H755 CM7 memory layout
@@ -67,7 +129,7 @@ STM32H755 CM4 memory layout
 Custom linker override
 ```
 
-They validate ELF/map placement, runtime symbols and heap/stack boundaries. These three checks are expected to pass even when the NUCLEO is disconnected. Hardware qualification starts with the OpenOCD probes.
+These are expected to pass even if the NUCLEO is disconnected. Physical qualification begins with the OpenOCD probes.
 
 Default layout expectations:
 
@@ -83,54 +145,41 @@ custom CM7      vector at 0x08020000
 
 ## Dual-core OpenOCD
 
-The physical phase uses `scripts/openocd_h755_dual_core.cfg` with ST-LINK direct DAP.
-
 ```text
 :3333 -> STM32H755 CPU1 / Cortex-M7
 :3334 -> STM32H755 CPU2 / Cortex-M4
-```
 
-Expected CPUID parts:
-
-```text
-CM7 -> 0xC27
-CM4 -> 0xC24
+CM7 CPUID part -> 0xC27
+CM4 CPUID part -> 0xC24
 ```
 
 ## Monotonic-time qualification
 
-A dedicated time image is run on each core.
+Each core verifies:
 
-Each test validates:
-
-- no-source delay returns `DAS_ERROR_NOT_READY`;
+- missing-source behavior;
 - external/application time-source injection;
-- elapsed time across `UINT32_MAX` wrap;
-- wrap-safe deadline creation/comparison;
-- rejection of intervals beyond the half-range limit;
-- default CMSIS SysTick initialization from the live executing-core clock;
+- wrap-safe elapsed/deadline handling;
+- rejection of intervals outside the safe half-range;
+- CMSIS SysTick initialization from the live executing-core clock;
 - a 100 ms delay measured against DWT cycles within 5%;
-- continued execution after the timing case.
+- continued execution.
 
-CM7 first selects the qualified 400 MHz board profile. CM4 independently uses its live core clock.
+CM7 first selects the qualified 400 MHz board profile. CM4 independently derives its own live core clock.
 
-## Clock-profile qualification
+## Clock qualification
 
-The dedicated CM7 clock image exercises the public `das_clock_*()` path. On the stock NUCLEO-H755ZI-Q it must:
+The CM7 clock image verifies the public board-frequency API and the managed STM32H755 clock/power path:
 
-- advertise 64, 200, 300 and 400 MHz;
-- successfully apply/read back every advertised profile;
-- reject 480 MHz;
-- configure the direct-SMPS board power path;
-- confirm power/VOS readiness;
-- finish at 400 MHz CM7, 200 MHz CM4/AHB and 100 MHz APB1..4;
-- continue executing after the transitions.
+- supported profiles: 64, 200, 300 and 400 MHz;
+- every advertised profile applies and reads back correctly;
+- 480 MHz is rejected on the current stock-board profile;
+- direct-SMPS/VOS readiness is valid;
+- final tree is 400 MHz CM7, 200 MHz CM4/AHB and 100 MHz APB1..4.
 
-## Board-resource and user-button qualification
+## Board-resource and B1 qualification
 
-Issue #15 adds a dedicated CM7 board-resource/button image.
-
-Before the physical button interaction, firmware validates the semantic resource map used by DAS:
+The semantic resource map includes:
 
 ```text
 B1 USER                  -> PC13
@@ -139,88 +188,64 @@ ST-LINK VCP              -> PD8 / PD9
 Arduino UART             -> PB6 / PB7
 Arduino I2C              -> PB8 / PB9
 Arduino SPI              -> PA5 / PA6 / PB5, CS PD14
+Arduino PWM D4            -> PE14
 ```
 
-The campaign then qualifies B1 through the public board-button API and generic DAS IRQ controller API.
-
-Sequence:
-
-1. leave the blue B1 USER button released while the button image is loaded;
-2. the initial state must read logically released;
-3. when prompted, press and hold B1 and press ENTER while holding it;
-4. firmware must report logically pressed and at least one press EXTI event;
-5. release B1 and press ENTER when prompted;
-6. firmware must report logically released and at least one release EXTI event.
-
-Mechanical bounce is intentionally tolerated. The qualification requires one or more press/release events, not an exact count.
-
-The current button case runs on CM7 because #15 is board-resource qualification. The lower-level GPIO/EXTI implementation and generic IRQ path are already independently physically qualified on both CM7 and CM4.
+The B1 case uses the public board-button and generic IRQ APIs and checks released, pressed, press EXTI, released again and release EXTI. Mechanical bounce is tolerated; at least one event is required rather than an exact edge count.
 
 ## UART qualification
 
-The UART fixture is:
+The persistent fixture is:
 
 ```text
-Arduino D1 / TX / PB6 ---- jumper ---- Arduino D0 / RX / PB7
+Arduino D1 / TX / PB6  <->  Arduino D0 / RX / PB7
 ```
 
-The standalone focused qualifier remains:
+Both cores verify:
 
-```bash
-./scripts/stm32h755_uart_test.sh /home/dev/STM32Cube/Repository/STM32CubeH7/
-```
+- finite receive timeout;
+- semantic board-resource and opaque-handle setup;
+- baud generation from the live clock tree;
+- 115200 8N1;
+- 57600 8E2;
+- 38400 7O1;
+- 34 deterministic bytes with exact application-byte equality.
 
-After the focused test passed on both cores, its CM7 and CM4 cases were promoted into the main campaign. Each core verifies:
+The 7O1 case protects the contract that `data_bits` excludes parity. STM32 parity storage must not leak into the byte returned by DAS.
 
-- a finite receive timeout when no byte is available;
-- semantic board-resource resolution and opaque UART handle setup;
-- baud generation from the live APB clock;
-- `115200 8N1` loopback;
-- `57600 8E2` loopback;
-- `38400 7O1` loopback;
-- 34 deterministic bytes with exact application-byte equality;
-- continued execution after all transfers.
+## GPIO qualification
 
-The 7O1 case specifically protects the generic contract that `data_bits` excludes parity. STM32 parity storage must not leak into the application byte returned by DAS.
-
-CM7 performs its UART case after selecting the qualified 400 MHz board profile. CM4 runs an independently linked image and exercises its own peripheral-clock enable view.
-
-## Core startup/GPIO qualification
-
-Both CM7 and CM4 independently run the existing hardware image.
-
-Bring-up checks include:
-
-- ELF programming and `compare-sections`;
-- firmware boot/heartbeat;
-- reusable Cortex-M startup;
-- `.data` restoration and `.bss` clearing after reset;
-- VTOR equal to the linked vector-table address;
-- no startup/fault evidence.
-
-The same five automated GPIO electrical tests then run on each core:
+Both cores verify:
 
 ```text
-pull-up
-pull-down
-D4 -> D3 loopback low/high
-open-drain
-EXTI rising/falling
+pull-up                 D3 electrically free
+pull-down               D3 electrically free
+loopback low/high       D4 -> D3 connected
+open-drain              D4 -> D3 connected
+EXTI rising/falling     D4 -> D3 connected
 ```
 
-Fixture:
+The EXTI case also validates the public `das_irq_*()` controller path: enable state, priority round-trip, software pending set/query/clear and real physical edge delivery.
 
-```text
-CN10 D4 / PE14 / pin 8 ---- jumper ---- CN10 D3 / PE13 / pin 10
-```
+## Timer/PWM qualification
 
-Pull tests require D3 to be disconnected. Loopback/open-drain/EXTI require the D4-to-D3 jumper. Do not connect either pin to 3V3, 5V or GND.
+Issue #10 keeps a focused qualifier but is also part of the main campaign after its first successful physical run.
 
-The EXTI case also qualifies the public `das_irq_*()` path: source-to-controller resolution, enable state, priority set/get, software pending set/query/clear, and real physical edge delivery.
+Each core runs a dedicated timer/PWM image using the already-installed D4/D3 fixture. The image verifies:
+
+- a 1 kHz periodic timer derived from the live DAS clock model;
+- start/stop and counter behavior;
+- TIM2 update interrupt delivery through generic `das_irq_t` control;
+- 100 update intervals measured with DWT cycles within 5%;
+- a 1 kHz PWM output on semantic Arduino D4;
+- physical D4-to-D3 observation at 25%, 50% and 75% duty;
+- PWM frequency/duty readback and continued execution.
+
+D3 is deliberately used as a GPIO observation input. Input-capture support is not introduced merely to make the test fixture more elaborate.
 
 ## Board LED checks
 
-The visual LED qualification remains on CM7:
+The visual CM7 checks remain:
 
 ```text
 all LEDs off
@@ -230,19 +255,11 @@ red only
 all three blinking
 ```
 
-Board mapping:
+CM4 already proves physical GPIO output through the electrical loopback path, so duplicating the five human LED checks on CPU2 adds ceremony rather than coverage.
 
-| LED | GPIO | Active state |
-| --- | --- | --- |
-| LD1 green | PB0 | high |
-| LD2 yellow | PE1 | high |
-| LD3 red | PB14 | high |
+## Expected 32-case summary
 
-CM4 already drives GPIO physically through the loopback tests, so duplicating five human visual LED confirmations on CPU2 would add ceremony rather than meaningful coverage.
-
-## Expected 30-case summary
-
-A complete UART-integrated campaign contains **30 acceptance points**:
+The timer-integrated campaign contains **32 acceptance points**:
 
 ```text
 STM32H755 CM7 memory layout       PASS   [host/static]
@@ -262,6 +279,16 @@ CM7 CMSIS/GPIO bring-up           PASS
 CM7 Cortex-M startup/reset        PASS
 CM7 GPIO pull-up                  PASS
 CM7 GPIO pull-down                PASS
+
+CM4 CMSIS/GPIO bring-up           PASS
+CM4 Cortex-M startup/reset        PASS
+CM4 GPIO pull-up                  PASS
+CM4 GPIO pull-down                PASS
+
+CM4 GPIO loopback low/high        PASS
+CM4 GPIO open-drain               PASS
+CM4 GPIO EXTI rising/falling      PASS
+
 CM7 GPIO loopback low/high        PASS
 CM7 GPIO open-drain               PASS
 CM7 GPIO EXTI rising/falling      PASS
@@ -271,66 +298,24 @@ CM7 LED yellow only               PASS
 CM7 LED red only                  PASS
 CM7 LED all blink                 PASS
 
-CM4 CMSIS/GPIO bring-up           PASS
-CM4 Cortex-M startup/reset        PASS
-CM4 GPIO pull-up                  PASS
-CM4 GPIO pull-down                PASS
-CM4 GPIO loopback low/high        PASS
-CM4 GPIO open-drain               PASS
-CM4 GPIO EXTI rising/falling      PASS
+CM7 timer/PWM                     PASS
+CM4 timer/PWM                     PASS
 ```
 
-The script exits nonzero when an acceptance point fails.
+The most recent fully qualified baseline before timer integration remains the 30/30 UART campaign. The 32-case state becomes the new baseline only after an archive from the exact integration head passes completely.
 
 ## Evidence bundle
 
-Typical archive contents include:
+The archive includes the summary, metadata, build logs, OpenOCD log, per-case GDB logs, ELF/map files, symbol/size dumps, linker scripts and the dedicated UART/timer/PWM images. Timer evidence is stored as:
 
 ```text
-summary.txt
-metadata.txt
-cm7_build.log
-cm4_build.log
-custom_link_build.log
-openocd-dual-core.log
-
-cm7_memory_layout.log
-cm4_memory_layout.log
-custom_memory_layout.log
-
-CM7_OpenOCD_probe.log
-CM4_OpenOCD_probe.log
-CM7_monotonic_timebase.log
-CM4_monotonic_timebase.log
-CM7_UART_loopback.log
-CM4_UART_loopback.log
-CM7_clock_HSI_PLL_400.log
-CM7_button_setup.log
-CM7_button_pressed.log
-CM7_button_released.log
-CM7_GPIO_*.log
-CM4_GPIO_*.log
-CM7_LED_*.log
-
-das_stm32h755_cm7_hw_test.elf/.map
-das_stm32h755_cm7_time_test.elf/.map
-das_stm32h755_cm7_uart_test.elf/.map
-das_stm32h755_cm7_clock_test.elf/.map
-das_stm32h755_cm7_button_test.elf/.map
-das_stm32h755_cm4_hw_test.elf/.map
-das_stm32h755_cm4_time_test.elf/.map
-das_stm32h755_cm4_uart_test.elf/.map
-das_stm32h755_custom_link_test.elf/.map
-
-symbol and size dumps for each generated image
-linker scripts used by the run
+CM7_timer_PWM.log
+CM4_timer_PWM.log
+das_stm32h755_cm7_timer_test.elf/.map
+das_stm32h755_cm4_timer_test.elf/.map
 ```
 
-## Reusing an existing build
-
-`--no-build` reuses all expected images, including the UART and button images. Missing ELF/map files are treated as errors rather than silently reducing coverage.
-
-`--clean` and `--no-build` are mutually exclusive.
+`--no-build` requires every expected image, including UART and timer/PWM images. Missing artifacts are errors rather than silently reducing coverage.
 
 ## Recovery
 
@@ -344,6 +329,6 @@ The normal campaign never performs an implicit mass erase.
 
 ## Qualification boundary
 
-After a successful 30-case campaign DAS can claim the polling/blocking UART baseline is physically regression-qualified on CM7 and CM4 in addition to the linker, clock, time, board-resource, GPIO and IRQ foundations.
+After a successful 32-case run DAS can claim physically regression-qualified linker, startup, clock/power, monotonic time, semantic board resources, GPIO/IRQ, polling UART and the #10 periodic-timer/PWM baseline on both cores.
 
-It still cannot claim interrupt-driven UART, DMA transfer, production CM7-to-CM4 lifecycle/HSEM/shared-memory coordination, or unimplemented I2C/SPI data transfers. Those remain separate features.
+That still does not imply DMA, input capture, production dual-core lifecycle/HSEM/shared-memory coordination, or unimplemented SPI/I2C transfers. Those remain separate work.

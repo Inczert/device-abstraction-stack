@@ -13,7 +13,7 @@
 #define DAS_STM32H755_DMA_STREAM_COUNT 8u
 #define DAS_STM32H755_DMA_MAX_COUNT UINT32_C(0xffff)
 #define DAS_STM32H755_DMA_ALL_FLAGS UINT32_C(0x3d)
-#define DAS_STM32H755_DMA_ERROR_FLAGS UINT32_C(0x0d)
+#define DAS_STM32H755_DMA_TERMINAL_ERROR_FLAGS UINT32_C(0x08)
 #define DAS_STM32H755_DMA_COMPLETE_FLAG UINT32_C(0x20)
 #define DAS_STM32H755_DMA_DISABLE_SPINS UINT32_C(100000)
 
@@ -296,7 +296,9 @@ das_result_t das_dma_get_state(das_dma_t dma, das_dma_state_t* state) {
     }
 
     const uint32_t flags = stream_flags(index);
-    if ((flags & DAS_STM32H755_DMA_ERROR_FLAGS) != 0u) {
+    /* TEIF is terminal. FEIF/DMEIF can represent recoverable back-pressure
+       and do not stop the stream; completion remains authoritative. */
+    if ((flags & DAS_STM32H755_DMA_TERMINAL_ERROR_FLAGS) != 0u) {
         *state = DAS_DMA_STATE_ERROR;
     } else if ((flags & DAS_STM32H755_DMA_COMPLETE_FLAG) != 0u) {
         *state = DAS_DMA_STATE_COMPLETE;

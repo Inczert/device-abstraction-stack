@@ -43,6 +43,8 @@ Examples:
 7O1 -> 7 data bits, odd parity, 1 stop bit
 ```
 
+A parity bit is never application data. The STM32H755 backend therefore derives the application-data mask from the live M0/M1/PCE configuration and masks the transmit/receive registers accordingly. For a 7-bit configuration, only bits 0..6 are exposed through the byte API even though the hardware receive register can contain the parity position as bit 7.
+
 Nine application data bits are not exposed by this byte-oriented API. Supporting that cleanly requires a 16-bit data path rather than quietly truncating bit 8.
 
 ## Clocking and baud rate
@@ -101,3 +103,5 @@ The test runs on CM7 and CM4 independently and checks:
 - continued execution after all transfers.
 
 CM7 first selects the qualified 400 MHz board profile, so its USART1 input clock is derived from the resulting APB2 clock. The CM4 image runs after reset and independently exercises the CPU2 peripheral-clock enable path.
+
+The first physical run of the baseline reached the first 7O1 byte after all 8N1 and 8E2 bytes passed, but received `0x80` for transmitted application data `0x00`. That exposed the STM32 parity position through the generic byte API. The backend fix masks the hardware register to the configured application data width; the focused test must pass again before UART is integrated into the full campaign.

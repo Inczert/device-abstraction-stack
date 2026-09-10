@@ -13,7 +13,7 @@
 #define DAS_STM32H755_DMA_STREAM_COUNT 8u
 #define DAS_STM32H755_DMA_MAX_COUNT UINT32_C(0xffff)
 #define DAS_STM32H755_DMA_ALL_FLAGS UINT32_C(0x3d)
-#define DAS_STM32H755_DMA_ERROR_FLAGS UINT32_C(0x0d)
+#define DAS_STM32H755_DMA_TERMINAL_ERROR_FLAGS UINT32_C(0x08)
 #define DAS_STM32H755_DMA_COMPLETE_FLAG UINT32_C(0x20)
 #define DAS_STM32H755_DMA_DISABLE_SPINS UINT32_C(100000)
 
@@ -304,7 +304,9 @@ das_result_t das_dma_get_state(das_dma_t dma, das_dma_state_t* state) {
     }
 
     const uint32_t flags = stream_flags(index);
-    if ((flags & DAS_STM32H755_DMA_ERROR_FLAGS) != 0u) {
+    /* In polling mode only TEIF terminates the transfer. FEIF and DMEIF are
+       diagnostic conditions; STM32H7 may still complete the active stream. */
+    if ((flags & DAS_STM32H755_DMA_TERMINAL_ERROR_FLAGS) != 0u) {
         g_dma_active[index] = false;
         *state = DAS_DMA_STATE_ERROR;
     } else if ((flags & DAS_STM32H755_DMA_COMPLETE_FLAG) != 0u) {
@@ -312,7 +314,7 @@ das_result_t das_dma_get_state(das_dma_t dma, das_dma_state_t* state) {
         *state = DAS_DMA_STATE_COMPLETE;
     } else if (g_dma_active[index]) {
         /* EN can clear before TCIF becomes observable. Keep a started stream busy
-           until hardware reports completion or an error flag. */
+           until hardware reports completion or a terminal error flag. */
         *state = DAS_DMA_STATE_BUSY;
     } else {
         *state = DAS_DMA_STATE_IDLE;

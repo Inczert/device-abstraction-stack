@@ -1,0 +1,155 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-contract:
+    name: Host contract
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile public headers without vendor includes
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -Iinclude -fsyntax-only tests/compile/public_headers.c
+      - name: Run common time tests
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -Iinclude src/common/time.c tests/host/time_test.c \
+            -o /tmp/das-time-test
+          /tmp/das-time-test
+
+  stm32-cross-build:
+    name: STM32H755 ${{ matrix.core }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        core: [cm7, cm4]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout STM32CubeH7 CMSIS source
+        uses: actions/checkout@v4
+        with:
+          repository: STMicroelectronics/STM32CubeH7
+          path: .ci/STM32CubeH7
+          fetch-depth: 1
+          submodules: recursive
+      - name: Install ARM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi ninja-build
+      - name: Cross-build DAS and hardware-test ELFs
+        run: |
+          ./scripts/build_stm32h755.sh \
+            --stm32h7-root "$GITHUB_WORKSPACE/.ci/STM32CubeH7" \
+            --build-dir "$GITHUB_WORKSPACE/build/ci-${{ matrix.core }}" \
+            --core "${{ matrix.core }}" \
+            --clean
+      - name: Install generated static package
+        run: |
+          cmake --install "$GITHUB_WORKSPACE/build/ci-${{ matrix.core }}" \
+            --prefix "$GITHUB_WORKSPACE/build/install-${{ matrix.core }}"
+      - name: Build every standalone DAS example from installed package
+        run: |
+          ./scripts/ci/build_installed_examples.sh \
+            "$GITHUB_WORKSPACE/build/install-${{ matrix.core }}" \
+            "${{ matrix.core }}" \
+            "$GITHUB_WORKSPACE/build/examples-${{ matrix.core }}"
+      - name: Validate custom vector-table ownership
+        run: |
+          for disable in ON OFF; do
+            build="$GITHUB_WORKSPACE/build/custom-vector-${{ matrix.core }}-${disable}"
+            cmake -S tests/consumer/custom_vector -B "$build" -G Ninja \
+              -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/cmake/toolchains/arm-none-eabi.cmake" \
+              -DCMAKE_BUILD_TYPE=Debug \
+              -DDAS_CORE="${{ matrix.core }}" \
+              -DDAS_CUSTOM_VECTOR_DISABLE_DEFAULT="$disable" \
+              -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/build/install-${{ matrix.core }}"
+            cmake --build "$build" --parallel
+            elf="$build/das_custom_vector_consumer.elf"
+            test -s "$elf"
+            test "$(arm-none-eabi-objdump -h "$elf" | awk '$2 == ".isr_vector" { print $3 }')" = "00000040"
+            arm-none-eabi-nm "$elf" | grep -Eq '[[:space:]][A-Za-z][[:space:]]g_das_vector_table$'
+          done
+      - name: Validate custom linker fixture
+        if: matrix.core == 'cm7'
+        run: |
+          cmake -S . -B build/ci-custom-link -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/cmake/toolchains/arm-none-eabi.cmake" \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DDAS_DEVICE=nucleo_h755zi_q \
+            -DDAS_CORE=cm7 \
+            -DDAS_USE_DEFAULT_VECTOR_TABLE=OFF \
+            -DDAS_LINKER_SCRIPT="$GITHUB_WORKSPACE/tests/link/stm32h755/custom_cm7.ld" \
+            -DSTM32_CUBE_H7_DIR="$GITHUB_WORKSPACE/.ci/STM32CubeH7" \
+            -DDAS_BUILD_LINK_TESTS=ON
+          cmake --build build/ci-custom-link --target das_stm32h755_link_test --parallel
+
+  hardrt-integration:
+    name: HardRT + DAS CM7 consumer
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout STM32CubeH7 CMSIS source
+        uses: actions/checkout@v4
+        with:
+          repository: STMicroelectronics/STM32CubeH7
+          path: .ci/STM32CubeH7
+          fetch-depth: 1
+          submodules: recursive
+      - name: Checkout HardRT
+        uses: actions/checkout@v4
+        with:
+          repository: ExoSpaceLabs/hardrt
+          ref: main
+          path: .ci/hardrt
+          fetch-depth: 1
+      - name: Install ARM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi ninja-build
+      - name: Build and install DAS CM7 package
+        run: |
+          cmake -S . -B build/ci-hardrt-das -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/cmake/toolchains/arm-none-eabi.cmake" \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DDAS_DEVICE=nucleo_h755zi_q \
+            -DDAS_CORE=cm7 \
+            -DSTM32_CUBE_H7_DIR="$GITHUB_WORKSPACE/.ci/STM32CubeH7"
+          cmake --build build/ci-hardrt-das --parallel
+          cmake --install build/ci-hardrt-das --prefix build/install-das
+      - name: Build and install HardRT Cortex-M package
+        run: |
+          cmake -S .ci/hardrt -B build/ci-hardrt -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/cmake/toolchains/arm-none-eabi.cmake" \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DDAS_CORE=cm7 \
+            -DHARDRT_PORT=cortex_m \
+            -DHARDRT_BUILD_EXAMPLES=OFF \
+            -DHARDRT_BUILD_TESTS=OFF \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/build/install-hardrt"
+          cmake --build build/ci-hardrt --parallel
+          cmake --install build/ci-hardrt
+      - name: Build HardRT + DAS installed-package example
+        run: |
+          cmake -S examples/hardrt_uart -B build/ci-hardrt-example -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/cmake/toolchains/arm-none-eabi.cmake" \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DDAS_CORE=cm7 \
+            -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/build/install-hardrt;$GITHUB_WORKSPACE/build/install-das"
+          cmake --build build/ci-hardrt-example --parallel
+          elf="$GITHUB_WORKSPACE/build/ci-hardrt-example/das_hardrt_uart.elf"
+          test -s "$elf"
+          arm-none-eabi-nm "$elf" | grep -Eq '[[:space:]]T[[:space:]]PendSV_Handler$'
+          arm-none-eabi-nm "$elf" | grep -Eq '[[:space:]]T[[:space:]]SysTick_Handler$'
+          arm-none-eabi-nm "$elf" | grep -q '__RAM_START__'
+          arm-none-eabi-nm "$elf" | grep -q '__RAM_END__'
+          arm-none-eabi-objdump -h "$elf" | grep -q '\.isr_vector'

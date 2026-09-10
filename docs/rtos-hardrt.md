@@ -1,6 +1,8 @@
 # HardRT integration
 
-DAS and HardRT can be used together on STM32H755 without giving both libraries ownership of the same Cortex-M facilities. The reference model is:
+DAS and HardRT can be used together on STM32H755 without giving both libraries ownership of the same Cortex-M facilities. The current DAS reference integration targets **HardRT 0.5.1 or a compatible newer 0.5.x release**. HardRT 0.5.1 is the validated baseline used for the current Cortex-M scheduler/ISR, diagnostics, IPC, event/notification, and CMake package integration.
+
+The reference model is:
 
 ```text
 DAS                         HardRT
@@ -105,7 +107,7 @@ Both libraries are consumed as installed packages:
 ```cmake
 set(DAS_USE_DEFAULT_VECTOR_TABLE ON)
 find_package(DAS CONFIG REQUIRED)
-find_package(HardRT CONFIG REQUIRED)
+find_package(HardRT 0.5.1 CONFIG REQUIRED)
 
 target_link_libraries(app PRIVATE HardRT::hardrt das::das)
 target_link_options(app PRIVATE

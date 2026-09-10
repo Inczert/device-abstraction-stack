@@ -191,6 +191,27 @@ static uint32_t frame_length_bits(const das_uart_config_t* config) {
            (config->parity == DAS_UART_PARITY_NONE ? 0u : 1u);
 }
 
+static uint32_t application_data_mask(const USART_TypeDef* registers) {
+    uint32_t frame_bits;
+    const uint32_t cr1 = registers->CR1;
+
+    if ((cr1 & USART_CR1_M1) != 0u) {
+        frame_bits = 7u;
+    } else if ((cr1 & USART_CR1_M0) != 0u) {
+        frame_bits = 9u;
+    } else {
+        frame_bits = 8u;
+    }
+
+    if ((cr1 & USART_CR1_PCE) != 0u) {
+        --frame_bits;
+    }
+
+    return frame_bits >= 8u
+        ? UINT32_C(0xff)
+        : (UINT32_C(1) << frame_bits) - UINT32_C(1);
+}
+
 das_uart_t stm32h755_uart_handle(stm32h755_uart_instance_t instance) {
     switch (instance) {
         case STM32H755_UART_USART1:
@@ -314,6 +335,7 @@ das_result_t das_uart_write_timeout(das_uart_t uart,
         return result;
     }
 
+    const uint32_t data_mask = application_data_mask(route.registers);
     for (size_t index = 0u; index < size; ++index) {
         result = wait_for_flag(route.registers,
                                USART_ISR_TXE_TXFNF,
@@ -322,7 +344,7 @@ das_result_t das_uart_write_timeout(das_uart_t uart,
         if (result != DAS_OK) {
             return result;
         }
-        route.registers->TDR = data[index];
+        route.registers->TDR = (uint32_t)data[index] & data_mask;
     }
 
     return wait_for_flag(route.registers, USART_ISR_TC, false, &wait);
@@ -349,6 +371,7 @@ das_result_t das_uart_read_timeout(das_uart_t uart,
         return result;
     }
 
+    const uint32_t data_mask = application_data_mask(route.registers);
     for (size_t index = 0u; index < size; ++index) {
         result = wait_for_flag(route.registers,
                                USART_ISR_RXNE_RXFNE,
@@ -357,7 +380,7 @@ das_result_t das_uart_read_timeout(das_uart_t uart,
         if (result != DAS_OK) {
             return result;
         }
-        data[index] = (uint8_t)(route.registers->RDR & UINT32_C(0xff));
+        data[index] = (uint8_t)(route.registers->RDR & data_mask);
     }
     return DAS_OK;
 }

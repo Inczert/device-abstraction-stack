@@ -129,4 +129,4 @@ Each core runs a dedicated image. The qualifier checks:
 
 The focused CM7/CM4 run passed 2/2 on commit `6cf59835d52c3a2d1d74ac6aa9d8f0cc44bb95ae`. CM7 passed at the qualified 400 MHz profile with D-cache enabled; CM4 passed at 64 MHz with the expected no-cache behavior. Both reported 256 memory-DMA bytes, 192 SPI-DMA bytes at 4 MHz and full acceptance flags `0x3f`.
 
-Those same two cases are now integrated into `scripts/stm32h755_test_campaign.sh` as standing regression coverage. They reuse the persistent SPI fixture and add no new hardware setup transition. The full campaign therefore advances from 36 to 38 acceptance points; the 38-case baseline is considered complete only after the integrated campaign itself passes end-to-end.
+Those same two cases are integrated into `scripts/stm32h755_test_campaign.sh` as standing regression coverage. They reuse the persistent SPI fixture and add no new hardware setup transition. The integrated campaign passed **38/38** on 2026-09-10 at commit `c4bbc578d32c7b81f2ec5aaf38d637d128ca1942`, establishing DMA/cache as part of the completed STM32H755 hardware regression baseline.

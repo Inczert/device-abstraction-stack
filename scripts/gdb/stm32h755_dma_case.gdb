@@ -3,13 +3,6 @@ set pagination off
 set print pretty off
 set mem inaccessible-by-default off
 
-if !defined($das_expected_cache)
-  set $das_expected_cache=0
-end
-if !defined($das_expected_core_hz)
-  set $das_expected_core_hz=64000000
-end
-
 monitor arm semihosting disable
 monitor reset halt
 

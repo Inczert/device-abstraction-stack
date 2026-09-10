@@ -7,7 +7,7 @@
 extern uint32_t __StackTop;
 
 __attribute__((section(".isr_vector"), used, aligned(1024)))
-const uintptr_t g_das_link_test_vectors[16] = {
+const uintptr_t g_das_vector_table[16] = {
     [0] = (uintptr_t)&__StackTop,
     [1] = (uintptr_t)&Reset_Handler,
     [2] = (uintptr_t)&NMI_Handler,

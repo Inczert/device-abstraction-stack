@@ -52,11 +52,15 @@ STM32_CUBE_H7_DIR="$(cd "$STM32_CUBE_H7_DIR" 2>/dev/null && pwd)" || {
 
 (( CLEAN == 0 )) || rm -rf -- "$BUILD_DIR"
 
+# Hardware-test ELFs deliberately own explicit test vector tables so they can
+# bind test-only ISRs. Disable the normal application default table in this
+# build configuration to keep exactly one .isr_vector contribution per ELF.
 cmake -S "$ROOT_DIR" -B "$BUILD_DIR" \
   -DCMAKE_TOOLCHAIN_FILE="$ROOT_DIR/cmake/toolchains/arm-none-eabi.cmake" \
   -DCMAKE_BUILD_TYPE=Debug \
   -DDAS_DEVICE=nucleo_h755zi_q \
   -DDAS_CORE="$CORE" \
+  -DDAS_USE_DEFAULT_VECTOR_TABLE=OFF \
   -DSTM32_CUBE_H7_DIR="$STM32_CUBE_H7_DIR" \
   -DDAS_BUILD_HARDWARE_TESTS=ON
 cmake --build "$BUILD_DIR" --target das_stm32h755_hw_test --parallel

@@ -6,6 +6,8 @@
 
 #include <stdint.h>
 
+extern uint32_t __StackTop;
+
 #define DAS_CORTEX_M_CORE_VECTOR_COUNT UINT32_C(16)
 #define DAS_STM32H755_EXTERNAL_VECTOR_COUNT ((uint32_t)WAKEUP_PIN_IRQn + UINT32_C(1))
 #define DAS_STM32H755_VECTOR_COUNT \

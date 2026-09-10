@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#include <das/board_resources.h>
-#include <das/clock.h>
-#include <das/uart.h>
+#include <das/das.h>
 
-#include <stddef.h>
 #include <stdint.h>
 
 volatile uint32_t g_das_example_core_hz;

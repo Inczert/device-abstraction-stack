@@ -43,7 +43,7 @@ Examples:
 7O1 -> 7 data bits, odd parity, 1 stop bit
 ```
 
-A parity bit is never application data. The STM32H755 backend therefore derives the application-data mask from the live M0/M1/PCE configuration and masks the transmit/receive registers accordingly. For a 7-bit configuration, only bits 0..6 are exposed through the byte API even though the hardware receive register can contain the parity position as bit 7.
+A parity bit is never application data. The STM32H755 backend derives the application-data mask from the live M0/M1/PCE configuration and masks transmit/receive register values accordingly. For a 7-bit configuration, only bits 0..6 are exposed through the byte API even if the hardware receive register contains the parity position in bit 7.
 
 Nine application data bits are not exposed by this byte-oriented API. Supporting that cleanly requires a 16-bit data path rather than quietly truncating bit 8.
 

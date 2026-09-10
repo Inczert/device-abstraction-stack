@@ -26,7 +26,7 @@ das_dma_release(dma);
 
 `count` is a number of configured transfer elements, not a byte count. The first STM32H755 baseline uses direct mode, supports byte/halfword/word elements with equal source and destination widths, and bounds one hardware transfer to 65535 elements.
 
-`das_dma_get_state()` distinguishes idle, busy, complete and hardware-error states. `das_dma_get_remaining()` exposes the remaining element count. Transfer/FIFO/direct-mode hardware errors map to `DAS_DMA_STATE_ERROR` and `DAS_ERROR_IO`. A finite wait uses the generic DAS monotonic time source; it aborts the stream and returns `DAS_ERROR_TIMEOUT` when the deadline expires.
+`das_dma_get_state()` distinguishes idle, busy, complete and terminal hardware-error states. `das_dma_get_remaining()` exposes the remaining element count. On STM32H755, a transfer error (`TEIF`) maps to `DAS_DMA_STATE_ERROR` and `DAS_ERROR_IO`. FIFO/direct-mode back-pressure flags (`FEIF`/`DMEIF`) do not by themselves terminate the stream, so completion remains authoritative unless a terminal DMA or peripheral error occurs. A finite wait uses the generic DAS monotonic time source; it aborts the stream and returns `DAS_ERROR_TIMEOUT` when the deadline expires.
 
 `das_dma_get_irq()` resolves the stream's generic `das_irq_t` without exposing STM32 IRQ types. Interrupt-driven transfer ownership/callback policy can build on this primitive later; the first baseline qualifies completion through polling so no backend ISR contract is invented prematurely.
 

@@ -20,6 +20,10 @@ The current STM32 path uses **CMSIS definitions directly**, without STM32 HAL/LL
 | Clock | 64/200/300/400 MHz board profiles with STM32H755 RCC/PWR/FLASH backend, hardware-qualified |
 | Time | generic monotonic millisecond API; CMSIS SysTick backend plus external/RTOS source injection |
 | GPIO | input/output, pulls, push-pull/open-drain, AF configuration, EXTI |
+| UART | polling/timeout UART physically qualified on CM7 and CM4 |
+| Timer/PWM | periodic timer IRQ and PWM physically qualified on CM7 and CM4 |
+| SPI | controller path physically qualified on CM7 and CM4 across modes 0..3 |
+| I2C | controller path focused-qualified on CM7 and CM4 at 100/400 kHz; full campaign integration pending |
 | Board API | LEDs, B1 user button, ST-LINK VCP, Arduino/Zio UART/I2C/SPI and D3/D4 fixture mappings |
 | Debug/test | dual-core OpenOCD + GDB + packaged evidence campaign |
 
@@ -82,7 +86,7 @@ src/mcu/cortex_m/
 
 src/device/stm32h755/
     STM32H755 silicon/peripherals
-    GPIO/EXTI and RCC/PWR/FLASH clock engine now, UART/DMA/etc. later
+    GPIO/EXTI, RCC/PWR/FLASH, UART, timer/PWM, SPI and I2C
 
 src/board/nucleo_h755zi_q/
     physical NUCLEO resources and board policy
@@ -178,156 +182,3 @@ The NUCLEO-H755ZI-Q backend currently advertises:
 The board layer owns physical supply/source policy. The STM32H755 device layer owns RCC, PWR, FLASH, PLL and bus-divider programming. On the stock board 480 MHz is deliberately not advertised for the qualified direct-SMPS/VOS1 profile.
 
 See [Clock control](docs/clocks.md).
-
-## Monotonic time
-
-The public time API is independent of SysTick and STM32 types:
-
-```c
-#include <das/time.h>
-
-(void)das_time_init();
-das_time_ms_t start = das_time_now_ms();
-
-if (das_time_interval_elapsed(start, 1000u)) {
-    /* one second elapsed */
-}
-```
-
-The default Cortex-M backend uses CMSIS `SysTick_Config()` with the live executing-core frequency. An RTOS/application that owns SysTick can install its own millisecond source with `das_time_set_source()`.
-
-See [Monotonic time](docs/time.md).
-
-## Interrupt model
-
-Applications use DAS interrupt handles rather than CMSIS/vendor interrupt numbers:
-
-```c
-das_irq_t irq = DAS_IRQ_INVALID;
-
-(void)das_gpio_interrupt_get_irq(pin, &irq);
-(void)das_irq_set_priority(irq, 3u);
-(void)das_irq_clear_pending(irq);
-(void)das_irq_enable(irq);
-```
-
-On Cortex-M the backend delegates controller access to CMSIS `NVIC_*` helpers. Peripheral/source state remains separate from controller state.
-
-See [Interrupt model](docs/interrupts.md).
-
-## Board resources
-
-Applications can refer to physical board functions semantically instead of scattering STM32 pins through application code:
-
-```c
-(void)das_board_button_init(DAS_BOARD_BUTTON_USER);
-if (das_board_button_is_pressed(DAS_BOARD_BUTTON_USER)) {
-    /* B1 pressed */
-}
-```
-
-Named connector resources include:
-
-```text
-DAS_BOARD_UART_STLINK_VCP
-DAS_BOARD_UART_ARDUINO
-DAS_BOARD_I2C_ARDUINO
-DAS_BOARD_SPI_ARDUINO
-DAS_BOARD_GPIO_ARDUINO_D3
-DAS_BOARD_GPIO_ARDUINO_D4
-```
-
-The resource layer maps board wiring only. UART/I2C/SPI peripheral behavior remains the responsibility of their generic DAS drivers as those are implemented.
-
-See [NUCLEO board resources](docs/board.md).
-
-## Default linker layouts
-
-DAS provides:
-
-```text
-cmake/targets/stm32h755_cm7.ld
-cmake/targets/stm32h755_cm4.ld
-```
-
-The dual-core-safe defaults are:
-
-```text
-CM7
-  flash bank 1 : 0x08000000..0x080FFFFF
-  AXI SRAM     : 0x24000000..0x2407FFFF
-
-CM4
-  flash bank 2 : 0x08100000..0x081FFFFF
-  D2 SRAM1     : 0x30000000..0x3001FFFF
-```
-
-Override the selected default with:
-
-```bash
--DDAS_LINKER_SCRIPT=/path/to/custom.ld
-```
-
-The qualification campaign includes a custom-linker override build that relocates a CM7 test image to `0x08020000`, proving that the override is propagated through `das::das`.
-
-See [STM32H755 memory and linker policy](docs/memory-layout.md).
-
-## Reusable Cortex-M startup
-
-The Cortex-M layer provides a weak reset/runtime path that restores `.data`, clears `.bss`, sets VTOR, executes the required barriers, and calls `main()`.
-
-Applications with a bootloader, RTOS or custom startup can replace the weak symbols. Device-specific external IRQ vectors remain part of the final target image.
-
-## Public APIs
-
-Current public headers:
-
-```text
-include/das/result.h
-include/das/clock.h
-include/das/time.h
-include/das/irq.h
-include/das/gpio.h
-include/das/board.h
-include/das/board_resources.h
-include/das/cortex_m/startup.h
-```
-
-See [API reference](docs/api.md).
-
-## Hardware qualification
-
-Run the full STM32H755 campaign:
-
-```bash
-./scripts/stm32h755_test_campaign.sh \
-    /home/dev/STM32Cube/Repository/STM32CubeH7/ \
-    --clean
-```
-
-The latest completed baseline is **27/27 PASS** on commit `883b37608f2e7f7bd2ac723b91b1cdfde898261e`, covering both cores' startup/GPIO/EXTI/time paths, the board clock profiles, and the linker checks.
-
-Issue #15 expands the campaign to **28 acceptance points** by adding one physical CM7 B1 user-button input/EXTI case. The same timestamped archive now also carries the board-resource/button ELF, map, symbols and GDB evidence.
-
-The first three acceptance points are host-only linker/layout checks. Hardware qualification starts with the OpenOCD probes.
-
-Important boundary: CM4 execution is currently debugger-driven. Production CM7-to-CM4 boot/release sequencing, HSEM and shared-memory coordination remain separate dual-core system work.
-
-See [Hardware qualification](docs/testing.md).
-
-## Documentation
-
-- [Architecture](docs/architecture.md)
-- [Building and integration](docs/integration.md)
-- [Clock control](docs/clocks.md)
-- [Monotonic time](docs/time.md)
-- [Interrupt model](docs/interrupts.md)
-- [NUCLEO board resources](docs/board.md)
-- [STM32H755 memory/linker policy](docs/memory-layout.md)
-- [Public API reference](docs/api.md)
-- [Porting DAS](docs/porting.md)
-- [Hardware qualification](docs/testing.md)
-
-## License
-
-Apache License 2.0. See [LICENSE](LICENSE).

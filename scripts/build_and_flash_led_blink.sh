@@ -108,6 +108,7 @@ openocd -s "$OPENOCD_SCRIPTS" \
   -c "reset halt" \
   -c "targets stm32h7x.cpu0" \
   -c "program $ELF verify" \
+  -c "reset halt" \
   -c "targets stm32h7x.cpu1" \
   -c "halt" \
   -c "targets stm32h7x.cpu0" \

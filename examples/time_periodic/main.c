@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#include <das/board.h>
-#include <das/clock.h>
-#include <das/time.h>
+#include <das/das.h>
 
 int main(void) {
     if (das_clock_set_frequency(200000000u) != DAS_OK) {

@@ -14,7 +14,7 @@ The current STM32 path uses **CMSIS definitions directly**. It does not require 
 | Device | STM32H755 |
 | Board | NUCLEO-H755ZI-Q |
 | Cores | CM7 and CM4 builds; both physically qualified under debugger control |
-| Startup | reusable weak Cortex-M reset/runtime and core exception handlers |
+| Startup | reusable weak Cortex-M reset/runtime handlers plus default STM32H755 vector table |
 | Linker | default CM7/CM4 layouts plus custom-linker override |
 | Interrupts | opaque DAS IRQ handles; CMSIS NVIC backend; GPIO/timer/DMA IRQ resolution |
 | Clock/power | 64/200/300/400 MHz stock-board profiles; RCC/PWR/FLASH sequencing |
@@ -112,19 +112,28 @@ Source-tree `add_subdirectory()` and `FetchContent` integration remain supported
 
 ## Startup and vector-table ownership
 
-DAS supplies weak reusable Cortex-M reset/runtime handlers and the default linker-symbol contract. The **final firmware image still owns its vector table**. A bare-metal application using the DAS startup path must provide an `.isr_vector` containing at least the initial stack pointer and `Reset_Handler`, plus any core/device handlers it uses such as `SysTick_Handler`.
+DAS supplies weak reusable Cortex-M reset/runtime handlers, the linker-symbol contract and a default STM32H755 vector table. The device table uses the CMSIS STM32H755 IRQ numbering internally, provides the core exception/SysTick entries required for a simple bare-metal application, and routes unused external IRQ slots to `Default_Handler`.
 
-The default linker scripts place that application-owned table at the correct core image base and provide `__StackTop` plus the `.data`/`.bss` symbols consumed by DAS startup.
+Normal applications therefore do **not** need to write an `.isr_vector` merely to boot. `DAS_USE_DEFAULT_VECTOR_TABLE` is `ON` by default for source-tree and installed-package consumers.
+
+Firmware that owns its vector/ISR policy can set:
+
+```cmake
+set(DAS_USE_DEFAULT_VECTOR_TABLE OFF)
+find_package(DAS CONFIG REQUIRED)
+```
+
+or provide a strong `g_das_vector_table` definition, which overrides the weak DAS default. The default linker scripts still place `.isr_vector` at the correct core image base and provide `__StackTop` plus the `.data`/`.bss` symbols consumed by DAS startup.
 
 ## External-consumer LED example
 
-`examples/led_blink` is deliberately a separate CMake project. It does not add the DAS source tree. The helper builds and installs `libdas.a`, resolves it with `find_package(DAS)`, links the application, flashes CM7 with OpenOCD, resets into the new vector table, and asks for physical confirmation of the green LED blink:
+`examples/led_blink` is deliberately a separate CMake project. It does not add the DAS source tree and contains no application vector table or local startup/halt boilerplate. The helper builds and installs `libdas.a`, resolves it with `find_package(DAS)`, links the application, flashes CM7 with OpenOCD, resets into the new image, and asks for physical confirmation of the green LED blink:
 
 ```bash
 ./scripts/build_and_flash_led_blink.sh /path/to/STM32CubeH7
 ```
 
-This installed-package path has been physically validated on the NUCLEO-H755ZI-Q.
+This installed-package path has been physically validated on the NUCLEO-H755ZI-Q before the default-vector refactor; rerun it after pulling `develop` to qualify the new library-owned vector path.
 
 ## Hardware qualification
 

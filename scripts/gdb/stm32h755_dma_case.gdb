@@ -9,6 +9,26 @@ monitor reset halt
 printf "Flashing STM32H755 DMA/cache qualification image...\n"
 load
 compare-sections
+
+# Stop at the first SPI-DMA cleanup before the backend clears the registers.
+# This snapshot is diagnostic only; normal execution resumes immediately after it.
+break dma_pair_cleanup
+continue
+
+set $rx_index=(unsigned int)rx_dma.storage
+set $tx_index=(unsigned int)tx_dma.storage
+set $rx_stream=0x40020010 + ($rx_index * 0x18)
+set $tx_stream=0x40020010 + ($tx_index * 0x18)
+set $rx_mux=0x40020800 + ($rx_index * 4)
+set $tx_mux=0x40020800 + ($tx_index * 4)
+
+printf "DMA_CLEANUP_SNAPSHOT rx_stream=%u tx_stream=%u\n", $rx_index, $tx_index
+printf "SPI1 SR=0x%08x CR1=0x%08x CR2=0x%08x CFG1=0x%08x CFG2=0x%08x\n", (unsigned int)registers->SR, (unsigned int)registers->CR1, (unsigned int)registers->CR2, (unsigned int)registers->CFG1, (unsigned int)registers->CFG2
+printf "DMA1 LISR=0x%08x HISR=0x%08x\n", *(unsigned int*)0x40020000, *(unsigned int*)0x40020004
+printf "RX CR=0x%08x NDTR=%u PAR=0x%08x M0AR=0x%08x FCR=0x%08x DMAMUX=0x%08x\n", *(unsigned int*)$rx_stream, *(unsigned int*)($rx_stream + 4), *(unsigned int*)($rx_stream + 8), *(unsigned int*)($rx_stream + 12), *(unsigned int*)($rx_stream + 20), *(unsigned int*)$rx_mux
+printf "TX CR=0x%08x NDTR=%u PAR=0x%08x M0AR=0x%08x FCR=0x%08x DMAMUX=0x%08x\n", *(unsigned int*)$tx_stream, *(unsigned int*)($tx_stream + 4), *(unsigned int*)($tx_stream + 8), *(unsigned int*)($tx_stream + 12), *(unsigned int*)($tx_stream + 20), *(unsigned int*)$tx_mux
+
+delete breakpoints
 monitor resume
 shell sleep 2
 monitor halt

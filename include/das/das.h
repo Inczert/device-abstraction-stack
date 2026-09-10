@@ -20,6 +20,7 @@
 #include <das/spi.h>
 #include <das/i2c.h>
 #include <das/timer.h>
+#include <das/eth.h>
 #include <das/board.h>
 #include <das/board_resources.h>
 

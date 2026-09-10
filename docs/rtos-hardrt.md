@@ -8,19 +8,19 @@ DAS                         HardRT
 RCC/PWR/FLASH clocking      scheduler
 GPIO/UART/SPI/I2C/DMA       SysTick tick
 board resources             PendSV context switching
-linker/memory policy        tasks/sleep/IPC
-weak reset/core handlers    strong scheduler handlers
+linker/memory policy        HardFault diagnostics
+weak reset/core handlers    tasks/sleep/IPC
 ```
 
 The reference application is `examples/hardrt_uart`.
 
 ## Exception ownership
 
-The current HardRT Cortex-M port provides strong `SysTick_Handler` and `PendSV_Handler` implementations. DAS provides weak core-handler defaults and a weak default STM32H755 vector table. The final link therefore keeps the DAS vector layout while the strong HardRT scheduler handlers replace the weak DAS handlers referenced by the core vector slots.
+The current HardRT Cortex-M port provides strong `SysTick_Handler`, `PendSV_Handler` and diagnostic `HardFault_Handler` implementations. DAS provides weak core-handler defaults and a weak default STM32H755 vector table. The final link therefore keeps the DAS vector layout while the strong HardRT handlers replace the weak DAS handlers referenced by those core vector slots.
 
-The HardRT reference application links `HardRT::hardrt` before `das::das` and explicitly requests `PendSV_Handler` and `SysTick_Handler` from the static archives. This matters because both dependencies are static libraries and the linker otherwise has no obligation to extract an object merely because it contains a stronger definition than an already satisfiable weak symbol.
+The HardRT reference application links `HardRT::hardrt` before `das::das` and explicitly requests `HardFault_Handler`, `PendSV_Handler` and `SysTick_Handler` from the static archives. This matters because both dependencies are static libraries and the linker otherwise has no obligation to extract an object merely because it contains a stronger definition than an already satisfiable weak symbol.
 
-HardRT does not currently require SVC for its scheduler path. If that changes, the same ownership rule must be extended deliberately rather than allowing two implementations to coexist accidentally.
+HardRT does not currently require SVC for its scheduler path. DAS's weak SVC default therefore remains active. If HardRT later gains SVC ownership, the same rule must be extended deliberately rather than allowing two implementations to coexist accidentally.
 
 ## Clock initialization order
 
@@ -109,10 +109,11 @@ find_package(HardRT CONFIG REQUIRED)
 
 target_link_libraries(app PRIVATE HardRT::hardrt das::das)
 target_link_options(app PRIVATE
+    -Wl,-u,HardFault_Handler
     -Wl,-u,PendSV_Handler
     -Wl,-u,SysTick_Handler)
 ```
 
-The DAS default vector table stays useful here: the application does not need to copy a full STM32 vector table just to let HardRT replace two core exception handlers.
+The DAS default vector table stays useful here: the application does not need to copy a full STM32 vector table just to let HardRT replace the core handlers it owns.
 
-CI cross-builds the reference HardRT+DAS CM7 application and checks the final ELF for the expected strong scheduler handlers, DAS vector section and RAM-boundary symbols.
+CI cross-builds the reference HardRT+DAS CM7 application and checks the final ELF for HardRT's strong scheduler/fault handlers, the DAS vector section and RAM-boundary symbols.

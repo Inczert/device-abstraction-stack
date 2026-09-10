@@ -148,6 +148,7 @@ jobs:
           cmake --build build/ci-hardrt-example --parallel
           elf="$GITHUB_WORKSPACE/build/ci-hardrt-example/das_hardrt_uart.elf"
           test -s "$elf"
+          arm-none-eabi-nm "$elf" | grep -Eq '[[:space:]]T[[:space:]]HardFault_Handler$'
           arm-none-eabi-nm "$elf" | grep -Eq '[[:space:]]T[[:space:]]PendSV_Handler$'
           arm-none-eabi-nm "$elf" | grep -Eq '[[:space:]]T[[:space:]]SysTick_Handler$'
           arm-none-eabi-nm "$elf" | grep -q '__RAM_START__'

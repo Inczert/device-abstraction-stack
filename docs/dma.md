@@ -26,9 +26,9 @@ das_dma_release(dma);
 
 `count` is a number of configured transfer elements, not a byte count. The first STM32H755 baseline uses direct mode, supports byte/halfword/word elements with equal source and destination widths, and bounds one hardware transfer to 65535 elements.
 
-`das_dma_get_state()` distinguishes idle, busy, complete and hardware-error states. `das_dma_get_remaining()` exposes the remaining element count. Transfer, FIFO and direct-mode DMA error flags map to `DAS_DMA_STATE_ERROR` and `DAS_ERROR_IO`. A started transfer remains busy until hardware reports either completion or an error; the STM32 stream enable bit is not used as the completion criterion because hardware may clear it before the completion flag becomes observable. A finite wait uses the generic DAS monotonic time source; it aborts the stream and returns `DAS_ERROR_TIMEOUT` when the deadline expires.
+`das_dma_get_state()` distinguishes idle, busy, complete and terminal hardware-error states. `das_dma_get_remaining()` exposes the remaining element count. On STM32H755, transfer error (`TEIF`) is terminal and maps to `DAS_DMA_STATE_ERROR` / `DAS_ERROR_IO`; FIFO/direct-mode conditions do not by themselves terminate polling completion. A started transfer remains busy until hardware reports completion or a terminal error; the stream enable bit is not used as the completion criterion because hardware may clear it before the completion flag becomes observable. A finite wait uses the generic DAS monotonic time source; it aborts the stream and returns `DAS_ERROR_TIMEOUT` when the deadline expires.
 
-`das_dma_get_irq()` resolves the stream's generic `das_irq_t` without exposing STM32 IRQ types. Interrupt-driven transfer ownership/callback policy can build on this primitive later; the first baseline qualifies completion through polling so no backend ISR contract is invented prematurely.
+`das_dma_get_irq()` resolves the stream's generic `das_irq_t` without exposing STM32 IRQ types. Interrupt-driven transfer ownership/callback policy can build on this primitive later; the current baseline qualifies completion through polling so no backend ISR contract is invented prematurely.
 
 ## STM32H755 backend
 
@@ -100,9 +100,9 @@ CM4 .data/.bss -> D2 SRAM1, 0x30000000...
 
 Both are DMA-visible. Code that later places DMA buffers into TCM or another special region must verify that the chosen DMA engine can reach it. DAS does not turn an unreachable physical address into a reachable one by optimism.
 
-## Focused qualification
+## Hardware qualification
 
-Before DMA is promoted into the standing hardware campaign, run:
+The focused qualifier remains available for DMA-specific iteration:
 
 ```bash
 ./scripts/stm32h755_dma_test.sh /home/dev/STM32Cube/Repository/STM32CubeH7/
@@ -114,7 +114,7 @@ The peripheral part reuses the qualified SPI loopback fixture:
 Arduino D11 / PB5 / SPI1_MOSI  <->  Arduino D12 / PA6 / SPI1_MISO
 ```
 
-Each core runs a dedicated image. The focused qualifier checks:
+Each core runs a dedicated image. The qualifier checks:
 
 - opaque DMA allocation/configuration/release;
 - generic DMA IRQ resolution;
@@ -127,4 +127,6 @@ Each core runs a dedicated image. The focused qualifier checks:
 - exact physical MOSI-to-MISO equality;
 - continued execution after the complete sequence.
 
-CM7 first selects the qualified 400 MHz board profile. CM4 independently runs at its qualified 64 MHz reset profile. The focused test must pass on both cores before #9 is integrated into the main campaign.
+The focused CM7/CM4 run passed 2/2 on commit `6cf59835d52c3a2d1d74ac6aa9d8f0cc44bb95ae`. CM7 passed at the qualified 400 MHz profile with D-cache enabled; CM4 passed at 64 MHz with the expected no-cache behavior. Both reported 256 memory-DMA bytes, 192 SPI-DMA bytes at 4 MHz and full acceptance flags `0x3f`.
+
+Those same two cases are now integrated into `scripts/stm32h755_test_campaign.sh` as standing regression coverage. They reuse the persistent SPI fixture and add no new hardware setup transition. The full campaign therefore advances from 36 to 38 acceptance points; the 38-case baseline is considered complete only after the integrated campaign itself passes end-to-end.

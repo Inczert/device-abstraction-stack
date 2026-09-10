@@ -33,7 +33,8 @@ Options:
   --openocd-scripts DIR   OpenOCD scripts directory.
   --debug-timeout SEC     GDB timeout per case (default: 30).
   --clean                 Clean before building.
-  --no-build              Reuse existing CM7/CM4 hardware, time, clock, button, UART, and custom-link ELFs.
+  --no-build              Reuse existing CM7/CM4 hardware, time, clock, button,
+                          UART, timer/PWM, and custom-link ELFs.
   -h, --help              Show help.
 USAGE
 }
@@ -50,7 +51,9 @@ while [[ $# -gt 0 ]]; do
     --*) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
     *)
       [[ -z "$STM32_CUBE_H7_DIR" ]] || { echo "Unexpected argument: $1" >&2; exit 2; }
-      STM32_CUBE_H7_DIR="$1"; shift ;;
+      STM32_CUBE_H7_DIR="$1"
+      shift
+      ;;
   esac
 done
 
@@ -64,11 +67,17 @@ if (( CLEAN != 0 && SKIP_BUILD != 0 )); then
   exit 2
 fi
 
-need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing command: $1" >&2; exit 2; }; }
+need() {
+  command -v "$1" >/dev/null 2>&1 || { echo "Missing command: $1" >&2; exit 2; }
+}
 for command in cmake openocd timeout tee grep tar arm-none-eabi-nm; do need "$command"; done
-if command -v gdb-multiarch >/dev/null 2>&1; then GDB_BIN=gdb-multiarch
-elif command -v arm-none-eabi-gdb >/dev/null 2>&1; then GDB_BIN=arm-none-eabi-gdb
-else echo "Install gdb-multiarch or arm-none-eabi-gdb" >&2; exit 2
+if command -v gdb-multiarch >/dev/null 2>&1; then
+  GDB_BIN=gdb-multiarch
+elif command -v arm-none-eabi-gdb >/dev/null 2>&1; then
+  GDB_BIN=arm-none-eabi-gdb
+else
+  echo "Install gdb-multiarch or arm-none-eabi-gdb" >&2
+  exit 2
 fi
 
 if (( SKIP_BUILD == 0 )); then
@@ -81,7 +90,6 @@ fi
 
 CM4_BUILD_DIR="$BUILD_DIR/cm4-hw"
 CUSTOM_BUILD_DIR="$BUILD_DIR/custom-link"
-
 STAMP="$(date -u +'%Y%m%dT%H%M%SZ')"
 CAMPAIGN_ROOT="$BUILD_DIR/campaign"
 LOG_DIR="$CAMPAIGN_ROOT/$STAMP"
@@ -152,12 +160,14 @@ trap 'exit 143' TERM
   echo "CM4 default linker: $ROOT_DIR/cmake/targets/stm32h755_cm4.ld"
   echo "Custom linker fixture: $ROOT_DIR/tests/link/stm32h755/custom_cm7.ld"
   echo "OpenOCD dual-core config: $ROOT_DIR/scripts/openocd_h755_dual_core.cfg"
-  echo "UART fixture: Arduino D1/TX/PB6 -> Arduino D0/RX/PB7"
+  echo "Persistent UART fixture: Arduino D1/TX/PB6 <-> Arduino D0/RX/PB7"
+  echo "Switched GPIO/PWM fixture: CN10 D4/PE14 <-> CN10 D3/PE13"
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$ROOT_DIR/cmake/targets/stm32h755_cm7.ld" 2>/dev/null || true
     sha256sum "$ROOT_DIR/cmake/targets/stm32h755_cm4.ld" 2>/dev/null || true
     sha256sum "$ROOT_DIR/tests/link/stm32h755/custom_cm7.ld" 2>/dev/null || true
     sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_uart_case.gdb" 2>/dev/null || true
+    sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_timer_case.gdb" 2>/dev/null || true
   fi
   echo "GDB: $GDB_BIN"
   "$GDB_BIN" --version 2>/dev/null | head -n 1 || true
@@ -177,10 +187,7 @@ if (( SKIP_BUILD == 0 )); then
     --core cm7 2>&1 | tee "$BUILD_LOG"
   CM7_BUILD_RC=${PIPESTATUS[0]}
   set -e
-  if (( CM7_BUILD_RC != 0 )); then
-    echo "STM32H755 CM7 hardware build failed with exit code $CM7_BUILD_RC" >&2
-    exit "$CM7_BUILD_RC"
-  fi
+  (( CM7_BUILD_RC == 0 )) || exit "$CM7_BUILD_RC"
 
   set +e
   "$ROOT_DIR/scripts/build_stm32h755.sh" \
@@ -189,10 +196,7 @@ if (( SKIP_BUILD == 0 )); then
     --core cm4 2>&1 | tee "$CM4_BUILD_LOG"
   CM4_BUILD_RC=${PIPESTATUS[0]}
   set -e
-  if (( CM4_BUILD_RC != 0 )); then
-    echo "STM32H755 CM4 hardware build failed with exit code $CM4_BUILD_RC" >&2
-    exit "$CM4_BUILD_RC"
-  fi
+  (( CM4_BUILD_RC == 0 )) || exit "$CM4_BUILD_RC"
 
   set +e
   {
@@ -209,12 +213,9 @@ if (( SKIP_BUILD == 0 )); then
   } 2>&1 | tee "$CUSTOM_BUILD_LOG"
   CUSTOM_BUILD_RC=${PIPESTATUS[0]}
   set -e
-  if (( CUSTOM_BUILD_RC != 0 )); then
-    echo "STM32H755 custom-linker build failed with exit code $CUSTOM_BUILD_RC" >&2
-    exit "$CUSTOM_BUILD_RC"
-  fi
+  (( CUSTOM_BUILD_RC == 0 )) || exit "$CUSTOM_BUILD_RC"
 else
-  echo "Build skipped; reusing existing CM7/CM4 hardware, time, clock, button, UART, and custom-link ELFs." | tee "$BUILD_LOG"
+  echo "Build skipped; reusing existing campaign ELFs/maps." | tee "$BUILD_LOG"
 fi
 
 CM7_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.elf"
@@ -223,6 +224,8 @@ CM7_TIME_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.elf"
 CM7_TIME_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.map"
 CM7_UART_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.elf"
 CM7_UART_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.map"
+CM7_TIMER_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_timer_test.elf"
+CM7_TIMER_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_timer_test.map"
 CLOCK_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_clock_test.elf"
 CLOCK_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_clock_test.map"
 BUTTON_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_button_test.elf"
@@ -233,54 +236,47 @@ CM4_TIME_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.el
 CM4_TIME_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.map"
 CM4_UART_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.elf"
 CM4_UART_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.map"
+CM4_TIMER_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_timer_test.elf"
+CM4_TIMER_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_timer_test.map"
 CUSTOM_ELF="$CUSTOM_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.elf"
 CUSTOM_MAP="$CUSTOM_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.map"
 
-for path in "$CM7_ELF" "$CM7_MAP" "$CM7_TIME_ELF" "$CM7_TIME_MAP" "$CM7_UART_ELF" "$CM7_UART_MAP" "$CLOCK_ELF" "$CLOCK_MAP" "$BUTTON_ELF" "$BUTTON_MAP" "$CM4_ELF" "$CM4_MAP" "$CM4_TIME_ELF" "$CM4_TIME_MAP" "$CM4_UART_ELF" "$CM4_UART_MAP" "$CUSTOM_ELF" "$CUSTOM_MAP"; do
+ARTIFACTS=(
+  "$CM7_ELF" "$CM7_MAP" "$CM7_TIME_ELF" "$CM7_TIME_MAP"
+  "$CM7_UART_ELF" "$CM7_UART_MAP" "$CM7_TIMER_ELF" "$CM7_TIMER_MAP"
+  "$CLOCK_ELF" "$CLOCK_MAP" "$BUTTON_ELF" "$BUTTON_MAP"
+  "$CM4_ELF" "$CM4_MAP" "$CM4_TIME_ELF" "$CM4_TIME_MAP"
+  "$CM4_UART_ELF" "$CM4_UART_MAP" "$CM4_TIMER_ELF" "$CM4_TIMER_MAP"
+  "$CUSTOM_ELF" "$CUSTOM_MAP"
+)
+for path in "${ARTIFACTS[@]}"; do
   [[ -s "$path" ]] || { echo "Expected campaign artifact not found: $path" >&2; exit 1; }
 done
 
-cp "$CM7_ELF" "$LOG_DIR/das_stm32h755_cm7_hw_test.elf"
-cp "$CM7_MAP" "$LOG_DIR/das_stm32h755_cm7_hw_test.map"
-cp "$CM7_TIME_ELF" "$LOG_DIR/das_stm32h755_cm7_time_test.elf"
-cp "$CM7_TIME_MAP" "$LOG_DIR/das_stm32h755_cm7_time_test.map"
-cp "$CM7_UART_ELF" "$LOG_DIR/das_stm32h755_cm7_uart_test.elf"
-cp "$CM7_UART_MAP" "$LOG_DIR/das_stm32h755_cm7_uart_test.map"
-cp "$CLOCK_ELF" "$LOG_DIR/das_stm32h755_cm7_clock_test.elf"
-cp "$CLOCK_MAP" "$LOG_DIR/das_stm32h755_cm7_clock_test.map"
-cp "$BUTTON_ELF" "$LOG_DIR/das_stm32h755_cm7_button_test.elf"
-cp "$BUTTON_MAP" "$LOG_DIR/das_stm32h755_cm7_button_test.map"
-cp "$CM4_ELF" "$LOG_DIR/das_stm32h755_cm4_hw_test.elf"
-cp "$CM4_MAP" "$LOG_DIR/das_stm32h755_cm4_hw_test.map"
-cp "$CM4_TIME_ELF" "$LOG_DIR/das_stm32h755_cm4_time_test.elf"
-cp "$CM4_TIME_MAP" "$LOG_DIR/das_stm32h755_cm4_time_test.map"
-cp "$CM4_UART_ELF" "$LOG_DIR/das_stm32h755_cm4_uart_test.elf"
-cp "$CM4_UART_MAP" "$LOG_DIR/das_stm32h755_cm4_uart_test.map"
-cp "$CUSTOM_ELF" "$LOG_DIR/das_stm32h755_custom_link_test.elf"
-cp "$CUSTOM_MAP" "$LOG_DIR/das_stm32h755_custom_link_test.map"
+copy_pair() {
+  local elf="$1" map="$2" stem="$3"
+  cp "$elf" "$LOG_DIR/${stem}.elf"
+  cp "$map" "$LOG_DIR/${stem}.map"
+  if command -v arm-none-eabi-size >/dev/null 2>&1; then
+    arm-none-eabi-size "$elf" >"$LOG_DIR/${stem}-size.txt" 2>&1 || true
+  fi
+  arm-none-eabi-nm -n "$elf" >"$LOG_DIR/${stem}-symbols.txt" 2>&1 || true
+}
+
+copy_pair "$CM7_ELF" "$CM7_MAP" das_stm32h755_cm7_hw_test
+copy_pair "$CM7_TIME_ELF" "$CM7_TIME_MAP" das_stm32h755_cm7_time_test
+copy_pair "$CM7_UART_ELF" "$CM7_UART_MAP" das_stm32h755_cm7_uart_test
+copy_pair "$CM7_TIMER_ELF" "$CM7_TIMER_MAP" das_stm32h755_cm7_timer_test
+copy_pair "$CLOCK_ELF" "$CLOCK_MAP" das_stm32h755_cm7_clock_test
+copy_pair "$BUTTON_ELF" "$BUTTON_MAP" das_stm32h755_cm7_button_test
+copy_pair "$CM4_ELF" "$CM4_MAP" das_stm32h755_cm4_hw_test
+copy_pair "$CM4_TIME_ELF" "$CM4_TIME_MAP" das_stm32h755_cm4_time_test
+copy_pair "$CM4_UART_ELF" "$CM4_UART_MAP" das_stm32h755_cm4_uart_test
+copy_pair "$CM4_TIMER_ELF" "$CM4_TIMER_MAP" das_stm32h755_cm4_timer_test
+copy_pair "$CUSTOM_ELF" "$CUSTOM_MAP" das_stm32h755_custom_link_test
 cp "$ROOT_DIR/cmake/targets/stm32h755_cm7.ld" "$LOG_DIR/"
 cp "$ROOT_DIR/cmake/targets/stm32h755_cm4.ld" "$LOG_DIR/"
 cp "$ROOT_DIR/tests/link/stm32h755/custom_cm7.ld" "$LOG_DIR/"
-if command -v arm-none-eabi-size >/dev/null 2>&1; then
-  arm-none-eabi-size "$CM7_ELF" >"$LOG_DIR/cm7-elf-size.txt" 2>&1 || true
-  arm-none-eabi-size "$CM7_TIME_ELF" >"$LOG_DIR/cm7-time-elf-size.txt" 2>&1 || true
-  arm-none-eabi-size "$CM7_UART_ELF" >"$LOG_DIR/cm7-uart-elf-size.txt" 2>&1 || true
-  arm-none-eabi-size "$CLOCK_ELF" >"$LOG_DIR/cm7-clock-elf-size.txt" 2>&1 || true
-  arm-none-eabi-size "$BUTTON_ELF" >"$LOG_DIR/cm7-button-elf-size.txt" 2>&1 || true
-  arm-none-eabi-size "$CM4_ELF" >"$LOG_DIR/cm4-elf-size.txt" 2>&1 || true
-  arm-none-eabi-size "$CM4_TIME_ELF" >"$LOG_DIR/cm4-time-elf-size.txt" 2>&1 || true
-  arm-none-eabi-size "$CM4_UART_ELF" >"$LOG_DIR/cm4-uart-elf-size.txt" 2>&1 || true
-  arm-none-eabi-size "$CUSTOM_ELF" >"$LOG_DIR/custom-elf-size.txt" 2>&1 || true
-fi
-arm-none-eabi-nm -n "$CM7_ELF" >"$LOG_DIR/cm7-symbols.txt" 2>&1 || true
-arm-none-eabi-nm -n "$CM7_TIME_ELF" >"$LOG_DIR/cm7-time-symbols.txt" 2>&1 || true
-arm-none-eabi-nm -n "$CM7_UART_ELF" >"$LOG_DIR/cm7-uart-symbols.txt" 2>&1 || true
-arm-none-eabi-nm -n "$CLOCK_ELF" >"$LOG_DIR/cm7-clock-symbols.txt" 2>&1 || true
-arm-none-eabi-nm -n "$BUTTON_ELF" >"$LOG_DIR/cm7-button-symbols.txt" 2>&1 || true
-arm-none-eabi-nm -n "$CM4_ELF" >"$LOG_DIR/cm4-symbols.txt" 2>&1 || true
-arm-none-eabi-nm -n "$CM4_TIME_ELF" >"$LOG_DIR/cm4-time-symbols.txt" 2>&1 || true
-arm-none-eabi-nm -n "$CM4_UART_ELF" >"$LOG_DIR/cm4-uart-symbols.txt" 2>&1 || true
-arm-none-eabi-nm -n "$CUSTOM_ELF" >"$LOG_DIR/custom-symbols.txt" 2>&1 || true
 
 safe_log_name() {
   local name="$1"
@@ -309,10 +305,31 @@ wait_for_enter() {
   read -r -p "Press ENTER when ready... "
 }
 
+initial_hardware_setup() {
+  cat <<'SETUP'
+
+=== Initial hardware setup ===
+1. Connect the NUCLEO-H755ZI-Q through the ST-LINK USB connection.
+2. Connect jumper A and LEAVE IT CONNECTED for the entire campaign:
+     Arduino D1 / TX / PB6  <->  Arduino D0 / RX / PB7
+3. Leave CN10 D3 / PE13 and CN10 D4 / PE14 DISCONNECTED for now.
+4. Keep a second jumper ready. The campaign will ask ONCE when it is time to
+   connect D4 <-> D3; after that, leave it connected for the rest of the run.
+5. Leave the blue B1 USER button released.
+
+Never connect D0/D1 or D3/D4 to 3V3, 5V, or GND for these loopback fixtures.
+SETUP
+  read -r -p "Press ENTER when the initial setup is complete... "
+}
+
 record() {
   local name="$1" status="$2"
   printf '%-34s %s\n' "$name" "$status" | tee -a "$SUMMARY"
-  if [[ "$status" == PASS ]]; then ((PASS_COUNT += 1)); else ((FAIL_COUNT += 1)); fi
+  if [[ "$status" == PASS ]]; then
+    ((PASS_COUNT += 1))
+  else
+    ((FAIL_COUNT += 1))
+  fi
 }
 
 run_gdb() {
@@ -340,38 +357,6 @@ check_layout() {
   fi
 }
 
-check_layout "STM32H755 CM7 memory layout" "$LOG_DIR/cm7_memory_layout.log" \
-  --core cm7 "$CM7_ELF" "$CM7_MAP" || exit 1
-check_layout "STM32H755 CM4 memory layout" "$LOG_DIR/cm4_memory_layout.log" \
-  --core cm4 "$CM4_ELF" "$CM4_MAP" || exit 1
-check_layout "Custom linker override" "$LOG_DIR/custom_memory_layout.log" \
-  --core cm7 --flash-begin 0x08020000 --flash-end 0x08100000 \
-  "$CUSTOM_ELF" "$CUSTOM_MAP" || exit 1
-
-echo "Starting dual-core OpenOCD..."
-openocd -s "$OPENOCD_SCRIPTS" \
-  -f "$ROOT_DIR/scripts/openocd_h755_dual_core.cfg" \
-  -c "init; reset halt" >"$OPENOCD_LOG" 2>&1 &
-OPENOCD_PID=$!
-for ((attempt = 0; attempt < 150; ++attempt)); do
-  if grep -q "Listening on port 3333 for gdb connections" "$OPENOCD_LOG" 2>/dev/null && \
-     grep -q "Listening on port 3334 for gdb connections" "$OPENOCD_LOG" 2>/dev/null; then
-    break
-  fi
-  if ! kill -0 "$OPENOCD_PID" >/dev/null 2>&1; then
-    cat "$OPENOCD_LOG" >&2
-    echo "OpenOCD exited before both GDB servers became ready" >&2
-    exit 1
-  fi
-  sleep 0.1
-done
-if ! grep -q "Listening on port 3333 for gdb connections" "$OPENOCD_LOG" || \
-   ! grep -q "Listening on port 3334 for gdb connections" "$OPENOCD_LOG"; then
-  cat "$OPENOCD_LOG" >&2
-  echo "Dual-core OpenOCD GDB server timeout" >&2
-  exit 1
-fi
-
 probe_core() {
   local label="$1" elf="$2" port="$3" expected_part="$4"
   local log="$LOG_DIR/$(safe_log_name "$label").log"
@@ -385,23 +370,10 @@ probe_core() {
   fi
 }
 
-run_time_case() {
-  local label="$1" elf="$2" port="$3"
+run_simple_case() {
+  local label="$1" elf="$2" port="$3" gdb_script="$4"
   local log="$LOG_DIR/$(safe_log_name "$label").log"
-  if run_gdb "$elf" "$port" "$log" \
-      -x "$ROOT_DIR/scripts/gdb/stm32h755_time_case.gdb"; then
-    record "$label" PASS
-  else
-    record "$label" FAIL
-    return 1
-  fi
-}
-
-run_uart_case() {
-  local label="$1" elf="$2" port="$3"
-  local log="$LOG_DIR/$(safe_log_name "$label").log"
-  if run_gdb "$elf" "$port" "$log" \
-      -x "$ROOT_DIR/scripts/gdb/stm32h755_uart_case.gdb"; then
+  if run_gdb "$elf" "$port" "$log" -x "$gdb_script"; then
     record "$label" PASS
   else
     record "$label" FAIL
@@ -411,14 +383,13 @@ run_uart_case() {
 
 run_button_case() {
   local label="CM7 user button input/EXTI"
-
   if ! run_gdb "$BUTTON_ELF" 3333 "$LOG_DIR/CM7_button_setup.log" \
       -x "$ROOT_DIR/scripts/gdb/stm32h755_button_setup.gdb"; then
     record "$label" FAIL
     return 1
   fi
 
-  wait_for_enter "User-button test: leave B1 RELEASED initially, then press and HOLD the blue B1 USER button and press ENTER while still holding it."
+  wait_for_enter "User-button test: press and HOLD the blue B1 USER button, then press ENTER while still holding it."
   if ! run_gdb "$BUTTON_ELF" 3333 "$LOG_DIR/CM7_button_pressed.log" \
       -ex 'set $das_expected_pressed=1' \
       -x "$ROOT_DIR/scripts/gdb/stm32h755_button_state.gdb"; then
@@ -439,22 +410,32 @@ run_button_case() {
 
 bring_up_core() {
   local core="$1" elf="$2" port="$3"
-  local prefix="${core}"
   if run_gdb "$elf" "$port" "$LOG_DIR/${core}_flash_probe.log" \
       -x "$ROOT_DIR/scripts/gdb/stm32h755_flash_probe.gdb"; then
-    record "$prefix CMSIS/GPIO bring-up" PASS
+    record "$core CMSIS/GPIO bring-up" PASS
   else
-    record "$prefix CMSIS/GPIO bring-up" FAIL
+    record "$core CMSIS/GPIO bring-up" FAIL
     return 1
   fi
 
   if run_gdb "$elf" "$port" "$LOG_DIR/${core}_startup_reset.log" \
       -x "$ROOT_DIR/scripts/gdb/stm32h755_startup_probe.gdb"; then
-    record "$prefix Cortex-M startup/reset" PASS
+    record "$core Cortex-M startup/reset" PASS
   else
-    record "$prefix Cortex-M startup/reset" FAIL
+    record "$core Cortex-M startup/reset" FAIL
     return 1
   fi
+}
+
+rearm_core_image() {
+  local core="$1" elf="$2" port="$3"
+  local log="$LOG_DIR/${core}_fixture_rearm.log"
+  if run_gdb "$elf" "$port" "$log" \
+      -x "$ROOT_DIR/scripts/gdb/stm32h755_flash_probe.gdb"; then
+    return 0
+  fi
+  echo "Failed to re-arm $core hardware image after fixture transition" >&2
+  return 1
 }
 
 automated_gpio_case() {
@@ -483,7 +464,6 @@ visual_case() {
       -x "$ROOT_DIR/scripts/gdb/stm32h755_led_case.gdb"; then
     automated=PASS
   fi
-
   if [[ "$automated" == PASS ]] && yes_no "$prompt"; then visual=PASS; fi
 
   if [[ "$automated" == PASS && "$visual" == PASS ]]; then
@@ -493,32 +473,79 @@ visual_case() {
   fi
 }
 
-probe_core "CM7 OpenOCD probe" "$CM7_ELF" 3333 0xc27 || exit 1
-probe_core "CM4 OpenOCD probe" "$CM4_ELF" 3334 0xc24 || exit 1
-run_time_case "CM7 monotonic timebase" "$CM7_TIME_ELF" 3333 || exit 1
-run_time_case "CM4 monotonic timebase" "$CM4_TIME_ELF" 3334 || exit 1
+# Host/static qualification. These deliberately do not require the board.
+check_layout "STM32H755 CM7 memory layout" "$LOG_DIR/cm7_memory_layout.log" \
+  --core cm7 "$CM7_ELF" "$CM7_MAP" || exit 1
+check_layout "STM32H755 CM4 memory layout" "$LOG_DIR/cm4_memory_layout.log" \
+  --core cm4 "$CM4_ELF" "$CM4_MAP" || exit 1
+check_layout "Custom linker override" "$LOG_DIR/custom_memory_layout.log" \
+  --core cm7 --flash-begin 0x08020000 --flash-end 0x08100000 \
+  "$CUSTOM_ELF" "$CUSTOM_MAP" || exit 1
 
-if run_gdb "$CLOCK_ELF" 3333 "$LOG_DIR/CM7_clock_HSI_PLL_400.log" \
-    -x "$ROOT_DIR/scripts/gdb/stm32h755_clock_case.gdb"; then
-  record "CM7 HSI/PLL 400MHz clock" PASS
-else
-  record "CM7 HSI/PLL 400MHz clock" FAIL
+# One physical setup prompt covers everything until the D4/D3 transition.
+initial_hardware_setup
+
+echo "Starting dual-core OpenOCD..."
+openocd -s "$OPENOCD_SCRIPTS" \
+  -f "$ROOT_DIR/scripts/openocd_h755_dual_core.cfg" \
+  -c "init; reset halt" >"$OPENOCD_LOG" 2>&1 &
+OPENOCD_PID=$!
+for ((attempt = 0; attempt < 150; ++attempt)); do
+  if grep -q "Listening on port 3333 for gdb connections" "$OPENOCD_LOG" 2>/dev/null && \
+     grep -q "Listening on port 3334 for gdb connections" "$OPENOCD_LOG" 2>/dev/null; then
+    break
+  fi
+  if ! kill -0 "$OPENOCD_PID" >/dev/null 2>&1; then
+    cat "$OPENOCD_LOG" >&2
+    echo "OpenOCD exited before both GDB servers became ready" >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+if ! grep -q "Listening on port 3333 for gdb connections" "$OPENOCD_LOG" || \
+   ! grep -q "Listening on port 3334 for gdb connections" "$OPENOCD_LOG"; then
+  cat "$OPENOCD_LOG" >&2
+  echo "Dual-core OpenOCD GDB server timeout" >&2
   exit 1
 fi
 
+probe_core "CM7 OpenOCD probe" "$CM7_ELF" 3333 0xc27 || exit 1
+probe_core "CM4 OpenOCD probe" "$CM4_ELF" 3334 0xc24 || exit 1
+run_simple_case "CM7 monotonic timebase" "$CM7_TIME_ELF" 3333 \
+  "$ROOT_DIR/scripts/gdb/stm32h755_time_case.gdb" || exit 1
+run_simple_case "CM4 monotonic timebase" "$CM4_TIME_ELF" 3334 \
+  "$ROOT_DIR/scripts/gdb/stm32h755_time_case.gdb" || exit 1
+run_simple_case "CM7 HSI/PLL 400MHz clock" "$CLOCK_ELF" 3333 \
+  "$ROOT_DIR/scripts/gdb/stm32h755_clock_case.gdb" || exit 1
 run_button_case || exit 1
 
-wait_for_enter "UART loopback: remove any D3-to-D4 qualification jumper, then connect ONE jumper between Arduino D1/TX/PB6 and Arduino D0/RX/PB7. Do not connect either signal to 3V3, 5V, or GND."
-run_uart_case "CM7 UART loopback" "$CM7_UART_ELF" 3333 || exit 1
-run_uart_case "CM4 UART loopback" "$CM4_UART_ELF" 3334 || exit 1
+# D1/D0 was installed during initial setup and remains connected throughout.
+run_simple_case "CM7 UART loopback" "$CM7_UART_ELF" 3333 \
+  "$ROOT_DIR/scripts/gdb/stm32h755_uart_case.gdb" || exit 1
+run_simple_case "CM4 UART loopback" "$CM4_UART_ELF" 3334 \
+  "$ROOT_DIR/scripts/gdb/stm32h755_uart_case.gdb" || exit 1
 
+# Qualify all tests requiring D3 to be electrically free before touching D4/D3.
 bring_up_core "CM7" "$CM7_ELF" 3333 || exit 1
-
-wait_for_enter "CM7 pull tests: leave CN10 D3 / PE13 / pin 10 electrically DISCONNECTED. Remove any jumper or shield drive from that pin. The D1-to-D0 UART jumper may remain connected."
 automated_gpio_case "CM7" "$CM7_ELF" 3333 "GPIO pull-up" 7 4
 automated_gpio_case "CM7" "$CM7_ELF" 3333 "GPIO pull-down" 8 8
 
-wait_for_enter "CM7 loopback tests: connect ONE jumper from CN10 D4 / PE14 / pin 8 (output) to CN10 D3 / PE13 / pin 10 (input). Do not connect either pin to 3V3, 5V, or GND."
+bring_up_core "CM4" "$CM4_ELF" 3334 || exit 1
+automated_gpio_case "CM4" "$CM4_ELF" 3334 "GPIO pull-up" 7 4
+automated_gpio_case "CM4" "$CM4_ELF" 3334 "GPIO pull-down" 8 8
+
+# Single fixture transition. D4/D3 remains connected through every remaining
+# GPIO and timer/PWM case; D1/D0 remains connected too.
+wait_for_enter "Fixture transition: connect jumper B from CN10 D4 / PE14 to CN10 D3 / PE13. Leave BOTH D4-D3 and D1-D0 connected for the rest of the campaign."
+
+# CM4 is already running its hardware image from the free-D3 phase.
+automated_gpio_case "CM4" "$CM4_ELF" 3334 "GPIO loopback low/high" 6 3
+automated_gpio_case "CM4" "$CM4_ELF" 3334 "GPIO open-drain" 9 48
+automated_gpio_case "CM4" "$CM4_ELF" 3334 "GPIO EXTI rising/falling" 10 192
+
+# Re-arm CM7 once after the CM4 phase; this is fixture choreography, not a new
+# acceptance point. The CM7 bring-up/startup acceptance points were recorded above.
+rearm_core_image "CM7" "$CM7_ELF" 3333 || exit 1
 automated_gpio_case "CM7" "$CM7_ELF" 3333 "GPIO loopback low/high" 6 3
 automated_gpio_case "CM7" "$CM7_ELF" 3333 "GPIO open-drain" 9 48
 automated_gpio_case "CM7" "$CM7_ELF" 3333 "GPIO EXTI rising/falling" 10 192
@@ -534,15 +561,10 @@ run_gdb "$CM7_ELF" 3333 "$LOG_DIR/cm7_final_all_off.log" \
   -ex 'set $das_expected_mask=0' \
   -x "$ROOT_DIR/scripts/gdb/stm32h755_led_case.gdb" >/dev/null || true
 
-bring_up_core "CM4" "$CM4_ELF" 3334 || exit 1
-
-wait_for_enter "CM4 pull tests: DISCONNECT the D4-to-D3 jumper again. Leave CN10 D3 / PE13 / pin 10 electrically disconnected."
-automated_gpio_case "CM4" "$CM4_ELF" 3334 "GPIO pull-up" 7 4
-automated_gpio_case "CM4" "$CM4_ELF" 3334 "GPIO pull-down" 8 8
-
-wait_for_enter "CM4 loopback tests: reconnect ONE jumper from CN10 D4 / PE14 / pin 8 to CN10 D3 / PE13 / pin 10. Do not connect either pin to 3V3, 5V, or GND."
-automated_gpio_case "CM4" "$CM4_ELF" 3334 "GPIO loopback low/high" 6 3
-automated_gpio_case "CM4" "$CM4_ELF" 3334 "GPIO open-drain" 9 48
-automated_gpio_case "CM4" "$CM4_ELF" 3334 "GPIO EXTI rising/falling" 10 192
+# Timer/PWM reuses the already-installed D4/D3 fixture. No extra wiring prompt.
+run_simple_case "CM7 timer/PWM" "$CM7_TIMER_ELF" 3333 \
+  "$ROOT_DIR/scripts/gdb/stm32h755_timer_case.gdb" || exit 1
+run_simple_case "CM4 timer/PWM" "$CM4_TIMER_ELF" 3334 \
+  "$ROOT_DIR/scripts/gdb/stm32h755_timer_case.gdb" || exit 1
 
 (( FAIL_COUNT == 0 )) || exit 1

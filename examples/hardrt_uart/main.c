@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#include <das/board.h>
-#include <das/board_resources.h>
-#include <das/clock.h>
-#include <das/time.h>
-#include <das/uart.h>
-
+#include <das/das.h>
 #include <hardrt.h>
 
-#include <stddef.h>
 #include <stdint.h>
 
 #define TASK_STACK_WORDS 512u
@@ -22,11 +16,6 @@ volatile uint32_t g_das_hardrt_led_count;
 volatile uint32_t g_das_hardrt_uart_count;
 volatile uint32_t g_das_hardrt_last_ms;
 
-/*
- * HardRT provides a weak SystemCoreClock-based fallback. This application has
- * already selected and queried the clock through DAS, so keep the RTOS port
- * independent from vendor system_stm32h7xx.c and return that exact value.
- */
 uint32_t hrt_port_get_core_hz(void) {
     return g_core_hz;
 }
@@ -34,6 +23,51 @@ uint32_t hrt_port_get_core_hz(void) {
 static das_time_ms_t hardrt_time_source(void* context) {
     (void)context;
     return hrt_now_ms();
+}
+
+static int das_init(void) {
+    if (das_clock_set_frequency(UINT32_C(400000000)) != DAS_OK) {
+        return 1;
+    }
+    if (das_clock_get_core_frequency(&g_core_hz) != DAS_OK || g_core_hz == 0u) {
+        return 2;
+    }
+    if (das_board_led_init(DAS_BOARD_LED_GREEN, false) != DAS_OK) {
+        return 3;
+    }
+
+    const das_uart_config_t uart_config = {
+        .baud_rate = UINT32_C(115200),
+        .data_bits = DAS_UART_DATA_BITS_8,
+        .parity = DAS_UART_PARITY_NONE,
+        .stop_bits = DAS_UART_STOP_BITS_1,
+    };
+    if (das_board_uart_init(DAS_BOARD_UART_STLINK_VCP,
+                            &uart_config,
+                            &g_console) != DAS_OK) {
+        return 4;
+    }
+
+    return 0;
+}
+
+static int rtos_init(void) {
+    const hrt_config_t rtos_config = {
+        .tick_hz = UINT32_C(1000),
+        .policy = HRT_SCHED_PRIORITY_RR,
+        .default_slice = 5u,
+        .core_hz = g_core_hz,
+        .tick_src = HRT_TICK_SYSTICK,
+    };
+    if (hrt_init(&rtos_config) != HRT_OK) {
+        return 5;
+    }
+
+    if (das_time_set_source(hardrt_time_source, 0) != DAS_OK) {
+        return 6;
+    }
+
+    return 0;
 }
 
 static void led_task(void* arg) {
@@ -68,42 +102,14 @@ static void uart_task(void* arg) {
 }
 
 int main(void) {
-    if (das_clock_set_frequency(UINT32_C(400000000)) != DAS_OK) {
-        return 1;
-    }
-    if (das_clock_get_core_frequency(&g_core_hz) != DAS_OK || g_core_hz == 0u) {
-        return 2;
-    }
-    if (das_board_led_init(DAS_BOARD_LED_GREEN, false) != DAS_OK) {
-        return 3;
+    int status = das_init();
+    if (status != 0) {
+        return status;
     }
 
-    const das_uart_config_t uart_config = {
-        .baud_rate = UINT32_C(115200),
-        .data_bits = DAS_UART_DATA_BITS_8,
-        .parity = DAS_UART_PARITY_NONE,
-        .stop_bits = DAS_UART_STOP_BITS_1,
-    };
-    if (das_board_uart_init(DAS_BOARD_UART_STLINK_VCP,
-                            &uart_config,
-                            &g_console) != DAS_OK) {
-        return 4;
-    }
-
-    const hrt_config_t rtos_config = {
-        .tick_hz = UINT32_C(1000),
-        .policy = HRT_SCHED_PRIORITY_RR,
-        .default_slice = 5u,
-        .core_hz = g_core_hz,
-        .tick_src = HRT_TICK_SYSTICK,
-    };
-    if (hrt_init(&rtos_config) != HRT_OK) {
-        return 5;
-    }
-
-    /* HardRT owns SysTick. DAS reuses the RTOS clock instead of configuring it. */
-    if (das_time_set_source(hardrt_time_source, 0) != DAS_OK) {
-        return 6;
+    status = rtos_init();
+    if (status != 0) {
+        return status;
     }
 
     const hrt_task_attr_t led_attr = {

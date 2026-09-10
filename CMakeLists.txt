@@ -42,7 +42,8 @@ if(DAS_DEVICE STREQUAL "nucleo_h755zi_q")
     set(DAS_MCU_SOURCES
         src/mcu/cortex_m/startup.c
         src/mcu/cortex_m/irq.c
-        src/mcu/cortex_m/time.c)
+        src/mcu/cortex_m/time.c
+        src/mcu/cortex_m/cache.c)
 
     set(DAS_DEVICE_SOURCES
         src/device/stm32h755/gpio.c
@@ -52,7 +53,8 @@ if(DAS_DEVICE STREQUAL "nucleo_h755zi_q")
         src/device/stm32h755/timer.c
         src/device/stm32h755/uart.c
         src/device/stm32h755/spi.c
-        src/device/stm32h755/i2c.c)
+        src/device/stm32h755/i2c.c
+        src/device/stm32h755/dma.c)
 
     set(DAS_BOARD_SOURCES
         src/board/nucleo_h755zi_q/board.c

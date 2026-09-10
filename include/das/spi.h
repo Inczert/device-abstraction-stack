@@ -52,7 +52,7 @@ das_result_t das_spi_init(das_spi_t spi, const das_spi_config_t* config);
 das_result_t das_spi_get_frequency(das_spi_t spi, uint32_t* frequency_hz);
 
 /**
- * Full-duplex transfer.
+ * Full-duplex polling transfer.
  *
  * tx may be NULL to transmit 0xff fill bytes. rx may be NULL to discard
  * received bytes. They may not both be NULL when size is non-zero.
@@ -68,5 +68,24 @@ das_result_t das_spi_transfer(das_spi_t spi,
                               const uint8_t* tx,
                               uint8_t* rx,
                               size_t size);
+
+/**
+ * Full-duplex DMA transfer using implementation-selected DMA resources.
+ *
+ * The first DMA baseline requires both tx and rx buffers for non-zero sizes.
+ * DMA does not make cacheable memory coherent automatically: on cached CPUs,
+ * clean TX data and clean/invalidate RX storage before starting the transfer,
+ * then invalidate RX storage after completion. See <das/cache.h>.
+ */
+das_result_t das_spi_transfer_dma_timeout(das_spi_t spi,
+                                          const uint8_t* tx,
+                                          uint8_t* rx,
+                                          size_t size,
+                                          uint32_t timeout_ms);
+
+das_result_t das_spi_transfer_dma(das_spi_t spi,
+                                  const uint8_t* tx,
+                                  uint8_t* rx,
+                                  size_t size);
 
 #endif

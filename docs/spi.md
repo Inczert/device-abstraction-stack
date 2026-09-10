@@ -25,19 +25,27 @@ The STM32H755 baseline uses eight application bits per frame. Wider frames can b
 
 ## Transfers
 
-SPI is inherently full duplex. The generic transfer call therefore accepts independent TX and RX buffers:
+SPI is inherently full duplex. The generic polling transfer accepts independent TX and RX buffers:
 
 ```c
 das_spi_transfer(spi, tx, rx, size);
 ```
 
-For asymmetric application use:
+For asymmetric polling use:
 
 - `tx == NULL` transmits `0xff` fill bytes while receiving;
 - `rx == NULL` discards received bytes while transmitting;
 - both may not be `NULL` for a non-zero transfer.
 
 `das_spi_transfer_timeout()` uses the generic DAS monotonic time source for a finite timeout. `das_spi_transfer()` blocks until completion.
+
+Issue #9 adds a full-duplex DMA path using implementation-selected DMA resources:
+
+```c
+das_spi_transfer_dma_timeout(spi, tx, rx, size, 50u);
+```
+
+The first DMA baseline requires both TX and RX buffers for a non-zero transfer. It does not silently perform CPU cache maintenance. On a cached core, prepare the TX/RX buffers with `das/cache.h` before starting DMA and invalidate the RX buffer after completion. See `docs/dma.md` for the ownership and cache-line rules.
 
 ## Chip select ownership
 
@@ -73,11 +81,11 @@ SPI1 belongs to the SPI1/2/3 kernel-clock group. The current backend selects `PE
 
 This makes the serial clock explicit and independent of whether CM7 is currently using the 64, 200, 300 or 400 MHz board profile. It also avoids pretending that the SPI1 kernel clock is simply APB2.
 
-The first baseline supports master/controller mode only. Interrupt-driven and DMA transfer paths are deliberately deferred; DMA belongs with #9 and should reuse this framing/clock/board route rather than replacing it.
+The polling and DMA paths reuse the same controller configuration. The STM32H755 DMA implementation keeps DMA1 stream selection and SPI1 DMAMUX request identifiers private; application code never supplies them.
 
 ## Focused physical qualification
 
-Before SPI is promoted into the standing campaign, run:
+The polling SPI baseline can still be checked independently with:
 
 ```bash
 ./scripts/stm32h755_spi_test.sh /home/dev/STM32Cube/Repository/STM32CubeH7/
@@ -89,7 +97,7 @@ Connect one jumper:
 Arduino SPI MOSI / PB5 ---- jumper ---- Arduino SPI MISO / PA6
 ```
 
-Leave SCK/PA5 and CS/PD14 otherwise unconnected. The qualifier runs separate CM7 and CM4 images and checks:
+Leave SCK/PA5 and CS/PD14 otherwise unconnected. The polling qualifier runs separate CM7 and CM4 images and checks:
 
 - semantic PA5/PA6/PB5/PD14 board mapping;
 - active-low default CS helper;
@@ -101,6 +109,4 @@ Leave SCK/PA5 and CS/PD14 otherwise unconnected. The qualifier runs separate CM7
 - exact equality of 111 physically looped-back bytes;
 - continued execution after all transfers.
 
-CM7 first selects the qualified 400 MHz board profile. CM4 runs after reset and independently exercises its peripheral-clock-enable view.
-
-Once both focused cases pass, they are added to the main hardware campaign. The MOSI/MISO jumper can then become another persistent initial fixture, avoiding yet another mid-campaign cable ritual.
+DMA-specific SPI qualification is part of `scripts/stm32h755_dma_test.sh` and reuses the same MOSI/MISO jumper. The persistent campaign fixture therefore needs no new SPI wiring when #9 is eventually promoted into the main regression campaign.

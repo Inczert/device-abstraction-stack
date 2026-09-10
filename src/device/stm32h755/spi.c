@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#include <das/dma.h>
 #include <das/spi.h>
 #include <das/time.h>
 
+#include "dma_internal.h"
 #include "spi_internal.h"
 #include "stm32h755xx.h"
 
@@ -207,6 +209,120 @@ static das_result_t transfer_chunk(SPI_TypeDef* registers,
     return DAS_OK;
 }
 
+static void dma_pair_cleanup(SPI_TypeDef* registers,
+                             das_dma_t rx_dma,
+                             das_dma_t tx_dma) {
+    registers->CR1 &= ~SPI_CR1_SPE;
+    registers->CFG1 &= ~(SPI_CFG1_RXDMAEN | SPI_CFG1_TXDMAEN);
+    registers->IFCR = DAS_STM32H755_SPI_CLEAR_FLAGS;
+    if (das_dma_is_valid(rx_dma)) {
+        (void)das_dma_abort(rx_dma);
+        (void)das_dma_release(rx_dma);
+    }
+    if (das_dma_is_valid(tx_dma)) {
+        (void)das_dma_abort(tx_dma);
+        (void)das_dma_release(tx_dma);
+    }
+}
+
+static das_result_t transfer_dma_chunk(SPI_TypeDef* registers,
+                                       const uint8_t* tx,
+                                       uint8_t* rx,
+                                       size_t offset,
+                                       uint32_t count,
+                                       const spi_wait_t* wait) {
+    das_dma_t rx_dma = DAS_DMA_INVALID;
+    das_dma_t tx_dma = DAS_DMA_INVALID;
+    das_result_t result = das_dma_acquire(&rx_dma);
+    if (result != DAS_OK) return result;
+    result = das_dma_acquire(&tx_dma);
+    if (result != DAS_OK) {
+        (void)das_dma_release(rx_dma);
+        return result;
+    }
+
+    const das_dma_config_t rx_config = {
+        .direction = DAS_DMA_PERIPHERAL_TO_MEMORY,
+        .source_width = DAS_DMA_WIDTH_BYTE,
+        .destination_width = DAS_DMA_WIDTH_BYTE,
+        .source_increment = false,
+        .destination_increment = true,
+    };
+    const das_dma_config_t tx_config = {
+        .direction = DAS_DMA_MEMORY_TO_PERIPHERAL,
+        .source_width = DAS_DMA_WIDTH_BYTE,
+        .destination_width = DAS_DMA_WIDTH_BYTE,
+        .source_increment = true,
+        .destination_increment = false,
+    };
+
+    result = das_dma_configure(rx_dma, &rx_config);
+    if (result == DAS_OK) result = das_dma_configure(tx_dma, &tx_config);
+    if (result == DAS_OK) {
+        result = stm32h755_dma_set_request(rx_dma, STM32H755_DMA_REQUEST_SPI1_RX);
+    }
+    if (result == DAS_OK) {
+        result = stm32h755_dma_set_request(tx_dma, STM32H755_DMA_REQUEST_SPI1_TX);
+    }
+    if (result != DAS_OK) {
+        dma_pair_cleanup(registers, rx_dma, tx_dma);
+        return result;
+    }
+
+    registers->CR1 &= ~SPI_CR1_SPE;
+    registers->IFCR = DAS_STM32H755_SPI_CLEAR_FLAGS;
+    registers->CR2 = count & SPI_CR2_TSIZE;
+    registers->CFG1 |= SPI_CFG1_RXDMAEN | SPI_CFG1_TXDMAEN;
+
+    result = das_dma_start(rx_dma,
+                           (const void*)&registers->RXDR,
+                           &rx[offset],
+                           count);
+    if (result == DAS_OK) {
+        result = das_dma_start(tx_dma,
+                               &tx[offset],
+                               (void*)&registers->TXDR,
+                               count);
+    }
+    if (result != DAS_OK) {
+        dma_pair_cleanup(registers, rx_dma, tx_dma);
+        return result;
+    }
+
+    registers->CR1 |= SPI_CR1_SSI | SPI_CR1_SPE;
+    registers->CR1 |= SPI_CR1_CSTART;
+
+    for (;;) {
+        das_dma_state_t rx_state = DAS_DMA_STATE_IDLE;
+        das_dma_state_t tx_state = DAS_DMA_STATE_IDLE;
+        result = das_dma_get_state(rx_dma, &rx_state);
+        if (result == DAS_OK) result = das_dma_get_state(tx_dma, &tx_state);
+        if (result != DAS_OK) {
+            dma_pair_cleanup(registers, rx_dma, tx_dma);
+            return result;
+        }
+
+        const uint32_t status = registers->SR;
+        if (rx_state == DAS_DMA_STATE_ERROR || tx_state == DAS_DMA_STATE_ERROR ||
+            (status & DAS_STM32H755_SPI_ERROR_FLAGS) != 0u) {
+            dma_pair_cleanup(registers, rx_dma, tx_dma);
+            return DAS_ERROR_IO;
+        }
+        if (rx_state == DAS_DMA_STATE_COMPLETE &&
+            tx_state == DAS_DMA_STATE_COMPLETE &&
+            (status & SPI_SR_EOT) != 0u) {
+            break;
+        }
+        if (wait_expired(wait)) {
+            dma_pair_cleanup(registers, rx_dma, tx_dma);
+            return DAS_ERROR_TIMEOUT;
+        }
+    }
+
+    dma_pair_cleanup(registers, rx_dma, tx_dma);
+    return DAS_OK;
+}
+
 das_spi_t stm32h755_spi_handle(stm32h755_spi_instance_t instance) {
     return instance == STM32H755_SPI1
         ? (das_spi_t){.storage = (uint32_t)instance}
@@ -323,4 +439,43 @@ das_result_t das_spi_transfer(das_spi_t spi,
                               uint8_t* rx,
                               size_t size) {
     return das_spi_transfer_timeout(spi, tx, rx, size, DAS_SPI_WAIT_FOREVER);
+}
+
+das_result_t das_spi_transfer_dma_timeout(das_spi_t spi,
+                                          const uint8_t* tx,
+                                          uint8_t* rx,
+                                          size_t size,
+                                          uint32_t timeout_ms) {
+    SPI_TypeDef* const registers = resolve_spi(spi);
+    if (registers == 0 || (size != 0u && (tx == 0 || rx == 0))) {
+        return DAS_ERROR_INVALID_ARGUMENT;
+    }
+    if (size == 0u) return DAS_OK;
+
+    spi_wait_t wait;
+    das_result_t result = prepare_wait(timeout_ms, &wait);
+    if (result != DAS_OK) return result;
+
+    size_t offset = 0u;
+    while (offset < size) {
+        const size_t remaining = size - offset;
+        const uint32_t count = remaining > DAS_STM32H755_SPI_MAX_TRANSFER
+            ? DAS_STM32H755_SPI_MAX_TRANSFER
+            : (uint32_t)remaining;
+        result = transfer_dma_chunk(registers, tx, rx, offset, count, &wait);
+        if (result != DAS_OK) return result;
+        offset += count;
+    }
+    return DAS_OK;
+}
+
+das_result_t das_spi_transfer_dma(das_spi_t spi,
+                                  const uint8_t* tx,
+                                  uint8_t* rx,
+                                  size_t size) {
+    return das_spi_transfer_dma_timeout(spi,
+                                        tx,
+                                        rx,
+                                        size,
+                                        DAS_SPI_WAIT_FOREVER);
 }

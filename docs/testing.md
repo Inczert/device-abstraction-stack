@@ -324,7 +324,7 @@ CM7 timer/PWM                     PASS
 CM4 timer/PWM                     PASS
 ```
 
-The completed baseline before DMA/cache campaign integration is the 36/36 campaign. The 38-case state becomes the new completed baseline only after an archive from the exact DMA integration head passes completely.
+The completed STM32H755 hardware regression baseline is **38/38 PASS** at commit `c4bbc578d32c7b81f2ec5aaf38d637d128ca1942`, qualified on 2026-09-10. That run includes the promoted CM7 and CM4 DMA/cache acceptance points and preserves every previously qualified case.
 
 ## Evidence bundle
 

@@ -25,7 +25,8 @@ jobs:
             -Iinclude -fsyntax-only tests/compile/public_headers.c
       - name: Enforce default vector ownership in regular tests
         run: |
-          if grep -R -n '\.isr_vector' tests/hardware tests/link; then
+          if grep -R -n --include='*.c' --include='*.s' --include='*.S' \
+              '\.isr_vector' tests/hardware tests/link; then
             echo "Regular hardware/link tests must use the DAS default vector table." >&2
             echo "Only dedicated custom-vector contract tests may define .isr_vector." >&2
             exit 1

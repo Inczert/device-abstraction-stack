@@ -1,20 +1,21 @@
 # DAS examples
 
-Every example in this directory is a standalone application CMake project. Normal examples consume a generated/installed DAS package with:
+The examples are standalone consumers of the installed DAS CMake package rather than source-tree-only demos. They are intended to show application structure without copying startup/vector boilerplate into each firmware.
 
-```cmake
-find_package(DAS CONFIG REQUIRED)
-target_link_libraries(application PRIVATE das::das)
+Application code may include focused headers or the convenience umbrella:
+
+```c
+#include <das/das.h>
 ```
 
-They do not add the DAS source tree, include implementation headers, or carry private STM32 startup/linker files.
+The umbrella exposes the normal application-facing DAS C API. Architecture-specific startup/vector customization remains explicit through headers such as `das/cortex_m/startup.h`.
 
-| Example | Purpose |
-| --- | --- |
-| `led_blink` | minimal green user-LED blink using the default DAS vector/startup path |
-| `time_periodic` | board clock + default SysTick monotonic time + periodic LED work |
-| `uart_console` | one-shot ST-LINK VCP UART output |
-| `clock_uart` | set/query the board/core clock before configuring UART |
-| `hardrt_uart` | HardRT scheduler with DAS clock/GPIO/UART and RTOS-backed DAS time |
+Current examples:
 
-`scripts/ci/build_installed_examples.sh` cross-builds all DAS-only examples against an installed CM7 or CM4 package. The HardRT example has its own CI job because it consumes a second installed library.
+- `led_blink` - minimal board LED + standalone DAS SysTick timebase;
+- `time_periodic` - clock profile + monotonic periodic work;
+- `uart_console` - ST-LINK VCP UART output;
+- `clock_uart` - configure CPU clock before clock-dependent UART setup and inspect the effective values;
+- `hardrt_uart` - HardRT 0.5.1 scheduler with DAS clock/GPIO/UART and the RTOS-provided monotonic time source.
+
+The HardRT example also has `scripts/build_and_flash_hardrt_uart.sh` for building/installing both libraries, flashing CM7 and optionally monitoring the ST-LINK VCP.

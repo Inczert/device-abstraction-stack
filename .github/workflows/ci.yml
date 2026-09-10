@@ -23,6 +23,13 @@ jobs:
         run: |
           cc -std=c11 -Wall -Wextra -Werror -pedantic \
             -Iinclude -fsyntax-only tests/compile/public_headers.c
+      - name: Enforce default vector ownership in regular tests
+        run: |
+          if grep -R -n '\.isr_vector' tests/hardware tests/link; then
+            echo "Regular hardware/link tests must use the DAS default vector table." >&2
+            echo "Only dedicated custom-vector contract tests may define .isr_vector." >&2
+            exit 1
+          fi
       - name: Run common time tests
         run: |
           cc -std=c11 -Wall -Wextra -Werror -pedantic \
@@ -75,6 +82,19 @@ jobs:
             --build-dir "$GITHUB_WORKSPACE/build/ci-${{ matrix.core }}" \
             --core "${{ matrix.core }}" \
             --clean
+      - name: Validate one vector table per hardware-test ELF
+        run: |
+          while IFS= read -r elf; do
+            count="$(arm-none-eabi-objdump -h "$elf" | awk '$2 == ".isr_vector" { count++ } END { print count+0 }')"
+            test "$count" = "1" || {
+              echo "$elf has $count .isr_vector sections" >&2
+              exit 1
+            }
+            arm-none-eabi-nm "$elf" | grep -Eq '[[:space:]][A-Za-z][[:space:]]g_das_vector_table$' || {
+              echo "$elf does not use the DAS default vector table" >&2
+              exit 1
+            }
+          done < <(find "$GITHUB_WORKSPACE/build/ci-${{ matrix.core }}/tests/hardware/stm32h755" -type f -name '*.elf' -print)
       - name: Install generated static package
         run: |
           cmake --install "$GITHUB_WORKSPACE/build/ci-${{ matrix.core }}" \
@@ -101,7 +121,7 @@ jobs:
             test "$(arm-none-eabi-objdump -h "$elf" | awk '$2 == ".isr_vector" { print $3 }')" = "00000040"
             arm-none-eabi-nm "$elf" | grep -Eq '[[:space:]][A-Za-z][[:space:]]g_das_vector_table$'
           done
-      - name: Validate custom linker fixture
+      - name: Validate custom linker fixture with DAS vectors
         if: matrix.core == 'cm7'
         run: |
           cmake -S . -B build/ci-custom-link -G Ninja \
@@ -109,11 +129,12 @@ jobs:
             -DCMAKE_BUILD_TYPE=Debug \
             -DDAS_DEVICE=nucleo_h755zi_q \
             -DDAS_CORE=cm7 \
-            -DDAS_USE_DEFAULT_VECTOR_TABLE=OFF \
             -DDAS_LINKER_SCRIPT="$GITHUB_WORKSPACE/tests/link/stm32h755/custom_cm7.ld" \
             -DSTM32_CUBE_H7_DIR="$GITHUB_WORKSPACE/.ci/STM32CubeH7" \
             -DDAS_BUILD_LINK_TESTS=ON
           cmake --build build/ci-custom-link --target das_stm32h755_link_test --parallel
+          elf="$GITHUB_WORKSPACE/build/ci-custom-link/tests/link/stm32h755/das_stm32h755_link_test.elf"
+          arm-none-eabi-nm "$elf" | grep -Eq '[[:space:]][A-Za-z][[:space:]]g_das_vector_table$'
 
   hardrt-integration:
     name: HardRT + DAS CM7 consumer

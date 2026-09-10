@@ -3,11 +3,13 @@
 #include <das/board.h>
 #include <das/board_resources.h>
 
+#include "timer_internal.h"
 #include "uart_internal.h"
 
 #include <stdint.h>
 
 #define DAS_NUCLEO_UART_AF UINT8_C(7)
+#define DAS_NUCLEO_PWM_AF  UINT8_C(1)
 
 static das_gpio_pin_t invalid_pin(void) {
     return (das_gpio_pin_t){DAS_GPIO_PORT_A, UINT8_C(0xff)};
@@ -19,6 +21,10 @@ static bool button_valid(das_board_button_t button) {
 
 static bool uart_valid(das_board_uart_resource_t resource) {
     return (unsigned)resource < (unsigned)DAS_BOARD_UART_COUNT;
+}
+
+static bool pwm_valid(das_board_pwm_resource_t resource) {
+    return (unsigned)resource < (unsigned)DAS_BOARD_PWM_COUNT;
 }
 
 static bool i2c_valid(das_board_i2c_resource_t resource) {
@@ -51,6 +57,14 @@ static const das_board_uart_pins_t UART_PINS[DAS_BOARD_UART_COUNT] = {
 static const stm32h755_uart_instance_t UART_INSTANCES[DAS_BOARD_UART_COUNT] = {
     [DAS_BOARD_UART_STLINK_VCP] = STM32H755_UART_USART3,
     [DAS_BOARD_UART_ARDUINO] = STM32H755_UART_USART1,
+};
+
+static const das_gpio_pin_t PWM_PINS[DAS_BOARD_PWM_COUNT] = {
+    [DAS_BOARD_PWM_ARDUINO_D4] = {DAS_GPIO_PORT_E, 14u},
+};
+
+static const stm32h755_pwm_output_t PWM_OUTPUTS[DAS_BOARD_PWM_COUNT] = {
+    [DAS_BOARD_PWM_ARDUINO_D4] = STM32H755_PWM_TIM1_CH4,
 };
 
 static const das_board_i2c_pins_t I2C_PINS[DAS_BOARD_I2C_COUNT] = {
@@ -129,6 +143,49 @@ das_result_t das_board_uart_init(das_board_uart_resource_t resource,
     }
 
     *uart = resolved;
+    return DAS_OK;
+}
+
+das_gpio_pin_t das_board_pwm_pin(das_board_pwm_resource_t resource) {
+    if (!pwm_valid(resource)) {
+        return invalid_pin();
+    }
+    return PWM_PINS[resource];
+}
+
+das_result_t das_board_pwm_init(das_board_pwm_resource_t resource,
+                                const das_pwm_config_t* config,
+                                das_pwm_t* pwm) {
+    if (!pwm_valid(resource) || config == 0 || pwm == 0) {
+        return DAS_ERROR_INVALID_ARGUMENT;
+    }
+
+    *pwm = DAS_PWM_INVALID;
+    const das_gpio_config_t pin_config = {
+        .mode = DAS_GPIO_MODE_ALTERNATE,
+        .pull = DAS_GPIO_PULL_NONE,
+        .output_type = DAS_GPIO_OUTPUT_PUSH_PULL,
+        .speed = DAS_GPIO_SPEED_HIGH,
+        .alternate = DAS_NUCLEO_PWM_AF,
+        .initial_high = false,
+    };
+
+    das_result_t result = das_gpio_configure(PWM_PINS[resource], &pin_config);
+    if (result != DAS_OK) {
+        return result;
+    }
+
+    const das_pwm_t resolved = stm32h755_pwm_handle(PWM_OUTPUTS[resource]);
+    if (!das_pwm_is_valid(resolved)) {
+        return DAS_ERROR_UNSUPPORTED;
+    }
+
+    result = das_pwm_init(resolved, config);
+    if (result != DAS_OK) {
+        return result;
+    }
+
+    *pwm = resolved;
     return DAS_OK;
 }
 

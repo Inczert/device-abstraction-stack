@@ -5,6 +5,7 @@
 
 #include <das/gpio.h>
 #include <das/result.h>
+#include <das/timer.h>
 #include <das/uart.h>
 
 /** Semantic UART-style board connections. */
@@ -33,6 +34,20 @@ das_result_t das_board_uart_get_pins(das_board_uart_resource_t resource,
 das_result_t das_board_uart_init(das_board_uart_resource_t resource,
                                  const das_uart_config_t* config,
                                  das_uart_t* uart);
+
+/** Semantic PWM-capable board outputs. */
+typedef enum das_board_pwm_resource {
+    DAS_BOARD_PWM_ARDUINO_D4 = 0,
+    DAS_BOARD_PWM_COUNT
+} das_board_pwm_resource_t;
+
+/** Resolve the physical pin associated with a semantic PWM output. */
+das_gpio_pin_t das_board_pwm_pin(das_board_pwm_resource_t resource);
+
+/** Configure the board route and initialize its generic PWM output. */
+das_result_t das_board_pwm_init(das_board_pwm_resource_t resource,
+                                const das_pwm_config_t* config,
+                                das_pwm_t* pwm);
 
 /** Semantic I2C board connections. */
 typedef enum das_board_i2c_resource {

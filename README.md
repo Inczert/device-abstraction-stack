@@ -23,9 +23,10 @@ The current STM32 path uses **CMSIS definitions directly**, without STM32 HAL/LL
 | UART | polling/timeout UART physically qualified on CM7 and CM4 |
 | Timer/PWM | periodic timer IRQ and PWM physically qualified on CM7 and CM4 |
 | SPI | controller path physically qualified on CM7 and CM4 across modes 0..3 |
-| I2C | controller path focused-qualified on CM7 and CM4 at 100/400 kHz; full campaign integration pending |
+| I2C | controller path physically qualified on CM7 and CM4 at 100/400 kHz |
+| DMA/cache | memory and SPI DMA physically qualified on CM7/CM4; explicit CM7 D-cache maintenance |
 | Board API | LEDs, B1 user button, ST-LINK VCP, Arduino/Zio UART/I2C/SPI and D3/D4 fixture mappings |
-| Debug/test | dual-core OpenOCD + GDB + packaged evidence campaign |
+| Debug/test | dual-core OpenOCD + GDB + packaged 38-case evidence campaign |
 
 DAS is still early development. The current project version is `0.1.0`.
 
@@ -86,7 +87,7 @@ src/mcu/cortex_m/
 
 src/device/stm32h755/
     STM32H755 silicon/peripherals
-    GPIO/EXTI, RCC/PWR/FLASH, UART, timer/PWM, SPI and I2C
+    GPIO/EXTI, RCC/PWR/FLASH, UART, timer/PWM, SPI, I2C and DMA
 
 src/board/nucleo_h755zi_q/
     physical NUCLEO resources and board policy
@@ -141,22 +142,34 @@ CM4 uses a separate build directory and `-DDAS_CORE=cm4`.
 
 DAS requires STM32CubeH7 only for CMSIS core/device headers. HAL and LL sources are not linked.
 
-## Using DAS in firmware
+## Consuming the generated static library
 
-A normal parent project needs only the DAS library target:
+DAS can be installed as a CMake package. The install contains the generated `libdas.a`, public headers, package targets and the selected core linker script:
+
+```bash
+cmake --install build/cm7 --prefix /path/to/das-install
+```
+
+A separate firmware project can then consume only that generated package:
 
 ```cmake
-set(DAS_DEVICE nucleo_h755zi_q CACHE STRING "" FORCE)
-set(DAS_CORE cm7 CACHE STRING "" FORCE)
-set(STM32_CUBE_H7_DIR "/path/to/STM32CubeH7" CACHE PATH "" FORCE)
-
-add_subdirectory(third_party/device-abstraction-stack)
+find_package(DAS CONFIG REQUIRED)
 
 add_executable(my_firmware src/main.c)
 target_link_libraries(my_firmware PRIVATE das::das)
 ```
 
-There is no separate linker pseudo-library. `libdas.a` has no final physical addresses by itself; the selected linker script is propagated through `das::das` and applies when the final ELF is linked.
+Configure the application with the matching ARM toolchain/core and the install prefix in `CMAKE_PREFIX_PATH`. The imported `das::das` target carries the installed linker script to the final firmware ELF.
+
+`examples/led_blink` deliberately exercises this external-consumer path rather than using `add_subdirectory()`. From the DAS repository root:
+
+```bash
+./scripts/build_and_flash_led_blink.sh /path/to/STM32CubeH7
+```
+
+The helper builds and installs the CM7 static library, configures the example against that installation with `find_package(DAS)`, builds the standalone firmware, flashes it with OpenOCD and asks for visual confirmation of the green LED blink.
+
+Source-tree embedding with `add_subdirectory()` remains supported for projects that prefer to build DAS as part of their own CMake tree.
 
 ## Clock model
 

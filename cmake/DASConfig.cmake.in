@@ -1,0 +1,38 @@
+@PACKAGE_INIT@
+
+set(DAS_PACKAGE_DEVICE "@DAS_DEVICE@")
+set(DAS_PACKAGE_CORE "@DAS_CORE@")
+
+if(DEFINED DAS_DEVICE AND NOT "${DAS_DEVICE}" STREQUAL "${DAS_PACKAGE_DEVICE}")
+    set(DAS_FOUND FALSE)
+    set(DAS_NOT_FOUND_MESSAGE
+        "Installed DAS package targets '${DAS_PACKAGE_DEVICE}', requested '${DAS_DEVICE}'")
+    return()
+endif()
+if(DEFINED DAS_CORE AND NOT "${DAS_CORE}" STREQUAL "${DAS_PACKAGE_CORE}")
+    set(DAS_FOUND FALSE)
+    set(DAS_NOT_FOUND_MESSAGE
+        "Installed DAS package targets core '${DAS_PACKAGE_CORE}', requested '${DAS_CORE}'")
+    return()
+endif()
+
+set(DAS_DEVICE "${DAS_PACKAGE_DEVICE}")
+set(DAS_CORE "${DAS_PACKAGE_CORE}")
+
+include("${CMAKE_CURRENT_LIST_DIR}/DASTargets.cmake")
+
+set(_DAS_LINKER_SCRIPT "@PACKAGE_DAS_INSTALL_LINKER_DIR@/@DAS_LINKER_SCRIPT_BASENAME@")
+if(NOT EXISTS "${_DAS_LINKER_SCRIPT}")
+    set(DAS_FOUND FALSE)
+    set(DAS_NOT_FOUND_MESSAGE
+        "Installed DAS linker script not found: ${_DAS_LINKER_SCRIPT}")
+    return()
+endif()
+
+set_property(TARGET das::das APPEND PROPERTY
+    INTERFACE_LINK_OPTIONS "-T${_DAS_LINKER_SCRIPT}")
+set_property(TARGET das::das APPEND PROPERTY
+    INTERFACE_LINK_DEPENDS "${_DAS_LINKER_SCRIPT}")
+
+unset(_DAS_LINKER_SCRIPT)
+check_required_components(DAS)

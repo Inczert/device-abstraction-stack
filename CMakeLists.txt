@@ -7,6 +7,9 @@ set_property(CACHE DAS_CORE PROPERTY STRINGS cm7 cm4)
 
 project(das VERSION 0.1.0 LANGUAGES C ASM)
 
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
 set(DAS_DEVICE "nucleo_h755zi_q" CACHE STRING "Target DAS device")
 set_property(CACHE DAS_DEVICE PROPERTY STRINGS nucleo_h755zi_q)
 set(STM32_CUBE_H7_DIR "" CACHE PATH "Path to STM32CubeH7 checkout")
@@ -115,7 +118,9 @@ add_library(das STATIC
 add_library(das::das ALIAS das)
 
 target_include_directories(das
-    PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
     PRIVATE
         "${DAS_CMSIS_CORE_INCLUDE}"
         "${DAS_CMSIS_DEVICE_INCLUDE}"
@@ -129,11 +134,44 @@ target_compile_features(das PUBLIC c_std_11)
 target_compile_options(das PRIVATE -Wall -Wextra -Werror)
 
 # The linker script belongs to the final firmware ELF, not to libdas.a. Carry
-# the selected device/core memory policy transitively so linking das::das is
-# sufficient for the normal bare-metal case. DAS_LINKER_SCRIPT can override it.
-target_link_options(das INTERFACE "-T${DAS_EFFECTIVE_LINKER_SCRIPT}")
+# source-tree linkage transitively. Installed packages reattach the installed,
+# relocatable linker-script path from DASConfig.cmake.
+target_link_options(das INTERFACE
+    "$<BUILD_INTERFACE:-T${DAS_EFFECTIVE_LINKER_SCRIPT}>")
 set_property(TARGET das APPEND PROPERTY INTERFACE_LINK_DEPENDS
-    "${DAS_EFFECTIVE_LINKER_SCRIPT}")
+    "$<BUILD_INTERFACE:${DAS_EFFECTIVE_LINKER_SCRIPT}>")
+
+set(DAS_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/DAS")
+set(DAS_INSTALL_LINKER_DIR "${CMAKE_INSTALL_DATADIR}/das")
+get_filename_component(DAS_LINKER_SCRIPT_BASENAME
+    "${DAS_EFFECTIVE_LINKER_SCRIPT}" NAME)
+
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/DASConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/DASConfig.cmake"
+    INSTALL_DESTINATION "${DAS_INSTALL_CMAKEDIR}"
+    PATH_VARS DAS_INSTALL_LINKER_DIR)
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/DASConfigVersion.cmake"
+    VERSION "${PROJECT_VERSION}"
+    COMPATIBILITY SameMajorVersion)
+
+install(TARGETS das
+    EXPORT DASTargets
+    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/das"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    FILES_MATCHING PATTERN "*.h")
+install(FILES "${DAS_EFFECTIVE_LINKER_SCRIPT}"
+    DESTINATION "${DAS_INSTALL_LINKER_DIR}")
+install(EXPORT DASTargets
+    FILE DASTargets.cmake
+    NAMESPACE das::
+    DESTINATION "${DAS_INSTALL_CMAKEDIR}")
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/DASConfig.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/DASConfigVersion.cmake"
+    DESTINATION "${DAS_INSTALL_CMAKEDIR}")
 
 if(DAS_BUILD_LINK_TESTS)
     add_subdirectory(tests/link/stm32h755)

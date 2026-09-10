@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#include <das/board.h>
-#include <das/time.h>
+#include <das/das.h>
 
 int main(void) {
     if (das_board_led_init(DAS_BOARD_LED_GREEN, false) != DAS_OK) {

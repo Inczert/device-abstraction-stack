@@ -1,10 +1,8 @@
 # SPI
 
-DAS exposes SPI controller transfers through an opaque generic handle. Application code does not select STM32 SPI instances, alternate functions, RCC mux values, FIFO/status bits or baud-divider encodings.
+DAS exposes SPI controller transfers through an opaque generic handle. STM32 SPI instances, alternate functions, RCC mux fields, FIFO/status bits, DMA streams and DMAMUX request IDs stay below the public API.
 
 ## Controller API
-
-The current baseline is byte-oriented and supports all four conventional SPI modes plus both bit orders:
 
 ```c
 const das_spi_config_t config = {
@@ -14,99 +12,81 @@ const das_spi_config_t config = {
 };
 
 das_spi_t spi = DAS_SPI_INVALID;
-if (das_board_spi_init(DAS_BOARD_SPI_ARDUINO, &config, &spi) != DAS_OK) {
-    /* handle error */
-}
+(void)das_board_spi_init(DAS_BOARD_SPI_ARDUINO, &config, &spi);
 ```
 
-`frequency_hz` is a requested **maximum** serial-clock rate. The backend chooses the fastest supported divider that does not exceed it. `das_spi_get_frequency()` returns the effective SCK rate.
+The current baseline is 8-bit and supports modes 0..3 plus MSB/LSB-first operation. `frequency_hz` is a requested maximum; `das_spi_get_frequency()` returns the selected effective SCK.
 
-The STM32H755 baseline uses eight application bits per frame. Wider frames can be added later if a portable use case requires them rather than leaking every STM32 DSIZE possibility into the first API.
-
-## Transfers
-
-SPI is inherently full duplex. The generic polling transfer accepts independent TX and RX buffers:
+## Polling transfers
 
 ```c
 das_spi_transfer(spi, tx, rx, size);
+das_spi_transfer_timeout(spi, tx, rx, size, timeout_ms);
 ```
 
-For asymmetric polling use:
+SPI is full duplex. For polling convenience, `tx == NULL` sends `0xff` fill bytes and `rx == NULL` discards incoming bytes. Both cannot be null for a non-zero transfer.
 
-- `tx == NULL` transmits `0xff` fill bytes while receiving;
-- `rx == NULL` discards received bytes while transmitting;
-- both may not be `NULL` for a non-zero transfer.
+## DMA transfers
 
-`das_spi_transfer_timeout()` uses the generic DAS monotonic time source for a finite timeout. `das_spi_transfer()` blocks until completion.
-
-Issue #9 adds a full-duplex DMA path using implementation-selected DMA resources:
+Full-duplex SPI DMA is available:
 
 ```c
-das_spi_transfer_dma_timeout(spi, tx, rx, size, 50u);
+das_spi_transfer_dma(spi, tx, rx, size);
+das_spi_transfer_dma_timeout(spi, tx, rx, size, timeout_ms);
 ```
 
-The first DMA baseline requires both TX and RX buffers for a non-zero transfer. It does not silently perform CPU cache maintenance. On a cached core, prepare the TX/RX buffers with `das/cache.h` before starting DMA and invalidate the RX buffer after completion. See `docs/dma.md` for the ownership and cache-line rules.
+The current DMA path requires both TX and RX buffers for non-zero transfers and uses implementation-selected DMA1/DMAMUX1 resources.
 
-## Chip select ownership
+DMA does not make cacheable memory coherent automatically. On CM7, callers explicitly clean TX data and prepare/invalidate RX storage with `<das/cache.h>`. See [DMA and cache coherency](dma.md).
 
-A transfer **does not assert or deassert chip select automatically**. Chip select belongs to the transaction/device policy above the controller because real SPI devices often require several transfers under one assertion.
+## Chip select
 
-For the NUCLEO semantic Arduino route, DAS provides one convenient board default:
+SPI transfer calls never assert/deassert chip select implicitly. For the Arduino route:
 
 ```c
-das_board_spi_chip_select(DAS_BOARD_SPI_ARDUINO, true);  /* active low */
+das_board_spi_chip_select(DAS_BOARD_SPI_ARDUINO, true);
 das_spi_transfer(spi, tx, rx, size);
 das_board_spi_chip_select(DAS_BOARD_SPI_ARDUINO, false);
 ```
 
-Applications with multiple devices can use any normal DAS GPIO as additional chip-select lines. The controller API itself is intentionally unaware of them.
+Applications with multiple devices can use additional normal DAS GPIOs as chip-select lines.
 
 ## NUCLEO-H755ZI-Q route
 
-The semantic resource maps internally to:
-
 ```text
 DAS_BOARD_SPI_ARDUINO
-SCK   PA5   SPI1 SCK   AF5
-MISO  PA6   SPI1 MISO  AF5
-MOSI  PB5   SPI1 MOSI  AF5
+SCK   PA5   SPI1_SCK   AF5
+MISO  PA6   SPI1_MISO  AF5
+MOSI  PB5   SPI1_MOSI  AF5
 CS    PD14  GPIO, active low
 ```
 
-These STM32 details remain in the board/device layers.
+## Clock policy
 
-## STM32H755 clock policy
+The STM32H755 backend derives/selects the SPI1 kernel clock from live RCC state and chooses the fastest supported prescaler that does not exceed the requested SCK. It does not assume SPI1 clock equals APB2.
 
-SPI1 belongs to the SPI1/2/3 kernel-clock group. The current backend selects `PER_CK` for that group and selects live HSI as `PER_CK`, then derives the actual HSI rate from the RCC HSI divider before choosing the SPI master prescaler.
+## Hardware qualification
 
-This makes the serial clock explicit and independent of whether CM7 is currently using the 64, 200, 300 or 400 MHz board profile. It also avoids pretending that the SPI1 kernel clock is simply APB2.
-
-The polling and DMA paths reuse the same controller configuration. The STM32H755 DMA implementation keeps DMA1 stream selection and SPI1 DMAMUX request identifiers private; application code never supplies them.
-
-## Focused physical qualification
-
-The polling SPI baseline can still be checked independently with:
+Polling fast-path qualifier:
 
 ```bash
 ./scripts/stm32h755_spi_test.sh /home/dev/STM32Cube/Repository/STM32CubeH7/
 ```
 
-Connect one jumper:
+DMA qualifier:
 
-```text
-Arduino SPI MOSI / PB5 ---- jumper ---- Arduino SPI MISO / PA6
+```bash
+./scripts/stm32h755_dma_test.sh /home/dev/STM32Cube/Repository/STM32CubeH7/
 ```
 
-Leave SCK/PA5 and CS/PD14 otherwise unconnected. The polling qualifier runs separate CM7 and CM4 images and checks:
+Both reuse:
 
-- semantic PA5/PA6/PB5/PD14 board mapping;
-- active-low default CS helper;
-- mode 0, 1, 2 and 3 transfers;
-- MSB-first and LSB-first operation;
-- effective 1, 2, 4 and 8 MHz serial clocks;
-- physical MOSI-to-MISO equality over transfer lengths 1, 7, 31 and 64 bytes;
-- receive-only fill semantics and transmit-only discard semantics;
-- exact equality of 111 physically looped-back bytes;
-- continued execution after all transfers.
+```text
+Arduino D11 / MOSI / PB5 <-> Arduino D12 / MISO / PA6
+```
 
-DMA-specific SPI qualification is part of `scripts/stm32h755_dma_test.sh` and reuses the same MOSI/MISO jumper. The persistent campaign fixture therefore needs no new SPI wiring when #9 is eventually promoted into the main regression campaign.
+Polling qualification covers modes 0..3, both bit orders, 1/2/4/8 MHz requested SCK, transfer lengths 1/7/31/64, receive-only/transmit-only semantics and exact equality across 111 looped-back bytes on each core.
+
+SPI-DMA qualification covers a 192-byte full-duplex physical transfer at 4 MHz on each core, with explicit CM7 cache maintenance.
+
+Both polling and DMA SPI paths are part of the completed **38/38** standing STM32H755 campaign.

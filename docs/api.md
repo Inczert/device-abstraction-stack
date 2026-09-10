@@ -2,7 +2,7 @@
 
 DAS public headers live under `include/das/`. Application code should use these headers rather than implementation files under `src/`. Public APIs use DAS and standard C types; CMSIS and STM32 types remain backend details.
 
-Current public headers:
+## Public headers
 
 ```text
 include/das/result.h
@@ -10,6 +10,12 @@ include/das/clock.h
 include/das/time.h
 include/das/irq.h
 include/das/gpio.h
+include/das/cache.h
+include/das/dma.h
+include/das/uart.h
+include/das/spi.h
+include/das/i2c.h
+include/das/timer.h
 include/das/board.h
 include/das/board_resources.h
 include/das/cortex_m/startup.h
@@ -18,451 +24,189 @@ include/das/cortex_m/startup.h
 ## Result codes
 
 ```c
-#include <das/result.h>
-```
-
-```c
 typedef enum das_result {
     DAS_OK = 0,
     DAS_ERROR_INVALID_ARGUMENT = -1,
     DAS_ERROR_UNSUPPORTED = -2,
     DAS_ERROR_TIMEOUT = -3,
-    DAS_ERROR_NOT_READY = -4
+    DAS_ERROR_NOT_READY = -4,
+    DAS_ERROR_IO = -5
 } das_result_t;
 ```
 
-`DAS_ERROR_INVALID_ARGUMENT` covers invalid handles, pins, enum values, null output pointers and unsupported numeric ranges. `DAS_ERROR_UNSUPPORTED` means a valid generic operation/profile is unavailable on the selected backend/board. `DAS_ERROR_TIMEOUT` reports a bounded hardware transition that did not reach its required state. `DAS_ERROR_NOT_READY` reports an operation that requires prior initialization or an installed resource.
+`DAS_ERROR_INVALID_ARGUMENT` covers invalid handles, pins, enum values, null pointers and invalid numeric ranges. `DAS_ERROR_UNSUPPORTED` means a valid generic operation is unavailable on the selected backend. `DAS_ERROR_TIMEOUT` reports a bounded operation that missed its deadline. `DAS_ERROR_NOT_READY` reports missing initialization/resource state. `DAS_ERROR_IO` reports a peripheral/DMA transport or data-path failure.
 
-## Clock API
+## Clock
 
-```c
-#include <das/clock.h>
-```
+Header: `<das/clock.h>`
 
-Applications select a board frequency in hertz. PLL dividers, voltage scaling, FLASH latency, bus prescalers and board power configuration remain backend details.
+Applications select a board frequency in hertz and query the resulting system/executing-core rate. The current NUCLEO-H755ZI-Q backend advertises 64, 200, 300 and 400 MHz. PLL dividers, voltage scale, FLASH latency and bus prescalers remain backend details.
 
-```c
-das_result_t das_clock_set_frequency(uint32_t frequency_hz);
-das_result_t das_clock_get_frequency(uint32_t* frequency_hz);
-das_result_t das_clock_get_core_frequency(uint32_t* frequency_hz);
-bool das_clock_frequency_supported(uint32_t frequency_hz);
-size_t das_clock_get_supported_frequencies(uint32_t* frequencies_hz,
-                                           size_t capacity);
-```
-
-The current NUCLEO-H755ZI-Q backend advertises 64, 200, 300 and 400 MHz. `das_clock_get_frequency()` returns the primary/system frequency; `das_clock_get_core_frequency()` returns the frequency of the core executing the selected DAS build, which can differ on a multi-core device.
+CM7 owns global clock changes on STM32H755; CM4 may query the live tree but global frequency changes are unsupported from CPU2.
 
 See [Clock control](clocks.md).
 
-## Monotonic time API
+## Monotonic time
 
-```c
-#include <das/time.h>
-```
+Header: `<das/time.h>`
 
-The public timestamp type is a wrapping millisecond counter:
-
-```c
-typedef uint32_t das_time_ms_t;
-#define DAS_TIME_MAX_INTERVAL_MS UINT32_C(0x7fffffff)
-```
-
-Initialize the target default source:
-
-```c
-das_result_t das_time_init(void);
-```
-
-Read/use it:
-
-```c
-bool das_time_is_ready(void);
-das_time_ms_t das_time_now_ms(void);
-uint32_t das_time_elapsed_ms(das_time_ms_t start_ms);
-bool das_time_interval_elapsed(das_time_ms_t start_ms,
-                               uint32_t interval_ms);
-das_result_t das_time_deadline_after(uint32_t delay_ms,
-                                     das_time_ms_t* deadline_ms);
-bool das_time_deadline_reached(das_time_ms_t deadline_ms);
-das_result_t das_delay_ms(uint32_t duration_ms);
-```
-
-An RTOS/application can replace the default source:
-
-```c
-typedef das_time_ms_t (*das_time_source_fn_t)(void* context);
-das_result_t das_time_set_source(das_time_source_fn_t source,
-                                 void* context);
-```
-
-On the current Cortex-M target the default backend uses CMSIS `SysTick_Config()` at 1 kHz, calculated from the live executing-core frequency. Public callers do not interact with SysTick or `SystemCoreClock`.
+The API provides a wrapping `uint32_t` millisecond timestamp, elapsed/deadline helpers, finite intervals, `das_delay_ms()`, default target initialization, and an application/RTOS source callback. The Cortex-M default uses a 1 kHz SysTick derived from the live executing-core frequency.
 
 See [Monotonic time](time.md).
 
-## Interrupt-controller API
+## Interrupt controller
 
-```c
-#include <das/irq.h>
-```
+Header: `<das/irq.h>`
 
-### Interrupt handles
+`das_irq_t` is an opaque interrupt-controller handle. The API provides validity, enable/disable/query, priority-level query/set/get and pending set/clear/query. On Cortex-M the backend delegates to CMSIS NVIC internally.
 
-```c
-typedef struct das_irq {
-    uint32_t storage;
-} das_irq_t;
-```
-
-`storage` is backend-owned. Applications must not interpret it as an NVIC number or construct handles from vendor constants. Initialize an empty handle with:
-
-```c
-das_irq_t irq = DAS_IRQ_INVALID;
-```
-
-and obtain a real handle from the DAS resource associated with the interrupt source, for example GPIO or a board button.
-
-### Enable state
-
-```c
-das_result_t das_irq_enable(das_irq_t irq);
-das_result_t das_irq_disable(das_irq_t irq);
-das_result_t das_irq_is_enabled(das_irq_t irq, bool* enabled);
-```
-
-These functions control the CPU interrupt-controller line. They do not configure or clear the peripheral/source itself.
-
-### Priority
-
-```c
-uint32_t das_irq_priority_levels(void);
-das_result_t das_irq_set_priority(das_irq_t irq, uint32_t priority);
-das_result_t das_irq_get_priority(das_irq_t irq, uint32_t* priority);
-```
-
-Priority semantics are:
-
-```text
-0                              highest priority
-...
-das_irq_priority_levels()-1   lowest priority
-```
-
-On Cortex-M, DAS maps this onto CMSIS `NVIC_*` and `__NVIC_PRIO_BITS` internally.
-
-### Controller pending state
-
-```c
-das_result_t das_irq_set_pending(das_irq_t irq);
-das_result_t das_irq_clear_pending(das_irq_t irq);
-das_result_t das_irq_is_pending(das_irq_t irq, bool* pending);
-```
-
-Controller pending state is separate from a peripheral/source event flag.
+GPIO, periodic timer and DMA APIs can resolve their controller line as a `das_irq_t`. Source-specific pending/enable/clear behavior remains in the owning peripheral API.
 
 See [Interrupt model](interrupts.md).
 
-## GPIO API
+## GPIO and EXTI
 
-```c
-#include <das/gpio.h>
-```
+Header: `<das/gpio.h>`
 
-### Pins
+The GPIO API covers:
 
-```c
-typedef struct das_gpio_pin {
-    das_gpio_port_t port;
-    uint8_t pin;
-} das_gpio_pin_t;
-```
+- ports A through K as generic identifiers;
+- input/output/alternate/analog modes;
+- none/up/down pulls;
+- push-pull/open-drain output type;
+- low/medium/high/very-high speed;
+- alternate-function selection;
+- atomic logical write/toggle and input/output readback;
+- rising/falling/both-edge interrupt configuration;
+- source enable/pending/clear and IRQ resolution.
 
-Example:
+STM32 GPIO registers, EXTI/SYSCFG routing and NVIC numbers do not appear in the public contract.
 
-```c
-const das_gpio_pin_t pe14 = {
-    .port = DAS_GPIO_PORT_E,
-    .pin = 14u,
-};
-```
+## UART
 
-Generic port identifiers currently span `DAS_GPIO_PORT_A` through `DAS_GPIO_PORT_K`. A backend may reject ports absent on its target.
+Header: `<das/uart.h>`
 
-### Configuration
+`das_uart_t` is opaque. The current API supports:
 
-Modes:
+- 7 or 8 **application** data bits;
+- no/even/odd parity;
+- one/two stop bits;
+- blocking read/write;
+- finite-time read/write using the DAS time source;
+- effective baud-rate query;
+- transmit flush;
+- `DAS_UART_WAIT_FOREVER`.
 
-```text
-DAS_GPIO_MODE_INPUT
-DAS_GPIO_MODE_OUTPUT
-DAS_GPIO_MODE_ALTERNATE
-DAS_GPIO_MODE_ANALOG
-```
+The parity bit is never exposed as application data. Receive framing/parity/noise/overrun faults map to `DAS_ERROR_IO`.
 
-Pulls:
+Qualified board routes are ST-LINK VCP (USART3 internally) and Arduino D1/D0 (USART1 internally).
 
-```text
-DAS_GPIO_PULL_NONE
-DAS_GPIO_PULL_UP
-DAS_GPIO_PULL_DOWN
-```
+See [UART](uart.md).
 
-Output types:
+## SPI
 
-```text
-DAS_GPIO_OUTPUT_PUSH_PULL
-DAS_GPIO_OUTPUT_OPEN_DRAIN
-```
+Header: `<das/spi.h>`
 
-Speeds:
+`das_spi_t` is opaque. The current byte-oriented controller API supports:
 
-```text
-DAS_GPIO_SPEED_LOW
-DAS_GPIO_SPEED_MEDIUM
-DAS_GPIO_SPEED_HIGH
-DAS_GPIO_SPEED_VERY_HIGH
-```
+- modes 0, 1, 2 and 3;
+- MSB-first and LSB-first;
+- requested maximum/effective SCK frequency;
+- blocking and finite-time full-duplex polling transfers;
+- `tx == NULL` receive-only fill semantics and `rx == NULL` transmit-only discard semantics;
+- full-duplex DMA transfer through implementation-selected DMA resources.
 
-Complete configuration:
+SPI transfer calls do not assert chip select. Board/default CS control is separate so applications can keep one assertion across several transfers.
 
-```c
-typedef struct das_gpio_config {
-    das_gpio_mode_t mode;
-    das_gpio_pull_t pull;
-    das_gpio_output_type_t output_type;
-    das_gpio_speed_t speed;
-    uint8_t alternate;
-    bool initial_high;
-} das_gpio_config_t;
+See [SPI](spi.md).
 
-das_result_t das_gpio_configure(
-    das_gpio_pin_t pin,
-    const das_gpio_config_t* config);
-```
+## I2C
 
-Convenience initialization:
+Header: `<das/i2c.h>`
 
-```c
-das_result_t das_gpio_input_init(das_gpio_pin_t pin,
-                                 das_gpio_pull_t pull);
-das_result_t das_gpio_output_init(das_gpio_pin_t pin,
-                                  bool initial_high);
-das_result_t das_gpio_output_init_ex(
-    das_gpio_pin_t pin,
-    das_gpio_output_type_t output_type,
-    das_gpio_pull_t pull,
-    das_gpio_speed_t speed,
-    bool initial_high);
-```
+`das_i2c_t` is opaque. The current controller baseline supports:
 
-I/O:
+- 7-bit addressing;
+- 100 kHz Standard mode and 400 kHz Fast mode;
+- address-only probe;
+- read/write;
+- combined write/repeated-START/read;
+- blocking and finite-time variants;
+- nominal configured-frequency query;
+- up to 255 bytes per non-empty phase in the current implementation.
 
-```c
-das_result_t das_gpio_write(das_gpio_pin_t pin, bool high);
-das_result_t das_gpio_toggle(das_gpio_pin_t pin);
-bool das_gpio_read_output(das_gpio_pin_t pin);
-bool das_gpio_read_input(das_gpio_pin_t pin);
-```
+NACK, arbitration loss, bus error and overrun map to `DAS_ERROR_IO`.
 
-For STM32H7 the backend uses `BSRR` for atomic set/reset and supports alternate-function selectors 0 through 15.
+See [I2C](i2c.md).
 
-### GPIO interrupt source
+## Timer and PWM
 
-```c
-typedef enum das_gpio_interrupt_edge {
-    DAS_GPIO_INTERRUPT_RISING,
-    DAS_GPIO_INTERRUPT_FALLING,
-    DAS_GPIO_INTERRUPT_BOTH
-} das_gpio_interrupt_edge_t;
+Header: `<das/timer.h>`
 
-das_result_t das_gpio_interrupt_configure(
-    das_gpio_pin_t pin,
-    das_gpio_interrupt_edge_t edge);
-das_result_t das_gpio_interrupt_enable(das_gpio_pin_t pin,
-                                       bool enabled);
-das_result_t das_gpio_interrupt_get_irq(das_gpio_pin_t pin,
-                                        das_irq_t* irq);
-bool das_gpio_interrupt_pending(das_gpio_pin_t pin);
-das_result_t das_gpio_interrupt_clear(das_gpio_pin_t pin);
-```
+`das_timer_t` provides a generic periodic timer with requested/effective frequency, start/stop/running state, counter read/reset, update-event source enable/pending/clear and `das_irq_t` resolution.
 
-Several source lines can share one controller handle. On STM32H755, GPIO EXTI lines 10 through 15 share a controller IRQ, so source-specific masking/pending remains in the GPIO API while controller enable/priority remains in `das_irq_*()`.
+`das_pwm_t` provides frequency and integer duty in per-mille (`0..1000`) with start/stop/running and duty/frequency readback. The current board semantic PWM route is Arduino D4.
 
-## Board API
+See [Timers and PWM](timer.md).
 
-```c
-#include <das/board.h>
-```
+## DMA
 
-### User LEDs
+Header: `<das/dma.h>`
 
-Current NUCLEO-H755ZI-Q resources:
+`das_dma_t` is an opaque acquired execution resource. The API provides:
+
+- acquire/release/validity;
+- peripheral-to-memory, memory-to-peripheral and memory-to-memory directions;
+- byte/halfword/word element widths;
+- independent source/destination increment semantics;
+- configure/start/state/remaining-count;
+- blocking and finite-time completion wait;
+- abort;
+- IRQ resolution.
+
+The STM32H755 backend uses DMA1/DMAMUX1 internally. Stream and request identifiers are not public API.
+
+See [DMA and cache coherency](dma.md).
+
+## Data cache
+
+Header: `<das/cache.h>`
+
+The cache API exposes D-cache availability/enabled state/line size, enable/disable, and clean/invalidate/clean+invalidate range maintenance.
+
+CM7 uses CMSIS cache primitives with 32-byte line-aware range expansion. CM4 has no D-cache; range maintenance is a successful no-op while enabling/disabling a nonexistent cache returns `DAS_ERROR_UNSUPPORTED`.
+
+DMA does not perform cache maintenance automatically. Buffer ownership and coherency remain explicit at the call site.
+
+## Board APIs
+
+Headers: `<das/board.h>` and `<das/board_resources.h>`
+
+Semantic board resources currently include:
 
 ```text
-DAS_BOARD_LED_GREEN   -> LD1 / PB0  / active high
-DAS_BOARD_LED_YELLOW  -> LD2 / PE1  / active high
-DAS_BOARD_LED_RED     -> LD3 / PB14 / active high
+LED green/yellow/red     -> LD1/LD2/LD3
+B1 USER                  -> semantic button API
+ST-LINK VCP UART         -> PD8/PD9 route
+Arduino UART             -> PB6/PB7 route
+Arduino I2C              -> PB8/PB9 route
+Arduino SPI              -> PA5/PA6/PB5 + PD14 CS
+Arduino PWM D4           -> PE14
+Arduino GPIO D3/D4       -> PE13/PE14 aliases
 ```
 
-Functions:
+The board layer owns physical polarity, connector routing and alternate-function choices. Applications receive generic handles/pins rather than STM32 peripheral types.
 
-```c
-das_result_t das_board_led_init(das_board_led_t led,
-                                bool initially_on);
-das_result_t das_board_led_init_all(bool initially_on);
-das_result_t das_board_led_set(das_board_led_t led, bool on);
-das_result_t das_board_led_toggle(das_board_led_t led);
-bool das_board_led_is_on(das_board_led_t led);
-das_gpio_pin_t das_board_led_pin(das_board_led_t led);
-```
+See [Board resources](board.md).
 
-### User button
+## Cortex-M startup
 
-The stock blue B1 USER button is represented semantically:
+Header: `<das/cortex_m/startup.h>`
 
-```c
-DAS_BOARD_BUTTON_USER
-```
+DAS provides weak reusable `Reset_Handler` and core exception defaults. The reset path restores `.data`, clears `.bss`, writes VTOR and enters `main()`.
 
-Applications do not need to know the underlying pin or active polarity:
-
-```c
-das_result_t das_board_button_init(das_board_button_t button);
-bool das_board_button_is_pressed(das_board_button_t button);
-das_gpio_pin_t das_board_button_pin(das_board_button_t button);
-```
-
-Interrupt source API:
-
-```c
-typedef enum das_board_button_event {
-    DAS_BOARD_BUTTON_EVENT_PRESS,
-    DAS_BOARD_BUTTON_EVENT_RELEASE,
-    DAS_BOARD_BUTTON_EVENT_BOTH
-} das_board_button_event_t;
-
-das_result_t das_board_button_interrupt_configure(
-    das_board_button_t button,
-    das_board_button_event_t event);
-das_result_t das_board_button_interrupt_enable(
-    das_board_button_t button,
-    bool enabled);
-bool das_board_button_interrupt_pending(das_board_button_t button);
-das_result_t das_board_button_interrupt_clear(das_board_button_t button);
-das_result_t das_board_button_interrupt_get_irq(
-    das_board_button_t button,
-    das_irq_t* irq);
-```
-
-On the NUCLEO-H755ZI-Q default board configuration B1 is PC13 with a board pull-down and active-high press. Those electrical details remain in the board backend.
-
-## Semantic connector resources
-
-```c
-#include <das/board_resources.h>
-```
-
-These mappings identify useful board connections without exposing STM32 peripheral types.
-
-### UART connections
-
-```c
-typedef enum das_board_uart_resource {
-    DAS_BOARD_UART_STLINK_VCP,
-    DAS_BOARD_UART_ARDUINO,
-    DAS_BOARD_UART_COUNT
-} das_board_uart_resource_t;
-
-typedef struct das_board_uart_pins {
-    das_gpio_pin_t tx;
-    das_gpio_pin_t rx;
-} das_board_uart_pins_t;
-
-das_result_t das_board_uart_get_pins(
-    das_board_uart_resource_t resource,
-    das_board_uart_pins_t* pins);
-```
-
-Current board mapping:
-
-```text
-ST-LINK VCP  -> PD8 / PD9
-Arduino UART -> PB6 / PB7
-```
-
-### I2C connection
-
-```c
-typedef struct das_board_i2c_pins {
-    das_gpio_pin_t scl;
-    das_gpio_pin_t sda;
-} das_board_i2c_pins_t;
-
-das_result_t das_board_i2c_get_pins(
-    das_board_i2c_resource_t resource,
-    das_board_i2c_pins_t* pins);
-```
-
-`DAS_BOARD_I2C_ARDUINO` resolves to PB8/PB9.
-
-### SPI connection
-
-```c
-typedef struct das_board_spi_pins {
-    das_gpio_pin_t sck;
-    das_gpio_pin_t miso;
-    das_gpio_pin_t mosi;
-    das_gpio_pin_t cs;
-} das_board_spi_pins_t;
-
-das_result_t das_board_spi_get_pins(
-    das_board_spi_resource_t resource,
-    das_board_spi_pins_t* pins);
-```
-
-`DAS_BOARD_SPI_ARDUINO` resolves to PA5/PA6/PB5 with PD14 as the connector-associated chip-select GPIO.
-
-### Qualification GPIOs
-
-```c
-DAS_BOARD_GPIO_ARDUINO_D3
-das_board_gpio_pin(DAS_BOARD_GPIO_ARDUINO_D3);
-
-DAS_BOARD_GPIO_ARDUINO_D4
-das_board_gpio_pin(DAS_BOARD_GPIO_ARDUINO_D4);
-```
-
-These resolve to PE13 and PE14 respectively and name the established physical loopback fixture used by the hardware campaign.
-
-The resource API deliberately stops short of creating aliases for every NUCLEO connector pin. See [NUCLEO board resources](board.md).
-
-## Cortex-M startup API
-
-```c
-#include <das/cortex_m/startup.h>
-```
-
-DAS provides weak reset/runtime and core-exception symbols for bare-metal Cortex-M integration. Applications, bootloaders and RTOSes may replace the weak definitions.
-
-The default reset path restores `.data`, clears `.bss`, writes VTOR from the linker contract and calls `main()`.
+The **final firmware owns the vector table**. A bare-metal application retaining DAS startup must provide `.isr_vector` entries for the initial stack pointer, `Reset_Handler`, and every core/device handler it uses. This includes `SysTick_Handler` when using the default DAS time source.
 
 ## API design rule
 
-DAS abstracts functionality where a stable user-facing contract provides portability or hides target-specific configuration. It does not duplicate CMSIS merely to rename it.
-
-For example:
-
-```text
-public:   das_irq_enable(das_irq_t)
-backend:  CMSIS NVIC_EnableIRQ(...)
-```
-
-Similarly, board APIs describe physical board intent while lower layers keep silicon details:
-
-```text
-public:   DAS_BOARD_BUTTON_USER
-board:    PC13, active-high, board pull-down
-device:   GPIO + EXTI
-core:     NVIC through generic DAS IRQ API
-```
-
-DAS remains early (`0.1.x`). Public APIs are intended to stabilize over time, but compatibility should not yet be assumed across development revisions.
+DAS abstracts functionality when it provides a stable application contract or hides target-specific configuration. It does not duplicate CMSIS merely to rename it. Public headers remain vendor-type free; board/device/core implementation details stay in their owning layers.

@@ -1,77 +1,28 @@
 # NUCLEO-H755ZI-Q board resources
 
-The DAS board layer exposes a deliberately small set of **semantic resources** for the NUCLEO-H755ZI-Q. It is not intended to reproduce the STM32H755 pin table under different names.
+The DAS board layer exposes a deliberately small set of **semantic resources** for the NUCLEO-H755ZI-Q. It does not reproduce the entire STM32H755 pin table under different names.
 
-The guiding rule is simple: a mapping belongs here when applications, examples, or hardware-qualification code benefit from referring to a board function rather than a raw MCU pin.
+A mapping belongs here when application code benefits from referring to a board function or connector route instead of a raw MCU pin/peripheral instance.
 
 ## Layer boundary
 
 ```text
-application / test
-        |
-        v
+application
+    |
+    v
 semantic board resource
-        |
-        v
-generic DAS GPIO / peripheral API
-        |
-        v
-STM32H755 backend
-        |
-        v
-CMSIS device definitions
+    |
+    v
+generic DAS peripheral/GPIO API
+    |
+    v
+STM32H755 device backend
+    |
+    v
+CMSIS definitions
 ```
-
-Board code owns facts such as "B1 is active high" or "the ST-LINK VCP is wired to these two MCU pins". The generic GPIO/UART/I2C/SPI implementations do not.
-
-## User button
-
-The stock board's blue B1 USER button is exposed as:
-
-```c
-DAS_BOARD_BUTTON_USER
-```
-
-Default board routing:
-
-```text
-B1 USER -> PC13
-logical released -> low
-logical pressed  -> high
-```
-
-The board has a hardware pull-down on the B1 signal, so DAS configures PC13 as an input without adding an internal pull. Press/release polarity is hidden by the board API.
-
-Typical polling use:
-
-```c
-(void)das_board_button_init(DAS_BOARD_BUTTON_USER);
-
-if (das_board_button_is_pressed(DAS_BOARD_BUTTON_USER)) {
-    /* button is physically pressed */
-}
-```
-
-For interrupts:
-
-```c
-das_irq_t irq = DAS_IRQ_INVALID;
-
-(void)das_board_button_interrupt_configure(
-    DAS_BOARD_BUTTON_USER,
-    DAS_BOARD_BUTTON_EVENT_BOTH);
-(void)das_board_button_interrupt_get_irq(DAS_BOARD_BUTTON_USER, &irq);
-(void)das_irq_enable(irq);
-(void)das_board_button_interrupt_enable(DAS_BOARD_BUTTON_USER, true);
-```
-
-The board layer maps `PRESS` and `RELEASE` onto the correct GPIO edge. Applications do not need to know that the current board is active high or that the signal is PC13.
-
-The current default mapping assumes the stock NUCLEO solder-bridge routing for B1. A board modified to route the button differently is outside this qualified profile until its board configuration is represented explicitly.
 
 ## LEDs
-
-Existing LED resources remain unchanged:
 
 | DAS resource | Board marking | MCU pin | Logical on |
 | --- | --- | --- | --- |
@@ -79,75 +30,88 @@ Existing LED resources remain unchanged:
 | `DAS_BOARD_LED_YELLOW` | LD2 | PE1 | high |
 | `DAS_BOARD_LED_RED` | LD3 | PB14 | high |
 
-## UART connections
+The board API provides init/set/toggle/readback and pin resolution without requiring an application to know the physical pins.
 
-`include/das/board_resources.h` defines named UART **connections** rather than STM32 peripheral instances.
-
-| DAS resource | Purpose | TX | RX |
-| --- | --- | --- | --- |
-| `DAS_BOARD_UART_STLINK_VCP` | ST-LINK USB virtual COM path | PD8 | PD9 |
-| `DAS_BOARD_UART_ARDUINO` | Arduino/Zio D1/D0 serial pair | PB6 | PB7 |
-
-The current resource API returns pins only. The future UART backend (#8) owns USART/LPUART configuration, alternate-function selection, baud generation, interrupts and data transfer. This keeps board wiring separate from peripheral implementation.
-
-The ST-LINK VCP mapping assumes the stock solder-bridge configuration connecting PD8/PD9 to the ST-LINK virtual COM interface.
-
-## Arduino/Zio I2C
-
-| DAS resource | Connector signals | SCL | SDA |
-| --- | --- | --- | --- |
-| `DAS_BOARD_I2C_ARDUINO` | D15 / D14 | PB8 | PB9 |
-
-The future I2C backend (#12) owns peripheral configuration and electrical protocol behavior. This board resource only identifies the routed connector pins.
-
-## Arduino/Zio SPI
-
-| DAS resource | SCK | MISO | MOSI | board CS GPIO |
-| --- | --- | --- | --- | --- |
-| `DAS_BOARD_SPI_ARDUINO` | PA5 | PA6 | PB5 | PD14 |
-
-The `cs` member is intentionally a normal GPIO resource associated with the connector. DAS does not assume every SPI device must use hardware NSS or that every attached device shares one chip-select policy.
-
-The future SPI backend (#11) owns the SPI peripheral, alternate functions, clocking and transfers.
-
-## Qualification GPIO pair
-
-The established electrical-loopback fixture is now represented semantically:
+## User button
 
 ```text
-DAS_BOARD_GPIO_ARDUINO_D4 -> PE14 -> CN10 pin 8
-DAS_BOARD_GPIO_ARDUINO_D3 -> PE13 -> CN10 pin 10
+DAS_BOARD_BUTTON_USER -> B1 USER -> PC13
+released -> low
+pressed  -> high
 ```
 
-The physical campaign connects D4 to D3 with one jumper for output/input, open-drain and EXTI qualification. Keeping these names in the board layer lets the fixture remain understandable without scattering `PE13` and `PE14` through future test code.
+The stock board provides the signal bias. DAS exposes logical press/release state plus press/release/both-event interrupt configuration, source enable/pending/clear and generic `das_irq_t` resolution.
+
+## UART routes
+
+| DAS resource | Purpose | TX | RX | Device fact |
+| --- | --- | --- | --- | --- |
+| `DAS_BOARD_UART_STLINK_VCP` | ST-LINK USB VCP | PD8 | PD9 | USART3 / AF7 |
+| `DAS_BOARD_UART_ARDUINO` | Arduino D1/D0 | PB6 | PB7 | USART1 / AF7 |
+
+`das_board_uart_init()` configures the route and returns an opaque `das_uart_t`. The STM32 USART instance and AF values remain board/backend facts.
+
+## Arduino I2C
+
+```text
+DAS_BOARD_I2C_ARDUINO
+SCL -> D15 / PB8 / I2C1_SCL AF4
+SDA -> D14 / PB9 / I2C1_SDA AF4
+```
+
+`das_board_i2c_init()` configures alternate-function open-drain pins and returns an opaque `das_i2c_t`.
+
+The qualification fixture uses I2C4 on PF14/PF15 as a test-only target; that endpoint is not exposed as a normal board resource.
+
+## Arduino SPI
+
+```text
+DAS_BOARD_SPI_ARDUINO
+SCK   -> PA5 / SPI1_SCK  AF5
+MISO  -> PA6 / SPI1_MISO AF5
+MOSI  -> PB5 / SPI1_MOSI AF5
+CS    -> PD14 / GPIO, active low
+```
+
+`das_board_spi_init()` configures the bus and returns an opaque `das_spi_t`. Chip select remains transaction policy outside `das_spi_transfer*()`. `das_board_spi_chip_select()` controls the route's default active-low CS; applications can use arbitrary DAS GPIOs for additional devices.
+
+## PWM route
+
+```text
+DAS_BOARD_PWM_ARDUINO_D4 -> D4 / PE14 -> TIM1_CH4 AF1 internally
+```
+
+`das_board_pwm_init()` returns an opaque `das_pwm_t`. Application code selects frequency/duty rather than timer instance/channel/AF fields.
+
+## Qualification GPIO aliases
+
+```text
+DAS_BOARD_GPIO_ARDUINO_D3 -> PE13
+DAS_BOARD_GPIO_ARDUINO_D4 -> PE14
+```
+
+The D4-to-D3 jumper is reused for physical GPIO loopback/open-drain/EXTI and PWM observation in the standing hardware campaign.
 
 ## Why not map every connector pin?
 
-The NUCLEO exposes many MCU pins and alternate functions. Turning every one into a `DAS_BOARD_*` alias would create a second pinout table that has to be maintained forever while providing almost no abstraction value.
+The NUCLEO exposes many MCU pins and alternate functions. Turning every pin into a second `DAS_BOARD_*` pinout table would add maintenance without adding abstraction.
 
-New semantic resources should be added when at least one of these is true:
-
-- the board gives the signal a physical function, such as B1 or an LED;
-- a routed connection matters to normal use, such as ST-LINK VCP;
-- a connector group is the natural way a generic peripheral is consumed, such as Arduino I2C/SPI/UART;
-- a stable hardware-qualification fixture needs a named board endpoint.
-
-Raw one-off GPIO access remains available through `das_gpio_pin_t`.
+Add a semantic resource when the board gives the signal a function, a normal routed peripheral connection matters to application code, or a stable qualification fixture benefits from a meaningful board name. One-off raw GPIO access remains available through `das_gpio_pin_t`.
 
 ## Hardware qualification
 
-Issue #15 adds a dedicated CM7 board-resource image to the existing campaign. The image validates the published resource table in firmware and then physically qualifies B1:
+The current 38-case campaign physically qualifies:
 
-1. B1 must initially read released;
-2. the user presses and holds B1;
-3. DAS must observe the logical pressed state and a press EXTI event;
-4. the user releases B1;
-5. DAS must observe the logical released state and a release EXTI event.
+- LED behavior;
+- B1 polling and press/release EXTI;
+- both UART routes' underlying backend through qualified paths;
+- Arduino SPI polling and DMA loopback;
+- Arduino I2C controller against a test-only I2C4 target;
+- Arduino D4 PWM observed through D3;
+- D3/D4 GPIO loopback/open-drain/EXTI.
 
-The test uses the generic `das_irq_t` controller path together with the semantic board-button source API. Mechanical switch bounce is intentionally tolerated: qualification requires at least one press and one release event rather than pretending a push-button is a precision pulse generator.
-
-The established CM7/CM4 GPIO, IRQ, clock and timebase cases remain part of the same archive.
+The stock solder-bridge/configuration assumptions documented here are the qualified board profile. Modified board routing requires an explicit board configuration rather than guesswork.
 
 ## Source of truth
 
-Board mappings are derived from ST's NUCLEO-H755ZI-Q user manual and MB1363 board schematic. When a mapping depends on a solder-bridge option, DAS documents and qualifies the stock/default board configuration rather than guessing the state of a modified board.
+Board mappings are derived from ST's NUCLEO-H755ZI-Q user manual and MB1363 board schematic. Device/peripheral behavior remains implemented below this board layer.

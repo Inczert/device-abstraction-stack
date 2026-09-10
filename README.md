@@ -1,131 +1,69 @@
 # DAS — Device Abstraction Stack
 
-DAS is a small, layered C library for embedded systems. It separates application-facing APIs from CPU architecture code, silicon-specific peripheral code, physical board mappings, and final firmware build policy.
+DAS is a small layered C library for embedded systems. It separates application-facing APIs from CPU architecture support, silicon-specific peripheral code, physical board mappings, and final firmware build policy.
 
-The current STM32 path uses **CMSIS definitions directly**, without STM32 HAL/LL or CubeIDE/CubeMX-generated initialization files.
+The current STM32 path uses **CMSIS definitions directly**. It does not require STM32 HAL/LL, CubeIDE, CubeMX-generated initialization, or generated linker/startup files.
 
-## Current status
+## Current target and status
 
-| Area | Support |
+| Area | Current support |
 | --- | --- |
 | Language | C11 |
 | Build | CMake 3.20+ / `arm-none-eabi-gcc` |
 | Architecture | Cortex-M |
 | Device | STM32H755 |
 | Board | NUCLEO-H755ZI-Q |
-| Cores | CM7 and CM4 startup/GPIO/EXTI/time physically qualified under debugger control |
-| Startup | reusable weak Cortex-M reset/runtime path |
-| Linker | default STM32H755 CM7 and CM4 layouts plus custom override qualification |
-| Interrupts | device-agnostic IRQ handles/control; CMSIS NVIC backend on Cortex-M |
-| Clock | 64/200/300/400 MHz board profiles with STM32H755 RCC/PWR/FLASH backend, hardware-qualified |
-| Time | generic monotonic millisecond API; CMSIS SysTick backend plus external/RTOS source injection |
-| GPIO | input/output, pulls, push-pull/open-drain, AF configuration, EXTI |
-| UART | polling/timeout UART physically qualified on CM7 and CM4 |
-| Timer/PWM | periodic timer IRQ and PWM physically qualified on CM7 and CM4 |
-| SPI | controller path physically qualified on CM7 and CM4 across modes 0..3 |
-| I2C | controller path physically qualified on CM7 and CM4 at 100/400 kHz |
-| DMA/cache | memory and SPI DMA physically qualified on CM7/CM4; explicit CM7 D-cache maintenance |
-| Board API | LEDs, B1 user button, ST-LINK VCP, Arduino/Zio UART/I2C/SPI and D3/D4 fixture mappings |
-| Debug/test | dual-core OpenOCD + GDB + packaged 38-case evidence campaign |
+| Cores | CM7 and CM4 builds; both physically qualified under debugger control |
+| Startup | reusable weak Cortex-M reset/runtime and core exception handlers |
+| Linker | default CM7/CM4 layouts plus custom-linker override |
+| Interrupts | opaque DAS IRQ handles; CMSIS NVIC backend; GPIO/timer/DMA IRQ resolution |
+| Clock/power | 64/200/300/400 MHz stock-board profiles; RCC/PWR/FLASH sequencing |
+| Time | monotonic milliseconds, SysTick backend, external/RTOS source injection |
+| GPIO | input/output, pulls, output type/speed, AF configuration, EXTI |
+| UART | polling/blocking and finite-time I/O; 7/8 application data bits, parity, 1/2 stop bits |
+| SPI | modes 0..3, both bit orders, polling and full-duplex DMA transfer |
+| I2C | 7-bit controller, 100/400 kHz, probe/read/write/repeated-START |
+| Timer/PWM | periodic timer IRQ path plus PWM frequency/duty control |
+| DMA/cache | generic DMA API, STM32H755 DMA1/DMAMUX1, explicit CM7 D-cache coherency |
+| Board API | LEDs, B1, ST-LINK VCP, Arduino UART/I2C/SPI/PWM and D3/D4 resources |
+| Packaging | static `libdas.a`, install/export, relocatable `find_package(DAS CONFIG REQUIRED)` package |
+| Qualification | packaged dual-core OpenOCD/GDB hardware campaign, **38/38 PASS** |
 
-DAS is still early development. The current project version is `0.1.0`.
+DAS is still early development. The project version is currently `0.1.0`.
 
-## Purpose
-
-The goal is to build practical embedded firmware without requiring a generated vendor project while preserving direct, inspectable control over the hardware.
-
-DAS aims for:
-
-- stable public C APIs;
-- compile-time target selection;
-- explicit CPU/core selection on multi-core devices;
-- Cortex-M code separated from STM32 peripheral code;
-- board wiring separated from device registers;
-- CMSIS retained as a low-level implementation dependency rather than exposed as the application contract;
-- no required code generator;
-- no mandatory heap, RTOS or scheduler;
-- reusable startup/linker defaults that applications can replace;
-- physical qualification for supported hardware behavior.
-
-## Layer model
+## Architecture
 
 ```text
 Application / RTOS
         |
         v
-Public DAS API
- include/das/
+Public DAS API                include/das/
         |
-   +----+----+
-   |         |
-   v         v
-common     board
-             |
-             v
-           device
-             |
-             v
-        MCU/core
-             |
-             v
-           CMSIS
-             |
-             v
-         hardware
+        +------------------+
+        |                  |
+        v                  v
+ common logic          board policy         src/common/, src/board/
+                           |
+                           v
+                      device backend        src/device/stm32h755/
+                           |
+                           v
+                      Cortex-M layer        src/mcu/cortex_m/
+                           |
+                           v
+                          CMSIS
+                           |
+                           v
+                       hardware
 ```
 
-Implementation ownership:
-
-```text
-src/common/
-    hardware-independent semantics
-    monotonic time helpers
-
-src/mcu/cortex_m/
-    Cortex-M architecture
-    startup, IRQ controller, SysTick backend
-
-src/device/stm32h755/
-    STM32H755 silicon/peripherals
-    GPIO/EXTI, RCC/PWR/FLASH, UART, timer/PWM, SPI, I2C and DMA
-
-src/board/nucleo_h755zi_q/
-    physical NUCLEO resources and board policy
-    LEDs, B1, connector groups and standard clock profiles
-
-cmake/targets/
-    final firmware memory/linker policy
-```
+The public API uses DAS and standard C types. STM32 register types, peripheral instance identifiers, RCC fields, alternate-function numbers and raw IRQ numbers stay below that boundary.
 
 See [Architecture](docs/architecture.md).
 
-## Target and core selection
+## Building DAS
 
-The current board is selected with:
-
-```cmake
--DAS_DEVICE=nucleo_h755zi_q
-```
-
-STM32H755 contains two CPUs, so the core is selected separately.
-
-CM7:
-
-```cmake
--DDAS_CORE=cm7
-```
-
-CM4:
-
-```cmake
--DDAS_CORE=cm4
-```
-
-The selected core controls CPU/FPU compiler flags, CMSIS core definitions, core-specific device views, and the default linker script. The default core is `cm7`.
-
-## Building
-
-Example CM7 configuration:
+CM7 example:
 
 ```bash
 cmake -S . -B build/cm7 \
@@ -138,19 +76,28 @@ cmake -S . -B build/cm7 \
 cmake --build build/cm7 --parallel
 ```
 
-CM4 uses a separate build directory and `-DDAS_CORE=cm4`.
-
-DAS requires STM32CubeH7 only for CMSIS core/device headers. HAL and LL sources are not linked.
+Use a separate build directory with `-DDAS_CORE=cm4` for CPU2. STM32CubeH7 is used for CMSIS core/device headers only; HAL and LL sources are not linked.
 
 ## Consuming the generated static library
 
-DAS can be installed as a CMake package. The install contains the generated `libdas.a`, public headers, package targets and the selected core linker script:
+DAS can be installed as a normal CMake package:
 
 ```bash
 cmake --install build/cm7 --prefix /path/to/das-install
 ```
 
-A separate firmware project can then consume only that generated package:
+The install contains the generated static archive, public headers, CMake package files and the linker script selected for that package:
+
+```text
+lib/libdas.a
+include/das/...
+lib/cmake/DAS/DASConfig.cmake
+lib/cmake/DAS/DASConfigVersion.cmake
+lib/cmake/DAS/DASTargets.cmake
+share/das/<selected-linker-script>.ld
+```
+
+A separate firmware project consumes it with:
 
 ```cmake
 find_package(DAS CONFIG REQUIRED)
@@ -159,39 +106,60 @@ add_executable(my_firmware src/main.c)
 target_link_libraries(my_firmware PRIVATE das::das)
 ```
 
-Configure the application with the matching ARM toolchain/core and the install prefix in `CMAKE_PREFIX_PATH`. The imported `das::das` target carries the installed linker script to the final firmware ELF.
+Configure the application with the matching ARM core toolchain and install prefix in `CMAKE_PREFIX_PATH`. The imported `das::das` target carries the installed linker script to the final ELF.
 
-`examples/led_blink` deliberately exercises this external-consumer path rather than using `add_subdirectory()`. From the DAS repository root:
+Source-tree `add_subdirectory()` and `FetchContent` integration remain supported as alternatives. See [Building and integration](docs/integration.md).
+
+## Startup and vector-table ownership
+
+DAS supplies weak reusable Cortex-M reset/runtime handlers and the default linker-symbol contract. The **final firmware image still owns its vector table**. A bare-metal application using the DAS startup path must provide an `.isr_vector` containing at least the initial stack pointer and `Reset_Handler`, plus any core/device handlers it uses such as `SysTick_Handler`.
+
+The default linker scripts place that application-owned table at the correct core image base and provide `__StackTop` plus the `.data`/`.bss` symbols consumed by DAS startup.
+
+## External-consumer LED example
+
+`examples/led_blink` is deliberately a separate CMake project. It does not add the DAS source tree. The helper builds and installs `libdas.a`, resolves it with `find_package(DAS)`, links the application, flashes CM7 with OpenOCD, resets into the new vector table, and asks for physical confirmation of the green LED blink:
 
 ```bash
 ./scripts/build_and_flash_led_blink.sh /path/to/STM32CubeH7
 ```
 
-The helper builds and installs the CM7 static library, configures the example against that installation with `find_package(DAS)`, builds the standalone firmware, flashes it with OpenOCD and asks for visual confirmation of the green LED blink.
+This installed-package path has been physically validated on the NUCLEO-H755ZI-Q.
 
-Source-tree embedding with `add_subdirectory()` remains supported for projects that prefer to build DAS as part of their own CMake tree.
+## Hardware qualification
 
-## Clock model
+The standing STM32H755 regression is **38/38 PASS** at commit `c4bbc578d32c7b81f2ec5aaf38d637d128ca1942`, qualified on 2026-09-10. It covers linker/layout checks and physical execution of startup, clock/time, GPIO/EXTI, board resources/button, UART, SPI, I2C, DMA/cache and timer/PWM on both cores where applicable.
 
-Applications request a standard board frequency in hertz instead of calculating PLL dividers:
+Run the current campaign with:
 
-```c
-#include <das/clock.h>
-
-if (das_clock_frequency_supported(400000000u)) {
-    (void)das_clock_set_frequency(400000000u);
-}
+```bash
+./scripts/stm32h755_test_campaign.sh \
+  /home/dev/STM32Cube/Repository/STM32CubeH7/ \
+  --clean
 ```
 
-The NUCLEO-H755ZI-Q backend currently advertises:
+Every run produces a timestamped evidence archive. The installed-package LED example is a separate application/package smoke test and is not counted as a 39th campaign acceptance point.
 
-```text
-64 MHz
-200 MHz
-300 MHz
-400 MHz
-```
+See [Hardware qualification](docs/testing.md).
 
-The board layer owns physical supply/source policy. The STM32H755 device layer owns RCC, PWR, FLASH, PLL and bus-divider programming. On the stock board 480 MHz is deliberately not advertised for the qualified direct-SMPS/VOS1 profile.
+## Documentation
 
-See [Clock control](docs/clocks.md).
+- [Public API reference](docs/api.md)
+- [Architecture](docs/architecture.md)
+- [Building and integration](docs/integration.md)
+- [STM32H755 memory/linker policy](docs/memory-layout.md)
+- [Board resources](docs/board.md)
+- [Clock control](docs/clocks.md)
+- [Monotonic time](docs/time.md)
+- [Interrupt model](docs/interrupts.md)
+- [UART](docs/uart.md)
+- [SPI](docs/spi.md)
+- [I2C](docs/i2c.md)
+- [Timers and PWM](docs/timer.md)
+- [DMA and cache coherency](docs/dma.md)
+- [Hardware qualification](docs/testing.md)
+- [Porting](docs/porting.md)
+
+## Current boundaries
+
+The qualified baseline does **not** yet include production CM7-to-CM4 boot/release and HSEM/shared-memory coordination, ADC, watchdog, internal-flash/reset-cause services, timer input capture, or a generic asynchronous UART callback/buffering model. Those remain explicit follow-up work rather than being implied by the current hardware qualification.

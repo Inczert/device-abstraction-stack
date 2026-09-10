@@ -1,6 +1,6 @@
 # Building and integration
 
-This document describes target composition, source-tree integration, installed static-library consumption, startup ownership, and the current STM32H755 build/debug workflow.
+This document describes target composition, source-tree integration, installed static-library consumption, startup/vector ownership, and the current STM32H755 build/debug workflow.
 
 ## Requirements
 
@@ -173,7 +173,7 @@ Source-tree applications can override the default with `DAS_LINKER_SCRIPT` befor
 
 See [STM32H755 memory and linker policy](memory-layout.md).
 
-## Startup and vector table
+## Startup and default vector table
 
 DAS provides weak reusable Cortex-M reset/runtime and core-exception handlers in:
 
@@ -184,20 +184,49 @@ include/das/cortex_m/startup.h
 
 The default reset path copies `.data`, clears `.bss`, programs VTOR, executes barriers and calls `main()`.
 
-The **final firmware owns its vector table**. The default linker script reserves/places `.isr_vector`, but it does not generate vector contents. A bare-metal application retaining DAS startup must provide a table containing at least:
+For STM32H755, DAS also includes a weak default vector-table object in `libdas.a`:
 
 ```text
-entry 0 -> __StackTop
-entry 1 -> Reset_Handler
+src/device/stm32h755/vector_table.c
 ```
 
-and the core/device handlers it uses. For example, a firmware using the default DAS SysTick time source needs a vector entry for `SysTick_Handler`. Device-specific external IRQ entries also belong to the final firmware.
+CMSIS does not provide a vector table through the normal core/device headers. The STM32H755 device header does provide the authoritative `IRQn_Type` numbering, which DAS uses to size the default table. ST also ships standalone startup templates, but those own their own reset sequence and are therefore not linked into the DAS runtime.
 
-This ownership allows a bootloader, RTOS or application to replace the weak handlers and/or vector policy without modifying DAS.
+The default table contains:
+
+- initial stack pointer from `__StackTop`;
+- DAS weak `Reset_Handler` and core exception handlers;
+- `SysTick_Handler`, so `das_time_init()` works without application startup boilerplate;
+- one slot for every STM32H755 external IRQ, defaulting safely to `Default_Handler`.
+
+Because `libdas.a` is static, an otherwise-unreferenced vector-table object would normally be skipped by the linker. `DAS_USE_DEFAULT_VECTOR_TABLE=ON` therefore force-links the weak canonical symbol `g_das_vector_table`. This is the default for both source-tree and installed-package consumption.
+
+A firmware that owns its vector table has two supported choices.
+
+For a completely custom table/startup policy, disable the DAS default before adding or finding the package:
+
+```cmake
+set(DAS_USE_DEFAULT_VECTOR_TABLE OFF)
+find_package(DAS CONFIG REQUIRED)
+```
+
+Then provide the application's own `.isr_vector` through its normal source/linker policy.
+
+Alternatively, leave the default enabled and provide a strong definition of:
+
+```c
+g_das_vector_table
+```
+
+in the application's `.isr_vector`. The strong application symbol overrides the weak DAS definition, so the default archive member is not used.
+
+The current default external IRQ slots intentionally route to `Default_Handler`; DAS does not yet invent a runtime callback/dispatch framework. Applications requiring concrete external ISR bindings should therefore supply their own table until such a dispatch model is designed explicitly.
 
 ## External-consumer LED example
 
 `examples/led_blink` is the reference installed-package smoke application. Its CMake project uses `find_package(DAS)` and links the imported static library; it does not add the DAS source tree.
+
+The application source contains only the LED/time application logic. It does not define an ISR table or a local halt loop.
 
 From the DAS repository root:
 
@@ -213,11 +242,11 @@ The script:
 4. verifies CMake resolved that generated installation;
 5. builds `das_led_blink.elf`;
 6. flashes/verifies it with the qualified direct-DAP OpenOCD configuration;
-7. resets into the newly programmed vector table;
+7. resets into the newly programmed default vector table;
 8. holds CM4 and runs CM7;
 9. asks for physical confirmation of the green LED blink.
 
-This path has been physically validated on the NUCLEO-H755ZI-Q.
+The installed-package path was physically validated before the default-vector refactor. Rerun the same script after pulling `develop` to qualify the new library-owned vector-table path.
 
 ## Dual-core hardware qualification
 
@@ -237,6 +266,7 @@ The campaign proves both independently linked images execute on real CPU1/CPU2 a
 | `DAS_DEVICE` | `nucleo_h755zi_q` | selected board/target |
 | `DAS_CORE` | `cm7` | selected CPU core (`cm7` or `cm4`) |
 | `DAS_LINKER_SCRIPT` | empty | source-tree custom linker override |
+| `DAS_USE_DEFAULT_VECTOR_TABLE` | `ON` | force-link the DAS weak default vector table |
 | `STM32_CUBE_H7_DIR` | empty | STM32CubeH7 root used while building DAS |
 | `DAS_BUILD_LINK_TESTS` | `OFF` | build linker-smoke target |
 | `DAS_BUILD_HARDWARE_TESTS` | `OFF` | build physical qualification firmware |

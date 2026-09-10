@@ -15,6 +15,8 @@ set_property(CACHE DAS_DEVICE PROPERTY STRINGS nucleo_h755zi_q)
 set(STM32_CUBE_H7_DIR "" CACHE PATH "Path to STM32CubeH7 checkout")
 set(DAS_LINKER_SCRIPT "" CACHE FILEPATH
     "Override the selected device/core linker script; empty uses the DAS default")
+option(DAS_USE_DEFAULT_VECTOR_TABLE
+    "Force-link the DAS default vector table into the final firmware" ON)
 option(DAS_BUILD_HARDWARE_TESTS "Build physical board test firmware" OFF)
 option(DAS_BUILD_LINK_TESTS "Build non-executed linker-layout test firmware" OFF)
 
@@ -57,7 +59,8 @@ if(DAS_DEVICE STREQUAL "nucleo_h755zi_q")
         src/device/stm32h755/uart.c
         src/device/stm32h755/spi.c
         src/device/stm32h755/i2c.c
-        src/device/stm32h755/dma.c)
+        src/device/stm32h755/dma.c
+        src/device/stm32h755/vector_table.c)
 
     set(DAS_BOARD_SOURCES
         src/board/nucleo_h755zi_q/board.c
@@ -138,6 +141,13 @@ target_compile_options(das PRIVATE -Wall -Wextra -Werror)
 # relocatable linker-script path from DASConfig.cmake.
 target_link_options(das INTERFACE
     "$<BUILD_INTERFACE:-T${DAS_EFFECTIVE_LINKER_SCRIPT}>")
+if(DAS_USE_DEFAULT_VECTOR_TABLE)
+    # The default table is an otherwise-unreferenced member of libdas.a. Force
+    # that one symbol undefined so GNU ld extracts it. A strong application
+    # definition of g_das_vector_table still overrides the weak DAS default.
+    target_link_options(das INTERFACE
+        "$<BUILD_INTERFACE:-Wl,-u,g_das_vector_table>")
+endif()
 set_property(TARGET das APPEND PROPERTY INTERFACE_LINK_DEPENDS
     "$<BUILD_INTERFACE:${DAS_EFFECTIVE_LINKER_SCRIPT}>")
 

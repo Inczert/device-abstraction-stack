@@ -107,6 +107,24 @@ static void target_clear_state(void) {
     }
 }
 
+static void target_flush_txdr(void) {
+    uint32_t status = I2C4->ISR;
+
+    /*
+     * A target transmitter may have already queued the next byte when the
+     * controller terminates a read with NACK/STOP. STM32 keeps that byte in
+     * TXDR and can emit it as the first byte of a later transaction unless
+     * TXDR is explicitly flushed. TXE is software-writable for this purpose.
+     */
+    if ((status & I2C_ISR_TXIS) != 0u) {
+        I2C4->TXDR = 0u;
+        status = I2C4->ISR;
+    }
+    if ((status & I2C_ISR_TXE) == 0u) {
+        I2C4->ISR |= I2C_ISR_TXE;
+    }
+}
+
 static das_result_t target_configure_pins(void) {
     const das_gpio_config_t config = {
         .mode = DAS_GPIO_MODE_ALTERNATE,
@@ -199,18 +217,20 @@ void I2C4_EV_IRQHandler(void) {
         status = I2C4->ISR;
     }
 
+    if ((status & I2C_ISR_NACKF) != 0u) {
+        target_flush_txdr();
+        I2C4->ICR = I2C_ICR_NACKCF;
+        status = I2C4->ISR;
+    }
+
     if ((status & I2C_ISR_TXIS) != 0u) {
         I2C4->TXDR = target_value((uint32_t)g_target_register + g_target_tx_index);
         ++g_target_tx_index;
         status = I2C4->ISR;
     }
 
-    if ((status & I2C_ISR_NACKF) != 0u) {
-        I2C4->ICR = I2C_ICR_NACKCF;
-        status = I2C4->ISR;
-    }
-
     if ((status & I2C_ISR_STOPF) != 0u) {
+        target_flush_txdr();
         ++g_das_i2c_test_evidence.target_stop_events;
         I2C4->ICR = I2C_ICR_STOPCF;
     }

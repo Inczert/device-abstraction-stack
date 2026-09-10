@@ -35,13 +35,17 @@ jobs:
         core: [cm7, cm4]
     steps:
       - uses: actions/checkout@v4
-      - name: Checkout STM32CubeH7 CMSIS source
+      - name: Checkout STM32CubeH7 CMSIS headers
         uses: actions/checkout@v4
         with:
           repository: STMicroelectronics/STM32CubeH7
           path: .ci/STM32CubeH7
           fetch-depth: 1
-          submodules: recursive
+          sparse-checkout: |
+            Drivers/CMSIS/Core/Include
+            Drivers/CMSIS/Include
+            Drivers/CMSIS/Device/ST/STM32H7xx/Include
+          sparse-checkout-cone-mode: false
       - name: Install ARM toolchain
         run: |
           sudo apt-get update
@@ -98,13 +102,17 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Checkout STM32CubeH7 CMSIS source
+      - name: Checkout STM32CubeH7 CMSIS headers
         uses: actions/checkout@v4
         with:
           repository: STMicroelectronics/STM32CubeH7
           path: .ci/STM32CubeH7
           fetch-depth: 1
-          submodules: recursive
+          sparse-checkout: |
+            Drivers/CMSIS/Core/Include
+            Drivers/CMSIS/Include
+            Drivers/CMSIS/Device/ST/STM32H7xx/Include
+          sparse-checkout-cone-mode: false
       - name: Checkout HardRT
         uses: actions/checkout@v4
         with:

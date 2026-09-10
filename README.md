@@ -106,13 +106,21 @@ add_executable(my_firmware src/main.c)
 target_link_libraries(my_firmware PRIVATE das::das)
 ```
 
+Application code can include individual public headers or use the convenience umbrella:
+
+```c
+#include <das/das.h>
+```
+
+The umbrella exposes the normal application-facing API. Architecture-specific startup/vector customization remains explicit through headers such as `das/cortex_m/startup.h`.
+
 Configure the application with the matching ARM core toolchain and install prefix in `CMAKE_PREFIX_PATH`. The imported `das::das` target carries the installed linker script to the final ELF.
 
 Source-tree `add_subdirectory()` and `FetchContent` integration remain supported as alternatives. See [Building and integration](docs/integration.md).
 
 ## Startup and vector-table ownership
 
-DAS supplies weak reusable Cortex-M reset/runtime handlers, the linker-symbol contract and a default STM32H755 vector table. The device table uses the CMSIS STM32H755 IRQ numbering internally, provides the core exception/SysTick entries required for a simple bare-metal application, and routes unused external IRQ slots to `Default_Handler`.
+DAS supplies weak reusable Cortex-M reset/runtime handlers, the linker-symbol contract and a default STM32H755 vector table. The device table uses the CMSIS STM32H755 IRQ numbering internally, provides the core exception/SysTick entries required for a simple bare-metal application, and routes unused external IRQ slots to weak default handlers.
 
 Normal applications therefore do **not** need to write an `.isr_vector` merely to boot. `DAS_USE_DEFAULT_VECTOR_TABLE` is `ON` by default for source-tree and installed-package consumers.
 
@@ -133,42 +141,6 @@ or provide a strong `g_das_vector_table` definition, which overrides the weak DA
 ./scripts/build_and_flash_led_blink.sh /path/to/STM32CubeH7
 ```
 
-This installed-package path has been physically validated on the NUCLEO-H755ZI-Q before the default-vector refactor; rerun it after pulling `develop` to qualify the new library-owned vector path.
-
 ## Hardware qualification
 
-The standing STM32H755 regression is **38/38 PASS** at commit `c4bbc578d32c7b81f2ec5aaf38d637d128ca1942`, qualified on 2026-09-10. It covers linker/layout checks and physical execution of startup, clock/time, GPIO/EXTI, board resources/button, UART, SPI, I2C, DMA/cache and timer/PWM on both cores where applicable.
-
-Run the current campaign with:
-
-```bash
-./scripts/stm32h755_test_campaign.sh \
-  /home/dev/STM32Cube/Repository/STM32CubeH7/ \
-  --clean
-```
-
-Every run produces a timestamped evidence archive. The installed-package LED example is a separate application/package smoke test and is not counted as a 39th campaign acceptance point.
-
-See [Hardware qualification](docs/testing.md).
-
-## Documentation
-
-- [Public API reference](docs/api.md)
-- [Architecture](docs/architecture.md)
-- [Building and integration](docs/integration.md)
-- [STM32H755 memory/linker policy](docs/memory-layout.md)
-- [Board resources](docs/board.md)
-- [Clock control](docs/clocks.md)
-- [Monotonic time](docs/time.md)
-- [Interrupt model](docs/interrupts.md)
-- [UART](docs/uart.md)
-- [SPI](docs/spi.md)
-- [I2C](docs/i2c.md)
-- [Timers and PWM](docs/timer.md)
-- [DMA and cache coherency](docs/dma.md)
-- [Hardware qualification](docs/testing.md)
-- [Porting](docs/porting.md)
-
-## Current boundaries
-
-The qualified baseline does **not** yet include production CM7-to-CM4 boot/release and HSEM/shared-memory coordination, ADC, watchdog, internal-flash/reset-cause services, timer input capture, or a generic asynchronous UART callback/buffering model. Those remain explicit follow-up work rather than being implied by the current hardware qualification.
+The standing STM32H755 regression is **38/38 PASS** at commit `fd9246abf76278556962724684b308264d37049f`, qualified after the centralized vector-table refactor. It covers linker/layout checks and physical execution of startup, clock/time, GPIO/EXTI, board resources/button, UART, SPI, I2C, DMA/cache and timer/PWM on both cores where applicable.

@@ -5,6 +5,7 @@
 
 #include <das/gpio.h>
 #include <das/result.h>
+#include <das/spi.h>
 #include <das/timer.h>
 #include <das/uart.h>
 
@@ -20,17 +21,8 @@ typedef struct das_board_uart_pins {
     das_gpio_pin_t rx;
 } das_board_uart_pins_t;
 
-/** Resolve the pins associated with a semantic UART board connection. */
 das_result_t das_board_uart_get_pins(das_board_uart_resource_t resource,
                                      das_board_uart_pins_t* pins);
-
-/**
- * Configure a semantic board UART route and initialize the generic UART.
- *
- * The board backend owns pin routing/alternate-function selection and resolves
- * the underlying device instance. The caller receives only a portable DAS UART
- * handle.
- */
 das_result_t das_board_uart_init(das_board_uart_resource_t resource,
                                  const das_uart_config_t* config,
                                  das_uart_t* uart);
@@ -41,10 +33,7 @@ typedef enum das_board_pwm_resource {
     DAS_BOARD_PWM_COUNT
 } das_board_pwm_resource_t;
 
-/** Resolve the physical pin associated with a semantic PWM output. */
 das_gpio_pin_t das_board_pwm_pin(das_board_pwm_resource_t resource);
-
-/** Configure the board route and initialize its generic PWM output. */
 das_result_t das_board_pwm_init(das_board_pwm_resource_t resource,
                                 const das_pwm_config_t* config,
                                 das_pwm_t* pwm);
@@ -60,7 +49,6 @@ typedef struct das_board_i2c_pins {
     das_gpio_pin_t sda;
 } das_board_i2c_pins_t;
 
-/** Resolve the pins associated with a semantic I2C board connection. */
 das_result_t das_board_i2c_get_pins(das_board_i2c_resource_t resource,
                                     das_board_i2c_pins_t* pins);
 
@@ -74,13 +62,26 @@ typedef struct das_board_spi_pins {
     das_gpio_pin_t sck;
     das_gpio_pin_t miso;
     das_gpio_pin_t mosi;
-    /** Board-level chip-select GPIO associated with the connector. */
+    /** Board-level active-low chip-select GPIO associated with the connector. */
     das_gpio_pin_t cs;
 } das_board_spi_pins_t;
 
-/** Resolve the pins associated with a semantic SPI board connection. */
 das_result_t das_board_spi_get_pins(das_board_spi_resource_t resource,
                                     das_board_spi_pins_t* pins);
+
+/** Configure the board SPI signals/default CS and initialize the controller. */
+das_result_t das_board_spi_init(das_board_spi_resource_t resource,
+                                const das_spi_config_t* config,
+                                das_spi_t* spi);
+
+/**
+ * Drive the board resource's default active-low chip-select.
+ *
+ * SPI transfers never change chip-select implicitly. Applications with several
+ * devices may instead use arbitrary DAS GPIOs as their chip-select lines.
+ */
+das_result_t das_board_spi_chip_select(das_board_spi_resource_t resource,
+                                       bool selected);
 
 /** Small set of connector GPIO aliases used directly by DAS applications/tests. */
 typedef enum das_board_gpio_resource {
@@ -89,7 +90,6 @@ typedef enum das_board_gpio_resource {
     DAS_BOARD_GPIO_COUNT
 } das_board_gpio_resource_t;
 
-/** Resolve a semantic connector GPIO to a generic DAS GPIO pin. */
 das_gpio_pin_t das_board_gpio_pin(das_board_gpio_resource_t resource);
 
 #endif

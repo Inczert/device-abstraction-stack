@@ -3,6 +3,7 @@
 #include <das/board.h>
 #include <das/board_resources.h>
 
+#include "spi_internal.h"
 #include "timer_internal.h"
 #include "uart_internal.h"
 
@@ -10,6 +11,7 @@
 
 #define DAS_NUCLEO_UART_AF UINT8_C(7)
 #define DAS_NUCLEO_PWM_AF  UINT8_C(1)
+#define DAS_NUCLEO_SPI_AF  UINT8_C(5)
 
 static das_gpio_pin_t invalid_pin(void) {
     return (das_gpio_pin_t){DAS_GPIO_PORT_A, UINT8_C(0xff)};
@@ -44,14 +46,8 @@ static const das_gpio_pin_t BUTTON_PINS[DAS_BOARD_BUTTON_COUNT] = {
 };
 
 static const das_board_uart_pins_t UART_PINS[DAS_BOARD_UART_COUNT] = {
-    [DAS_BOARD_UART_STLINK_VCP] = {
-        .tx = {DAS_GPIO_PORT_D, 8u},
-        .rx = {DAS_GPIO_PORT_D, 9u},
-    },
-    [DAS_BOARD_UART_ARDUINO] = {
-        .tx = {DAS_GPIO_PORT_B, 6u},
-        .rx = {DAS_GPIO_PORT_B, 7u},
-    },
+    [DAS_BOARD_UART_STLINK_VCP] = {.tx = {DAS_GPIO_PORT_D, 8u}, .rx = {DAS_GPIO_PORT_D, 9u}},
+    [DAS_BOARD_UART_ARDUINO] = {.tx = {DAS_GPIO_PORT_B, 6u}, .rx = {DAS_GPIO_PORT_B, 7u}},
 };
 
 static const stm32h755_uart_instance_t UART_INSTANCES[DAS_BOARD_UART_COUNT] = {
@@ -68,10 +64,7 @@ static const stm32h755_pwm_output_t PWM_OUTPUTS[DAS_BOARD_PWM_COUNT] = {
 };
 
 static const das_board_i2c_pins_t I2C_PINS[DAS_BOARD_I2C_COUNT] = {
-    [DAS_BOARD_I2C_ARDUINO] = {
-        .scl = {DAS_GPIO_PORT_B, 8u},
-        .sda = {DAS_GPIO_PORT_B, 9u},
-    },
+    [DAS_BOARD_I2C_ARDUINO] = {.scl = {DAS_GPIO_PORT_B, 8u}, .sda = {DAS_GPIO_PORT_B, 9u}},
 };
 
 static const das_board_spi_pins_t SPI_PINS[DAS_BOARD_SPI_COUNT] = {
@@ -83,6 +76,10 @@ static const das_board_spi_pins_t SPI_PINS[DAS_BOARD_SPI_COUNT] = {
     },
 };
 
+static const stm32h755_spi_instance_t SPI_INSTANCES[DAS_BOARD_SPI_COUNT] = {
+    [DAS_BOARD_SPI_ARDUINO] = STM32H755_SPI1,
+};
+
 static const das_gpio_pin_t GPIO_RESOURCE_PINS[DAS_BOARD_GPIO_COUNT] = {
     [DAS_BOARD_GPIO_ARDUINO_D3] = {DAS_GPIO_PORT_E, 13u},
     [DAS_BOARD_GPIO_ARDUINO_D4] = {DAS_GPIO_PORT_E, 14u},
@@ -90,9 +87,7 @@ static const das_gpio_pin_t GPIO_RESOURCE_PINS[DAS_BOARD_GPIO_COUNT] = {
 
 das_result_t das_board_uart_get_pins(das_board_uart_resource_t resource,
                                      das_board_uart_pins_t* pins) {
-    if (!uart_valid(resource) || pins == 0) {
-        return DAS_ERROR_INVALID_ARGUMENT;
-    }
+    if (!uart_valid(resource) || pins == 0) return DAS_ERROR_INVALID_ARGUMENT;
     *pins = UART_PINS[resource];
     return DAS_OK;
 }
@@ -100,133 +95,127 @@ das_result_t das_board_uart_get_pins(das_board_uart_resource_t resource,
 das_result_t das_board_uart_init(das_board_uart_resource_t resource,
                                  const das_uart_config_t* config,
                                  das_uart_t* uart) {
-    if (!uart_valid(resource) || config == 0 || uart == 0) {
-        return DAS_ERROR_INVALID_ARGUMENT;
-    }
-
+    if (!uart_valid(resource) || config == 0 || uart == 0) return DAS_ERROR_INVALID_ARGUMENT;
     *uart = DAS_UART_INVALID;
     const das_board_uart_pins_t pins = UART_PINS[resource];
     const das_gpio_config_t tx_config = {
-        .mode = DAS_GPIO_MODE_ALTERNATE,
-        .pull = DAS_GPIO_PULL_NONE,
-        .output_type = DAS_GPIO_OUTPUT_PUSH_PULL,
-        .speed = DAS_GPIO_SPEED_HIGH,
-        .alternate = DAS_NUCLEO_UART_AF,
-        .initial_high = true,
+        .mode = DAS_GPIO_MODE_ALTERNATE, .pull = DAS_GPIO_PULL_NONE,
+        .output_type = DAS_GPIO_OUTPUT_PUSH_PULL, .speed = DAS_GPIO_SPEED_HIGH,
+        .alternate = DAS_NUCLEO_UART_AF, .initial_high = true,
     };
     const das_gpio_config_t rx_config = {
-        .mode = DAS_GPIO_MODE_ALTERNATE,
-        .pull = DAS_GPIO_PULL_UP,
-        .output_type = DAS_GPIO_OUTPUT_PUSH_PULL,
-        .speed = DAS_GPIO_SPEED_HIGH,
-        .alternate = DAS_NUCLEO_UART_AF,
-        .initial_high = true,
+        .mode = DAS_GPIO_MODE_ALTERNATE, .pull = DAS_GPIO_PULL_UP,
+        .output_type = DAS_GPIO_OUTPUT_PUSH_PULL, .speed = DAS_GPIO_SPEED_HIGH,
+        .alternate = DAS_NUCLEO_UART_AF, .initial_high = true,
     };
-
     das_result_t result = das_gpio_configure(pins.tx, &tx_config);
-    if (result != DAS_OK) {
-        return result;
-    }
+    if (result != DAS_OK) return result;
     result = das_gpio_configure(pins.rx, &rx_config);
-    if (result != DAS_OK) {
-        return result;
-    }
-
+    if (result != DAS_OK) return result;
     const das_uart_t resolved = stm32h755_uart_handle(UART_INSTANCES[resource]);
-    if (!das_uart_is_valid(resolved)) {
-        return DAS_ERROR_UNSUPPORTED;
-    }
-
+    if (!das_uart_is_valid(resolved)) return DAS_ERROR_UNSUPPORTED;
     result = das_uart_init(resolved, config);
-    if (result != DAS_OK) {
-        return result;
-    }
-
+    if (result != DAS_OK) return result;
     *uart = resolved;
     return DAS_OK;
 }
 
 das_gpio_pin_t das_board_pwm_pin(das_board_pwm_resource_t resource) {
-    if (!pwm_valid(resource)) {
-        return invalid_pin();
-    }
-    return PWM_PINS[resource];
+    return pwm_valid(resource) ? PWM_PINS[resource] : invalid_pin();
 }
 
 das_result_t das_board_pwm_init(das_board_pwm_resource_t resource,
                                 const das_pwm_config_t* config,
                                 das_pwm_t* pwm) {
-    if (!pwm_valid(resource) || config == 0 || pwm == 0) {
-        return DAS_ERROR_INVALID_ARGUMENT;
-    }
-
+    if (!pwm_valid(resource) || config == 0 || pwm == 0) return DAS_ERROR_INVALID_ARGUMENT;
     *pwm = DAS_PWM_INVALID;
     const das_gpio_config_t pin_config = {
-        .mode = DAS_GPIO_MODE_ALTERNATE,
-        .pull = DAS_GPIO_PULL_NONE,
-        .output_type = DAS_GPIO_OUTPUT_PUSH_PULL,
-        .speed = DAS_GPIO_SPEED_HIGH,
-        .alternate = DAS_NUCLEO_PWM_AF,
-        .initial_high = false,
+        .mode = DAS_GPIO_MODE_ALTERNATE, .pull = DAS_GPIO_PULL_NONE,
+        .output_type = DAS_GPIO_OUTPUT_PUSH_PULL, .speed = DAS_GPIO_SPEED_HIGH,
+        .alternate = DAS_NUCLEO_PWM_AF, .initial_high = false,
     };
-
     das_result_t result = das_gpio_configure(PWM_PINS[resource], &pin_config);
-    if (result != DAS_OK) {
-        return result;
-    }
-
+    if (result != DAS_OK) return result;
     const das_pwm_t resolved = stm32h755_pwm_handle(PWM_OUTPUTS[resource]);
-    if (!das_pwm_is_valid(resolved)) {
-        return DAS_ERROR_UNSUPPORTED;
-    }
-
+    if (!das_pwm_is_valid(resolved)) return DAS_ERROR_UNSUPPORTED;
     result = das_pwm_init(resolved, config);
-    if (result != DAS_OK) {
-        return result;
-    }
-
+    if (result != DAS_OK) return result;
     *pwm = resolved;
     return DAS_OK;
 }
 
 das_result_t das_board_i2c_get_pins(das_board_i2c_resource_t resource,
                                     das_board_i2c_pins_t* pins) {
-    if (!i2c_valid(resource) || pins == 0) {
-        return DAS_ERROR_INVALID_ARGUMENT;
-    }
+    if (!i2c_valid(resource) || pins == 0) return DAS_ERROR_INVALID_ARGUMENT;
     *pins = I2C_PINS[resource];
     return DAS_OK;
 }
 
 das_result_t das_board_spi_get_pins(das_board_spi_resource_t resource,
                                     das_board_spi_pins_t* pins) {
-    if (!spi_valid(resource) || pins == 0) {
-        return DAS_ERROR_INVALID_ARGUMENT;
-    }
+    if (!spi_valid(resource) || pins == 0) return DAS_ERROR_INVALID_ARGUMENT;
     *pins = SPI_PINS[resource];
     return DAS_OK;
 }
 
+das_result_t das_board_spi_init(das_board_spi_resource_t resource,
+                                const das_spi_config_t* config,
+                                das_spi_t* spi) {
+    if (!spi_valid(resource) || config == 0 || spi == 0) return DAS_ERROR_INVALID_ARGUMENT;
+    *spi = DAS_SPI_INVALID;
+    const das_board_spi_pins_t pins = SPI_PINS[resource];
+
+    das_result_t result = das_gpio_output_init(pins.cs, true);
+    if (result != DAS_OK) return result;
+
+    const das_gpio_config_t clock_output = {
+        .mode = DAS_GPIO_MODE_ALTERNATE, .pull = DAS_GPIO_PULL_NONE,
+        .output_type = DAS_GPIO_OUTPUT_PUSH_PULL, .speed = DAS_GPIO_SPEED_HIGH,
+        .alternate = DAS_NUCLEO_SPI_AF,
+        .initial_high = config->mode == DAS_SPI_MODE_2 || config->mode == DAS_SPI_MODE_3,
+    };
+    const das_gpio_config_t data_output = {
+        .mode = DAS_GPIO_MODE_ALTERNATE, .pull = DAS_GPIO_PULL_NONE,
+        .output_type = DAS_GPIO_OUTPUT_PUSH_PULL, .speed = DAS_GPIO_SPEED_HIGH,
+        .alternate = DAS_NUCLEO_SPI_AF, .initial_high = false,
+    };
+    const das_gpio_config_t data_input = {
+        .mode = DAS_GPIO_MODE_ALTERNATE, .pull = DAS_GPIO_PULL_NONE,
+        .output_type = DAS_GPIO_OUTPUT_PUSH_PULL, .speed = DAS_GPIO_SPEED_HIGH,
+        .alternate = DAS_NUCLEO_SPI_AF, .initial_high = false,
+    };
+
+    result = das_gpio_configure(pins.sck, &clock_output);
+    if (result != DAS_OK) return result;
+    result = das_gpio_configure(pins.mosi, &data_output);
+    if (result != DAS_OK) return result;
+    result = das_gpio_configure(pins.miso, &data_input);
+    if (result != DAS_OK) return result;
+
+    const das_spi_t resolved = stm32h755_spi_handle(SPI_INSTANCES[resource]);
+    if (!das_spi_is_valid(resolved)) return DAS_ERROR_UNSUPPORTED;
+    result = das_spi_init(resolved, config);
+    if (result != DAS_OK) return result;
+    *spi = resolved;
+    return DAS_OK;
+}
+
+das_result_t das_board_spi_chip_select(das_board_spi_resource_t resource,
+                                       bool selected) {
+    if (!spi_valid(resource)) return DAS_ERROR_INVALID_ARGUMENT;
+    return das_gpio_write(SPI_PINS[resource].cs, !selected);
+}
+
 das_gpio_pin_t das_board_gpio_pin(das_board_gpio_resource_t resource) {
-    if (!gpio_resource_valid(resource)) {
-        return invalid_pin();
-    }
-    return GPIO_RESOURCE_PINS[resource];
+    return gpio_resource_valid(resource) ? GPIO_RESOURCE_PINS[resource] : invalid_pin();
 }
 
 das_gpio_pin_t das_board_button_pin(das_board_button_t button) {
-    if (!button_valid(button)) {
-        return invalid_pin();
-    }
-    return BUTTON_PINS[button];
+    return button_valid(button) ? BUTTON_PINS[button] : invalid_pin();
 }
 
 das_result_t das_board_button_init(das_board_button_t button) {
-    if (!button_valid(button)) {
-        return DAS_ERROR_INVALID_ARGUMENT;
-    }
-
-    /* B1 has a board-level pull-down resistor; do not add a second bias here. */
+    if (!button_valid(button)) return DAS_ERROR_INVALID_ARGUMENT;
     return das_gpio_input_init(BUTTON_PINS[button], DAS_GPIO_PULL_NONE);
 }
 
@@ -234,40 +223,23 @@ bool das_board_button_is_pressed(das_board_button_t button) {
     return button_valid(button) && das_gpio_read_input(BUTTON_PINS[button]);
 }
 
-das_result_t das_board_button_interrupt_configure(
-    das_board_button_t button,
-    das_board_button_event_t event) {
-    if (!button_valid(button)) {
-        return DAS_ERROR_INVALID_ARGUMENT;
-    }
-
+das_result_t das_board_button_interrupt_configure(das_board_button_t button,
+                                                  das_board_button_event_t event) {
+    if (!button_valid(button)) return DAS_ERROR_INVALID_ARGUMENT;
     das_gpio_interrupt_edge_t edge;
     switch (event) {
-        case DAS_BOARD_BUTTON_EVENT_PRESS:
-            edge = DAS_GPIO_INTERRUPT_RISING;
-            break;
-        case DAS_BOARD_BUTTON_EVENT_RELEASE:
-            edge = DAS_GPIO_INTERRUPT_FALLING;
-            break;
-        case DAS_BOARD_BUTTON_EVENT_BOTH:
-            edge = DAS_GPIO_INTERRUPT_BOTH;
-            break;
-        default:
-            return DAS_ERROR_INVALID_ARGUMENT;
+        case DAS_BOARD_BUTTON_EVENT_PRESS: edge = DAS_GPIO_INTERRUPT_RISING; break;
+        case DAS_BOARD_BUTTON_EVENT_RELEASE: edge = DAS_GPIO_INTERRUPT_FALLING; break;
+        case DAS_BOARD_BUTTON_EVENT_BOTH: edge = DAS_GPIO_INTERRUPT_BOTH; break;
+        default: return DAS_ERROR_INVALID_ARGUMENT;
     }
-
     const das_result_t init_result = das_board_button_init(button);
-    if (init_result != DAS_OK) {
-        return init_result;
-    }
+    if (init_result != DAS_OK) return init_result;
     return das_gpio_interrupt_configure(BUTTON_PINS[button], edge);
 }
 
-das_result_t das_board_button_interrupt_enable(das_board_button_t button,
-                                               bool enabled) {
-    if (!button_valid(button)) {
-        return DAS_ERROR_INVALID_ARGUMENT;
-    }
+das_result_t das_board_button_interrupt_enable(das_board_button_t button, bool enabled) {
+    if (!button_valid(button)) return DAS_ERROR_INVALID_ARGUMENT;
     return das_gpio_interrupt_enable(BUTTON_PINS[button], enabled);
 }
 
@@ -276,16 +248,12 @@ bool das_board_button_interrupt_pending(das_board_button_t button) {
 }
 
 das_result_t das_board_button_interrupt_clear(das_board_button_t button) {
-    if (!button_valid(button)) {
-        return DAS_ERROR_INVALID_ARGUMENT;
-    }
+    if (!button_valid(button)) return DAS_ERROR_INVALID_ARGUMENT;
     return das_gpio_interrupt_clear(BUTTON_PINS[button]);
 }
 
 das_result_t das_board_button_interrupt_get_irq(das_board_button_t button,
                                                 das_irq_t* irq) {
-    if (!button_valid(button) || irq == 0) {
-        return DAS_ERROR_INVALID_ARGUMENT;
-    }
+    if (!button_valid(button) || irq == 0) return DAS_ERROR_INVALID_ARGUMENT;
     return das_gpio_interrupt_get_irq(BUTTON_PINS[button], irq);
 }

@@ -11,6 +11,8 @@ target_link_libraries(das_led_blink PRIVATE das::das)
 
 For the NUCLEO-H755ZI-Q CM7 example, the application initializes the semantic green user LED, initializes the DAS SysTick time source and toggles the LED every 500 ms.
 
+The application does not define a vector table or startup loop. The installed DAS package supplies the default STM32H755 vector table and weak Cortex-M startup handlers. Applications that need their own vector/ISR policy can set `DAS_USE_DEFAULT_VECTOR_TABLE=OFF` before `find_package(DAS)` or provide a strong `g_das_vector_table` replacement.
+
 From the repository root, build, install, consume, flash and visually verify it with:
 
 ```bash

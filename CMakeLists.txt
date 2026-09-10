@@ -51,7 +51,8 @@ if(DAS_DEVICE STREQUAL "nucleo_h755zi_q")
         src/device/stm32h755/power.c
         src/device/stm32h755/timer.c
         src/device/stm32h755/uart.c
-        src/device/stm32h755/spi.c)
+        src/device/stm32h755/spi.c
+        src/device/stm32h755/i2c.c)
 
     set(DAS_BOARD_SOURCES
         src/board/nucleo_h755zi_q/board.c

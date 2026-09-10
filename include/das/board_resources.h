@@ -4,6 +4,7 @@
 #define DAS_BOARD_RESOURCES_H
 
 #include <das/gpio.h>
+#include <das/i2c.h>
 #include <das/result.h>
 #include <das/spi.h>
 #include <das/timer.h>
@@ -51,6 +52,11 @@ typedef struct das_board_i2c_pins {
 
 das_result_t das_board_i2c_get_pins(das_board_i2c_resource_t resource,
                                     das_board_i2c_pins_t* pins);
+
+/** Configure the board I2C pins and initialize the generic controller. */
+das_result_t das_board_i2c_init(das_board_i2c_resource_t resource,
+                                const das_i2c_config_t* config,
+                                das_i2c_t* i2c);
 
 /** Semantic SPI board connections. */
 typedef enum das_board_spi_resource {

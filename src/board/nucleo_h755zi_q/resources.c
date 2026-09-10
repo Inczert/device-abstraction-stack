@@ -3,6 +3,7 @@
 #include <das/board.h>
 #include <das/board_resources.h>
 
+#include "i2c_internal.h"
 #include "spi_internal.h"
 #include "timer_internal.h"
 #include "uart_internal.h"
@@ -12,6 +13,7 @@
 #define DAS_NUCLEO_UART_AF UINT8_C(7)
 #define DAS_NUCLEO_PWM_AF  UINT8_C(1)
 #define DAS_NUCLEO_SPI_AF  UINT8_C(5)
+#define DAS_NUCLEO_I2C_AF  UINT8_C(4)
 
 static das_gpio_pin_t invalid_pin(void) {
     return (das_gpio_pin_t){DAS_GPIO_PORT_A, UINT8_C(0xff)};
@@ -65,6 +67,10 @@ static const stm32h755_pwm_output_t PWM_OUTPUTS[DAS_BOARD_PWM_COUNT] = {
 
 static const das_board_i2c_pins_t I2C_PINS[DAS_BOARD_I2C_COUNT] = {
     [DAS_BOARD_I2C_ARDUINO] = {.scl = {DAS_GPIO_PORT_B, 8u}, .sda = {DAS_GPIO_PORT_B, 9u}},
+};
+
+static const stm32h755_i2c_instance_t I2C_INSTANCES[DAS_BOARD_I2C_COUNT] = {
+    [DAS_BOARD_I2C_ARDUINO] = STM32H755_I2C1,
 };
 
 static const das_board_spi_pins_t SPI_PINS[DAS_BOARD_SPI_COUNT] = {
@@ -148,6 +154,34 @@ das_result_t das_board_i2c_get_pins(das_board_i2c_resource_t resource,
                                     das_board_i2c_pins_t* pins) {
     if (!i2c_valid(resource) || pins == 0) return DAS_ERROR_INVALID_ARGUMENT;
     *pins = I2C_PINS[resource];
+    return DAS_OK;
+}
+
+das_result_t das_board_i2c_init(das_board_i2c_resource_t resource,
+                                const das_i2c_config_t* config,
+                                das_i2c_t* i2c) {
+    if (!i2c_valid(resource) || config == 0 || i2c == 0) return DAS_ERROR_INVALID_ARGUMENT;
+    *i2c = DAS_I2C_INVALID;
+    const das_board_i2c_pins_t pins = I2C_PINS[resource];
+    const das_gpio_config_t pin_config = {
+        .mode = DAS_GPIO_MODE_ALTERNATE,
+        .pull = DAS_GPIO_PULL_UP,
+        .output_type = DAS_GPIO_OUTPUT_OPEN_DRAIN,
+        .speed = DAS_GPIO_SPEED_HIGH,
+        .alternate = DAS_NUCLEO_I2C_AF,
+        .initial_high = true,
+    };
+
+    das_result_t result = das_gpio_configure(pins.scl, &pin_config);
+    if (result != DAS_OK) return result;
+    result = das_gpio_configure(pins.sda, &pin_config);
+    if (result != DAS_OK) return result;
+
+    const das_i2c_t resolved = stm32h755_i2c_handle(I2C_INSTANCES[resource]);
+    if (!das_i2c_is_valid(resolved)) return DAS_ERROR_UNSUPPORTED;
+    result = das_i2c_init(resolved, config);
+    if (result != DAS_OK) return result;
+    *i2c = resolved;
     return DAS_OK;
 }
 

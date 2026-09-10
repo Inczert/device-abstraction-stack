@@ -13,7 +13,7 @@
 #define DAS_STM32H755_DMA_STREAM_COUNT 8u
 #define DAS_STM32H755_DMA_MAX_COUNT UINT32_C(0xffff)
 #define DAS_STM32H755_DMA_ALL_FLAGS UINT32_C(0x3d)
-#define DAS_STM32H755_DMA_TERMINAL_ERROR_FLAGS UINT32_C(0x08)
+#define DAS_STM32H755_DMA_ERROR_FLAGS UINT32_C(0x0d)
 #define DAS_STM32H755_DMA_COMPLETE_FLAG UINT32_C(0x20)
 #define DAS_STM32H755_DMA_DISABLE_SPINS UINT32_C(100000)
 
@@ -27,6 +27,7 @@
 
 static bool g_dma_claimed[DAS_STM32H755_DMA_STREAM_COUNT];
 static bool g_dma_configured[DAS_STM32H755_DMA_STREAM_COUNT];
+static bool g_dma_active[DAS_STM32H755_DMA_STREAM_COUNT];
 static das_dma_config_t g_dma_config[DAS_STM32H755_DMA_STREAM_COUNT];
 
 static DMA_Stream_TypeDef* stream_from_index(uint32_t index) {
@@ -170,6 +171,7 @@ das_result_t das_dma_acquire(das_dma_t* dma) {
         if (!g_dma_claimed[index]) {
             g_dma_claimed[index] = true;
             g_dma_configured[index] = false;
+            g_dma_active[index] = false;
             *dma = (das_dma_t){.storage = index};
             clear_stream_flags(index);
             dmamux_from_index(index)->CCR = 0u;
@@ -189,6 +191,7 @@ das_result_t das_dma_release(das_dma_t dma) {
     if (result != DAS_OK) return result;
     clear_stream_flags(index);
     dmamux_from_index(index)->CCR = 0u;
+    g_dma_active[index] = false;
     g_dma_configured[index] = false;
     g_dma_claimed[index] = false;
     return DAS_OK;
@@ -240,6 +243,7 @@ das_result_t das_dma_configure(das_dma_t dma, const das_dma_config_t* config) {
     stream->M1AR = 0u;
     stream->FCR = 0u;
     clear_stream_flags(index);
+    g_dma_active[index] = false;
     g_dma_config[index] = *config;
     g_dma_configured[index] = true;
     return stm32h755_dma_set_request(dma, STM32H755_DMA_REQUEST_MEM2MEM);
@@ -263,7 +267,9 @@ das_result_t das_dma_start(das_dma_t dma,
     }
 
     DMA_Stream_TypeDef* const stream = stream_from_index(index);
-    if ((stream->CR & DMA_SxCR_EN) != 0u) return DAS_ERROR_NOT_READY;
+    if ((stream->CR & DMA_SxCR_EN) != 0u || g_dma_active[index]) {
+        return DAS_ERROR_NOT_READY;
+    }
 
     clear_stream_flags(index);
     stream->NDTR = (uint32_t)count;
@@ -284,8 +290,10 @@ das_result_t das_dma_start(das_dma_t dma,
             return DAS_ERROR_INVALID_ARGUMENT;
     }
 
+    g_dma_active[index] = true;
     __DSB();
     stream->CR |= DMA_SxCR_EN;
+    __DSB();
     return DAS_OK;
 }
 
@@ -296,13 +304,15 @@ das_result_t das_dma_get_state(das_dma_t dma, das_dma_state_t* state) {
     }
 
     const uint32_t flags = stream_flags(index);
-    /* TEIF is terminal. FEIF/DMEIF can represent recoverable back-pressure
-       and do not stop the stream; completion remains authoritative. */
-    if ((flags & DAS_STM32H755_DMA_TERMINAL_ERROR_FLAGS) != 0u) {
+    if ((flags & DAS_STM32H755_DMA_ERROR_FLAGS) != 0u) {
+        g_dma_active[index] = false;
         *state = DAS_DMA_STATE_ERROR;
     } else if ((flags & DAS_STM32H755_DMA_COMPLETE_FLAG) != 0u) {
+        g_dma_active[index] = false;
         *state = DAS_DMA_STATE_COMPLETE;
-    } else if ((stream_from_index(index)->CR & DMA_SxCR_EN) != 0u) {
+    } else if (g_dma_active[index]) {
+        /* EN can clear before TCIF becomes observable. Keep a started stream busy
+           until hardware reports completion or an error flag. */
         *state = DAS_DMA_STATE_BUSY;
     } else {
         *state = DAS_DMA_STATE_IDLE;
@@ -354,6 +364,7 @@ das_result_t das_dma_abort(das_dma_t dma) {
     const das_result_t result = stop_stream(index);
     if (result != DAS_OK) return result;
     clear_stream_flags(index);
+    g_dma_active[index] = false;
     return DAS_OK;
 }
 

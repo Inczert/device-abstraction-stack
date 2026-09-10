@@ -36,6 +36,12 @@ trap cleanup EXIT INT TERM
 rm -rf "$BUILD_ROOT"
 mkdir -p "$BUILD_ROOT/logs"
 
+REVISION="unknown"
+if command -v git >/dev/null 2>&1; then
+  REVISION="$(git -C "$ROOT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
+fi
+printf 'DAS commit: %s\n' "$REVISION" | tee "$BUILD_ROOT/logs/metadata.log"
+
 "$ROOT_DIR/scripts/build_stm32h755.sh" \
   --stm32h7-root "$STM32_CUBE_H7_DIR" \
   --build-dir "$BUILD_ROOT/cm7" \
@@ -98,4 +104,5 @@ run_case CM4 "$CM4_ELF" 3334 "$BUILD_ROOT/logs/cm4-uart.log"
 
 echo
 echo "UART qualification: 2/2 PASS"
+echo "DAS commit: $REVISION"
 echo "Logs: $BUILD_ROOT/logs"

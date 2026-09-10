@@ -34,7 +34,7 @@ Options:
   --debug-timeout SEC     GDB timeout per case (default: 30).
   --clean                 Clean before building.
   --no-build              Reuse existing CM7/CM4 hardware, time, clock, button,
-                          UART, timer/PWM, and custom-link ELFs.
+                          UART, SPI, timer/PWM, and custom-link ELFs.
   -h, --help              Show help.
 USAGE
 }
@@ -161,12 +161,14 @@ trap 'exit 143' TERM
   echo "Custom linker fixture: $ROOT_DIR/tests/link/stm32h755/custom_cm7.ld"
   echo "OpenOCD dual-core config: $ROOT_DIR/scripts/openocd_h755_dual_core.cfg"
   echo "Persistent UART fixture: Arduino D1/TX/PB6 <-> Arduino D0/RX/PB7"
+  echo "Persistent SPI fixture: Arduino D11/MOSI/PB5 <-> Arduino D12/MISO/PA6"
   echo "Switched GPIO/PWM fixture: CN10 D4/PE14 <-> CN10 D3/PE13"
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$ROOT_DIR/cmake/targets/stm32h755_cm7.ld" 2>/dev/null || true
     sha256sum "$ROOT_DIR/cmake/targets/stm32h755_cm4.ld" 2>/dev/null || true
     sha256sum "$ROOT_DIR/tests/link/stm32h755/custom_cm7.ld" 2>/dev/null || true
     sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_uart_case.gdb" 2>/dev/null || true
+    sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_spi_case.gdb" 2>/dev/null || true
     sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_timer_case.gdb" 2>/dev/null || true
   fi
   echo "GDB: $GDB_BIN"
@@ -224,6 +226,8 @@ CM7_TIME_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.elf"
 CM7_TIME_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.map"
 CM7_UART_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.elf"
 CM7_UART_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.map"
+CM7_SPI_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_spi_test.elf"
+CM7_SPI_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_spi_test.map"
 CM7_TIMER_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_timer_test.elf"
 CM7_TIMER_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_timer_test.map"
 CLOCK_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_clock_test.elf"
@@ -236,6 +240,8 @@ CM4_TIME_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.el
 CM4_TIME_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.map"
 CM4_UART_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.elf"
 CM4_UART_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.map"
+CM4_SPI_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_spi_test.elf"
+CM4_SPI_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_spi_test.map"
 CM4_TIMER_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_timer_test.elf"
 CM4_TIMER_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_timer_test.map"
 CUSTOM_ELF="$CUSTOM_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.elf"
@@ -243,11 +249,12 @@ CUSTOM_MAP="$CUSTOM_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.map"
 
 ARTIFACTS=(
   "$CM7_ELF" "$CM7_MAP" "$CM7_TIME_ELF" "$CM7_TIME_MAP"
-  "$CM7_UART_ELF" "$CM7_UART_MAP" "$CM7_TIMER_ELF" "$CM7_TIMER_MAP"
-  "$CLOCK_ELF" "$CLOCK_MAP" "$BUTTON_ELF" "$BUTTON_MAP"
+  "$CM7_UART_ELF" "$CM7_UART_MAP" "$CM7_SPI_ELF" "$CM7_SPI_MAP"
+  "$CM7_TIMER_ELF" "$CM7_TIMER_MAP" "$CLOCK_ELF" "$CLOCK_MAP"
+  "$BUTTON_ELF" "$BUTTON_MAP"
   "$CM4_ELF" "$CM4_MAP" "$CM4_TIME_ELF" "$CM4_TIME_MAP"
-  "$CM4_UART_ELF" "$CM4_UART_MAP" "$CM4_TIMER_ELF" "$CM4_TIMER_MAP"
-  "$CUSTOM_ELF" "$CUSTOM_MAP"
+  "$CM4_UART_ELF" "$CM4_UART_MAP" "$CM4_SPI_ELF" "$CM4_SPI_MAP"
+  "$CM4_TIMER_ELF" "$CM4_TIMER_MAP" "$CUSTOM_ELF" "$CUSTOM_MAP"
 )
 for path in "${ARTIFACTS[@]}"; do
   [[ -s "$path" ]] || { echo "Expected campaign artifact not found: $path" >&2; exit 1; }
@@ -266,12 +273,14 @@ copy_pair() {
 copy_pair "$CM7_ELF" "$CM7_MAP" das_stm32h755_cm7_hw_test
 copy_pair "$CM7_TIME_ELF" "$CM7_TIME_MAP" das_stm32h755_cm7_time_test
 copy_pair "$CM7_UART_ELF" "$CM7_UART_MAP" das_stm32h755_cm7_uart_test
+copy_pair "$CM7_SPI_ELF" "$CM7_SPI_MAP" das_stm32h755_cm7_spi_test
 copy_pair "$CM7_TIMER_ELF" "$CM7_TIMER_MAP" das_stm32h755_cm7_timer_test
 copy_pair "$CLOCK_ELF" "$CLOCK_MAP" das_stm32h755_cm7_clock_test
 copy_pair "$BUTTON_ELF" "$BUTTON_MAP" das_stm32h755_cm7_button_test
 copy_pair "$CM4_ELF" "$CM4_MAP" das_stm32h755_cm4_hw_test
 copy_pair "$CM4_TIME_ELF" "$CM4_TIME_MAP" das_stm32h755_cm4_time_test
 copy_pair "$CM4_UART_ELF" "$CM4_UART_MAP" das_stm32h755_cm4_uart_test
+copy_pair "$CM4_SPI_ELF" "$CM4_SPI_MAP" das_stm32h755_cm4_spi_test
 copy_pair "$CM4_TIMER_ELF" "$CM4_TIMER_MAP" das_stm32h755_cm4_timer_test
 copy_pair "$CUSTOM_ELF" "$CUSTOM_MAP" das_stm32h755_custom_link_test
 cp "$ROOT_DIR/cmake/targets/stm32h755_cm7.ld" "$LOG_DIR/"
@@ -312,12 +321,15 @@ initial_hardware_setup() {
 1. Connect the NUCLEO-H755ZI-Q through the ST-LINK USB connection.
 2. Connect jumper A and LEAVE IT CONNECTED for the entire campaign:
      Arduino D1 / TX / PB6  <->  Arduino D0 / RX / PB7
-3. Leave CN10 D3 / PE13 and CN10 D4 / PE14 DISCONNECTED for now.
-4. Keep a second jumper ready. The campaign will ask ONCE when it is time to
-   connect D4 <-> D3; after that, leave it connected for the rest of the run.
-5. Leave the blue B1 USER button released.
+3. Connect jumper B and LEAVE IT CONNECTED for the entire campaign:
+     Arduino D11 / MOSI / PB5  <->  Arduino D12 / MISO / PA6
+4. Leave CN10 D3 / PE13 and CN10 D4 / PE14 DISCONNECTED for now.
+5. Keep jumper C ready. The campaign will ask ONCE when it is time to connect
+   D4 <-> D3; after that, leave it connected for the rest of the run.
+6. Leave Arduino D13 / SCK / PA5 and D10 / CS / PD14 otherwise unconnected.
+7. Leave the blue B1 USER button released.
 
-Never connect D0/D1 or D3/D4 to 3V3, 5V, or GND for these loopback fixtures.
+Never connect the loopback signal pins to 3V3, 5V, or GND.
 SETUP
   read -r -p "Press ENTER when the initial setup is complete... "
 }
@@ -482,7 +494,8 @@ check_layout "Custom linker override" "$LOG_DIR/custom_memory_layout.log" \
   --core cm7 --flash-begin 0x08020000 --flash-end 0x08100000 \
   "$CUSTOM_ELF" "$CUSTOM_MAP" || exit 1
 
-# One physical setup prompt covers everything until the D4/D3 transition.
+# One physical setup prompt covers every persistent serial fixture and leaves
+# D3/D4 free until the single later transition.
 initial_hardware_setup
 
 echo "Starting dual-core OpenOCD..."
@@ -519,11 +532,15 @@ run_simple_case "CM7 HSI/PLL 400MHz clock" "$CLOCK_ELF" 3333 \
   "$ROOT_DIR/scripts/gdb/stm32h755_clock_case.gdb" || exit 1
 run_button_case || exit 1
 
-# D1/D0 was installed during initial setup and remains connected throughout.
+# UART and SPI loopbacks were installed during initial setup and remain connected.
 run_simple_case "CM7 UART loopback" "$CM7_UART_ELF" 3333 \
   "$ROOT_DIR/scripts/gdb/stm32h755_uart_case.gdb" || exit 1
 run_simple_case "CM4 UART loopback" "$CM4_UART_ELF" 3334 \
   "$ROOT_DIR/scripts/gdb/stm32h755_uart_case.gdb" || exit 1
+run_simple_case "CM7 SPI loopback" "$CM7_SPI_ELF" 3333 \
+  "$ROOT_DIR/scripts/gdb/stm32h755_spi_case.gdb" || exit 1
+run_simple_case "CM4 SPI loopback" "$CM4_SPI_ELF" 3334 \
+  "$ROOT_DIR/scripts/gdb/stm32h755_spi_case.gdb" || exit 1
 
 # Qualify all tests requiring D3 to be electrically free before touching D4/D3.
 bring_up_core "CM7" "$CM7_ELF" 3333 || exit 1
@@ -535,8 +552,8 @@ automated_gpio_case "CM4" "$CM4_ELF" 3334 "GPIO pull-up" 7 4
 automated_gpio_case "CM4" "$CM4_ELF" 3334 "GPIO pull-down" 8 8
 
 # Single fixture transition. D4/D3 remains connected through every remaining
-# GPIO and timer/PWM case; D1/D0 remains connected too.
-wait_for_enter "Fixture transition: connect jumper B from CN10 D4 / PE14 to CN10 D3 / PE13. Leave BOTH D4-D3 and D1-D0 connected for the rest of the campaign."
+# GPIO and timer/PWM case; the UART and SPI loopbacks remain connected too.
+wait_for_enter "Fixture transition: connect jumper C from CN10 D4 / PE14 to CN10 D3 / PE13. Leave D4-D3, D1-D0, and D11-D12 connected for the rest of the campaign."
 
 # CM4 is already running its hardware image from the free-D3 phase.
 automated_gpio_case "CM4" "$CM4_ELF" 3334 "GPIO loopback low/high" 6 3

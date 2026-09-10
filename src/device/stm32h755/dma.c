@@ -149,7 +149,7 @@ static das_result_t stop_stream(uint32_t index) {
 das_result_t stm32h755_dma_set_request(das_dma_t dma, uint32_t request) {
     uint32_t index = 0u;
     if (!handle_index(dma, &index)) return DAS_ERROR_INVALID_ARGUMENT;
-    if ((request & ~DMAMUX_CxCR_DMAREQ_ID) != 0u) return DAS_ERROR_OUT_OF_RANGE;
+    if ((request & ~DMAMUX_CxCR_DMAREQ_ID) != 0u) return DAS_ERROR_INVALID_ARGUMENT;
 
     DMA_Stream_TypeDef* const stream = stream_from_index(index);
     if ((stream->CR & DMA_SxCR_EN) != 0u) return DAS_ERROR_NOT_READY;
@@ -254,7 +254,7 @@ das_result_t das_dma_start(das_dma_t dma,
         source == 0 || destination == 0 || count == 0u) {
         return DAS_ERROR_INVALID_ARGUMENT;
     }
-    if (count > DAS_STM32H755_DMA_MAX_COUNT) return DAS_ERROR_OUT_OF_RANGE;
+    if (count > DAS_STM32H755_DMA_MAX_COUNT) return DAS_ERROR_INVALID_ARGUMENT;
 
     const das_dma_config_t* const config = &g_dma_config[index];
     if (!address_aligned(source, config->source_width) ||

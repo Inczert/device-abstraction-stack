@@ -12,7 +12,7 @@ include/das/
 
 Application-facing headers use DAS and standard C types. STM32 and CMSIS device types do not leak into this layer.
 
-Current public areas are result/error handling, clock, monotonic time, IRQ control, GPIO/EXTI, UART, SPI, I2C, periodic timer/PWM, DMA, D-cache maintenance, board resources and optional Cortex-M startup symbols.
+Current public areas are result/error handling, clock, monotonic time, IRQ control, GPIO/EXTI, UART, SPI, I2C, periodic timer/PWM, DMA, D-cache maintenance, board resources and optional Cortex-M startup/vector override symbols.
 
 ### Common logic
 
@@ -53,6 +53,7 @@ This layer owns STM32H755 silicon behavior currently implemented by DAS:
 - I2C;
 - general-purpose timer/PWM support;
 - DMA1/DMAMUX1;
+- default STM32H755 vector-table layout using CMSIS IRQ numbering;
 - core-aware register views where STM32H755 exposes CPU-specific state.
 
 ADC, watchdog, internal-flash/reset-cause services and production dual-core lifecycle control remain separate follow-up work.
@@ -88,6 +89,7 @@ The build layer owns:
 - CM7/CM4 default memory/linker scripts;
 - core/toolchain selection;
 - optional linker override;
+- default-vector-table link policy;
 - static-library installation/export;
 - relocatable installed `das::das` CMake target;
 - propagation of the selected linker script to the final firmware ELF.
@@ -124,7 +126,7 @@ common logic           board mapping/policy
 
 `DAS_DEVICE` names the board/target composition. `DAS_CORE` separately selects CPU/FPU flags, CMSIS core definitions, core-specific STM32 views and default linker layout.
 
-## Startup ownership
+## Startup and vector ownership
 
 `src/mcu/cortex_m/startup.c` provides weak reusable reset/runtime behavior:
 
@@ -136,7 +138,16 @@ common logic           board mapping/policy
 
 The startup source consumes linker symbols but contains no STM32H755 physical addresses.
 
-The **final firmware owns the vector table**. The linker script places `.isr_vector`; it does not synthesize vector entries. Applications retain control of the initial stack entry, reset vector and concrete core/device ISRs. This is required for normal bare-metal reset boot and permits bootloaders/RTOSes to replace the weak DAS handlers cleanly.
+For the STM32H755 composition, DAS also places a weak default vector table in the device layer. CMSIS supplies the IRQ numbering; DAS owns the actual default table so a normal bare-metal application does not have to duplicate startup boilerplate merely to boot or use the default SysTick time source.
+
+The default table provides the initial stack, weak Cortex-M handlers and SysTick entries. External STM32H755 IRQ slots safely route to `Default_Handler`; applications that need concrete external ISR bindings currently provide their own table.
+
+The default is force-linked from the otherwise lazy static archive when `DAS_USE_DEFAULT_VECTOR_TABLE=ON`. Firmware that owns vector policy can either:
+
+- set `DAS_USE_DEFAULT_VECTOR_TABLE=OFF` before adding/finding DAS and provide its own `.isr_vector`; or
+- provide a strong `g_das_vector_table`, which overrides the weak DAS definition.
+
+This leaves simple applications simple while preserving full bootloader/RTOS/application ownership when needed.
 
 ## Memory ownership
 
@@ -158,7 +169,9 @@ Applications can replace this policy with a custom linker script. See [Memory/li
 
 `das::das` is a static archive target. `libdas.a` is not assigned physical addresses when created.
 
-For a source-tree build, the selected linker script is carried on the target's build interface. For an installed package, `DASConfig.cmake` attaches the installed relocatable linker-script path to the imported target. In both cases the consumer contract remains:
+For a source-tree build, the selected linker script is carried on the target's build interface. For an installed package, `DASConfig.cmake` attaches the installed relocatable linker-script path to the imported target. When the default vector table is enabled, CMake also force-links the canonical weak vector symbol so that static-library extraction cannot silently omit the boot table.
+
+In both cases the consumer contract remains:
 
 ```cmake
 target_link_libraries(my_firmware PRIVATE das::das)
@@ -172,7 +185,8 @@ The installed package also exports only the public include tree, keeping impleme
 Cortex-M NVIC/core control       -> src/mcu/cortex_m/
 STM32 peripheral/source state    -> src/device/stm32h755/
 board route/polarity             -> src/board/nucleo_h755zi_q/
-concrete vector/ISR binding      -> final firmware
+default vector table             -> src/device/stm32h755/vector_table.c
+custom vector/ISR binding        -> application/RTOS when required
 ```
 
 `das_irq_t` represents a controller line. GPIO, timer and DMA sources can resolve their controller line while keeping source-specific flags/masks in their own APIs.
@@ -205,15 +219,15 @@ Still separate under #20:
 
 1. `include/das/` exposes no vendor device types.
 2. `src/mcu/` contains architecture behavior, not STM32 peripheral drivers.
-3. `src/device/` contains silicon behavior, not NUCLEO connector policy.
+3. `src/device/` contains silicon behavior, including the device vector layout, not NUCLEO connector policy.
 4. `src/board/` owns board wiring/policy and reuses generic/device backends.
 5. linker/memory/package policy stays in the build layer.
 6. applications do not include implementation files from `src/`.
 7. multi-core device code must not silently assume CPU1 when built for CPU2.
-8. final firmware owns vector/ISR binding.
+8. DAS supplies a safe default vector table, while applications/RTOSes can replace it explicitly when they own ISR binding.
 
 ## Qualification
 
 The completed standing STM32H755 campaign is **38/38 PASS** at `c4bbc578d32c7b81f2ec5aaf38d637d128ca1942`. It includes static linker checks and physical qualification of startup, clock/power, time, board resources/button, GPIO/EXTI/IRQ, UART, SPI, I2C, DMA/cache and timer/PWM on both cores where applicable.
 
-The installed `find_package(DAS)` CM7 LED blink application is separately hardware-validated on the later packaging/example line. It proves the generated static archive, installed public headers/package metadata, installed linker script, application-owned vector table and OpenOCD reset/flash path work together as a real external consumer.
+The installed `find_package(DAS)` CM7 LED blink application is separately hardware-validated on the packaging/example line before this default-vector refactor. The next LED smoke run should qualify the simpler application against the library-owned vector path.

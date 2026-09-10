@@ -77,7 +77,9 @@ A `das_irq_t` identifies a controller line, not necessarily a unique peripheral 
 
 The current IRQ API controls interrupt-controller state. It does **not** provide generic runtime handler registration.
 
-The final firmware owns its vector table and concrete ISR entry points. This is the same startup boundary used by the installed LED example and the hardware qualification images.
+For STM32H755, DAS supplies a weak default vector table so ordinary bare-metal applications can boot and use core services such as SysTick without defining startup boilerplate. External IRQ entries in that default table route to `Default_Handler`.
+
+Applications that require concrete external ISR bindings can either set `DAS_USE_DEFAULT_VECTOR_TABLE=OFF` and provide their own `.isr_vector`, or provide a strong `g_das_vector_table` definition that overrides the weak DAS table. The hardware qualification images use their own strong vector tables for their test-specific handlers.
 
 Portable callback/dispatch registration is a separate design problem involving vector ownership, shared lines, static/runtime binding and RTOS/application policy. DAS does not hide that problem inside `das_irq_enable()`.
 
@@ -89,7 +91,7 @@ das_irq_*()
     -> NVIC hardware
 ```
 
-No CMSIS or STM32 types appear in `<das/irq.h>`.
+The STM32H755 default vector-table implementation also uses the CMSIS device header's IRQ numbering internally. No CMSIS or STM32 types appear in `<das/irq.h>`.
 
 ## Qualification
 

@@ -2,11 +2,13 @@
 
 This example demonstrates one ownership model for using [HardRT](https://github.com/ExoSpaceLabs/hardrt) as the Cortex-M scheduler while DAS owns board clocking and peripherals.
 
+The reference integration targets **HardRT 0.5.1 or a compatible newer 0.5.x release**. HardRT 0.5.1 is the current validated baseline for this example and includes the current Cortex-M scheduler/ISR, diagnostics, IPC, event/notification, and packaging improvements used by the integration.
+
 Both dependencies are consumed as installed CMake packages:
 
 ```cmake
 find_package(DAS CONFIG REQUIRED)
-find_package(HardRT CONFIG REQUIRED)
+find_package(HardRT 0.5.1 CONFIG REQUIRED)
 target_link_libraries(das_hardrt_uart PRIVATE HardRT::hardrt das::das)
 ```
 
@@ -58,6 +60,8 @@ Otherwise specify the checkout explicitly:
     /home/dev/STM32Cube/Repository/STM32CubeH7/ \
     --hardrt-root /path/to/hardrt
 ```
+
+The helper builds the supplied HardRT checkout as an installed Cortex-M package. The final example configuration then enforces the `HardRT 0.5.1` package requirement, so an older 0.5.0 installation cannot silently become the reference runtime.
 
 The helper performs the same external-consumer flow as CI:
 

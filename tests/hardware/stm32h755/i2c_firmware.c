@@ -37,27 +37,6 @@
 #error "I2C hardware test requires CORE_CM7 or CORE_CM4"
 #endif
 
-extern uint32_t __StackTop;
-void I2C4_EV_IRQHandler(void);
-void I2C4_ER_IRQHandler(void);
-
-__attribute__((section(".isr_vector"), used, aligned(256)))
-const uintptr_t g_das_i2c_vector_table[] = {
-    [0] = (uintptr_t)&__StackTop,
-    [1] = (uintptr_t)&Reset_Handler,
-    [2] = (uintptr_t)&NMI_Handler,
-    [3] = (uintptr_t)&HardFault_Handler,
-    [4] = (uintptr_t)&MemManage_Handler,
-    [5] = (uintptr_t)&BusFault_Handler,
-    [6] = (uintptr_t)&UsageFault_Handler,
-    [11] = (uintptr_t)&SVC_Handler,
-    [12] = (uintptr_t)&DebugMon_Handler,
-    [14] = (uintptr_t)&PendSV_Handler,
-    [15] = (uintptr_t)&SysTick_Handler,
-    [16 + I2C4_EV_IRQn] = (uintptr_t)&I2C4_EV_IRQHandler,
-    [16 + I2C4_ER_IRQn] = (uintptr_t)&I2C4_ER_IRQHandler,
-};
-
 typedef struct das_i2c_test_evidence {
     uint32_t magic;
     volatile uint32_t booted;
@@ -394,7 +373,7 @@ int main(void) {
         g_das_i2c_test_evidence.error = UINT32_C(0x0c80) | (uint32_t)(-result & 0x0f);
         for (;;) { __NOP(); }
     }
-    ++g_das_i2c_test_evidence.bytes_checked; /* selector byte */
+    ++g_das_i2c_test_evidence.bytes_checked;
     g_das_i2c_test_evidence.flags |= DAS_I2C_FLAG_WRITE_READ;
 
     const das_i2c_config_t fast = {.frequency_hz = UINT32_C(400000)};

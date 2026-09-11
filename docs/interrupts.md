@@ -73,15 +73,29 @@ On Cortex-M, DAS maps these operations onto CMSIS NVIC helpers and the device-pr
 
 A `das_irq_t` identifies a controller line, not necessarily a unique peripheral source. STM32 GPIO EXTI lines are a direct example: several source lines share one NVIC vector. Enabling the controller therefore affects every source on that line, while each peripheral/source API remains responsible for identifying and clearing its own event.
 
-## Handler binding
+## Handler and vector ownership
 
 The current IRQ API controls interrupt-controller state. It does **not** provide generic runtime handler registration.
 
-For STM32H755, DAS supplies a weak default vector table so ordinary bare-metal applications can boot and use core services such as SysTick without defining startup boilerplate. External IRQ entries in that default table route to `Default_Handler`.
+For STM32H755, DAS supplies one weak default vector table covering the complete fixed MCU vector layout. External vector slots point to their normal STM32/CMSIS handler symbols, and DAS supplies weak implementations of those symbols that fall through to `Default_Handler`.
 
-Applications that require concrete external ISR bindings can either set `DAS_USE_DEFAULT_VECTOR_TABLE=OFF` and provide their own `.isr_vector`, or provide a strong `g_das_vector_table` definition that overrides the weak DAS table. The hardware qualification images use their own strong vector tables for their test-specific handlers.
+Normal firmware therefore keeps the DAS vector table and overrides only the handlers it owns. For example:
 
-Portable callback/dispatch registration is a separate design problem involving vector ownership, shared lines, static/runtime binding and RTOS/application policy. DAS does not hide that problem inside `das_irq_enable()`.
+```c
+void TIM2_IRQHandler(void) {
+    /* application, test or RTOS-owned TIM2 handling */
+}
+```
+
+That strong definition replaces the weak DAS `TIM2_IRQHandler`; no copied vector table is required. The same model permits UART, SPI, I2C, DMA, GPIO interrupts and RTOS core handlers to coexist in one firmware image.
+
+Core exception handlers supplied by the Cortex-M layer are weak as well. An RTOS can therefore provide strong `SysTick_Handler`, `PendSV_Handler` or fault handlers while retaining the DAS device vector table.
+
+Whole-table replacement remains available for exceptional startup policies. A bootloader or application can provide a strong `g_das_vector_table`, or set `DAS_USE_DEFAULT_VECTOR_TABLE=OFF` and provide its own `.isr_vector` section. This is not required merely to bind a peripheral ISR.
+
+Hardware qualification firmware uses the same default DAS table as normal applications and supplies only test-specific strong ISR functions. The dedicated custom-vector consumer test is intentionally the exception because its purpose is to validate whole-table replacement.
+
+Portable callback/dispatch registration is a separate design problem involving shared lines, static/runtime binding and RTOS/application policy. DAS does not hide that problem inside `das_irq_enable()`.
 
 ## CMSIS boundary
 
@@ -91,10 +105,10 @@ das_irq_*()
     -> NVIC hardware
 ```
 
-The STM32H755 default vector-table implementation also uses the CMSIS device header's IRQ numbering internally. No CMSIS or STM32 types appear in `<das/irq.h>`.
+The STM32H755 default vector-table implementation follows the CMSIS/ST device IRQ layout internally. No CMSIS or STM32 types appear in `<das/irq.h>`.
 
 ## Qualification
 
 The standing STM32H755 campaign exercises IRQ controller semantics through physical GPIO/EXTI on CM7 and CM4, the board-button path, periodic TIM2 update delivery, and DMA IRQ resolution. It verifies controller state/priority/pending behavior while preserving source-specific pending/clear handling.
 
-These paths are included in the completed **38/38** regression baseline.
+The previous completed **38/38** regression baseline predates the default-vector-table cleanup. The full hardware campaign must therefore be rerun after this change before the new vector ownership model inherits that qualification claim.

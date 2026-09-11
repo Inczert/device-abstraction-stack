@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-#include <das/board_resources.h>
-#include <das/uart.h>
+#include <das/das.h>
 
-#include <stddef.h>
 #include <stdint.h>
 
 int main(void) {
@@ -16,13 +14,16 @@ int main(void) {
 
     das_uart_t console = DAS_UART_INVALID;
     if (das_board_uart_init(DAS_BOARD_UART_STLINK_VCP, &config, &console) != DAS_OK) {
-        for (;;) {
-        }
+        return 1;
     }
 
     static const uint8_t message[] = "DAS UART ready\r\n";
-    (void)das_uart_write(console, message, sizeof(message) - 1u);
-
-    for (;;) {
+    if (das_uart_write(console, message, sizeof(message) - 1u) != DAS_OK) {
+        return 2;
     }
+    if (das_uart_flush(console) != DAS_OK) {
+        return 3;
+    }
+
+    return 0;
 }

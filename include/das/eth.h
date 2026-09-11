@@ -16,6 +16,8 @@ typedef struct das_eth {
 
 #define DAS_ETH_INVALID ((das_eth_t){UINT32_MAX})
 #define DAS_ETH_MAC_ADDRESS_SIZE 6u
+/** Maximum standard Layer-2 frame supplied by DAS, excluding the Ethernet FCS. */
+#define DAS_ETH_MAX_FRAME_SIZE 1518u
 
 /** Layer-2 Ethernet MAC configuration. */
 typedef struct das_eth_config {
@@ -44,9 +46,9 @@ das_result_t das_eth_init(das_eth_t eth, const das_eth_config_t* config);
 /**
  * Send one complete Layer-2 Ethernet frame.
  *
- * The caller supplies the Ethernet header and payload. The backend owns any
- * device-specific DMA descriptor and cache-coherency work required to place
- * the frame on the wire.
+ * The caller supplies the Ethernet header and payload, but not the FCS. The
+ * backend owns CRC/padding, DMA descriptors and cache-coherency work required
+ * to place the frame on the wire.
  */
 das_result_t das_eth_send(das_eth_t eth, const uint8_t* frame, size_t length);
 

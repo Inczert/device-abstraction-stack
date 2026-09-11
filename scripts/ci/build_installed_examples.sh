@@ -25,7 +25,7 @@ done
 PREFIX="$(cd "$PREFIX" && pwd)"
 EXPECTED_DAS_DIR="$PREFIX/lib/cmake/DAS"
 TOOLCHAIN="$ROOT_DIR/cmake/toolchains/arm-none-eabi.cmake"
-EXAMPLES=(led_blink time_periodic uart_console clock_uart)
+EXAMPLES=(led_blink time_periodic uart_console clock_uart eth_raw)
 
 rm -rf "$BUILD_ROOT"
 mkdir -p "$BUILD_ROOT"
@@ -65,7 +65,6 @@ for example in "${EXAMPLES[@]}"; do
     echo "Expected exactly one ELF for $example" >&2
     exit 1
   }
-
 done
 
 LED_ELF="$BUILD_ROOT/led_blink/das_led_blink.elf"

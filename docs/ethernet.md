@@ -111,6 +111,9 @@ g_das_eth_duplex
 g_das_eth_tx_count
 g_das_eth_rx_count
 g_das_eth_rx_bytes
+g_das_eth_rx_test_count
+g_das_eth_rx_test_errors
+g_das_eth_rx_last_sequence
 g_das_eth_last_result
 ```
 
@@ -126,8 +129,43 @@ Then capture the board's frames on the connected Linux Ethernet interface:
 sudo tcpdump -i <iface> -e -XX 'ether proto 0x88b5'
 ```
 
-The expected source is `02:00:00:00:00:01` and the destination is broadcast. The NUCLEO Ethernet route also requires its board jumpers/solder configuration to be in the Ethernet position, including JP6 and JP7 fitted on the standard NUCLEO-H755ZI-Q setup.
+The expected source is `02:00:00:00:00:01` and the destination is broadcast. The NUCLEO Ethernet route also requires JP6 and JP7 fitted on the standard NUCLEO-H755ZI-Q setup.
 
-## Qualification status
+## Automated physical qualification
 
-The public headers and STM32H755 implementation cross-build for CM7 and CM4; the CM4 runtime path is explicitly unsupported. The backend is not yet part of the standing physical qualification baseline. Physical acceptance requires observing PHY link state plus captured raw TX and RX traffic with CM7 D-cache enabled before Ethernet is marked qualified.
+The focused qualifier is:
+
+```bash
+./scripts/stm32h755_eth_test.sh \
+  /path/to/STM32CubeH7 \
+  --iface enp0s31f6
+```
+
+Physical setup:
+
+```text
+JP6 fitted
+JP7 fitted
+NUCLEO-H755ZI-Q CN14 RJ45  <->  host PC Ethernet port
+```
+
+No IP address, DHCP or higher network stack is required. The test uses Linux raw Layer-2 sockets on the host and raw DAS Ethernet frames on the board.
+
+The qualifier verifies physical carrier, negotiated PHY state, five STM32-to-host EtherType `0x88B5` frames, 64 host-to-STM32 EtherType `0x88B6` integrity frames with deterministic sequence/payload validation, repeated descriptor recycling and CM7 D-cache coherency. It finishes by reading the firmware evidence through batch GDB and requires zero RX integrity errors.
+
+The focused qualifier passed on commit `beecbeadc36b06992cbb8d3f91add466bf7ee701` on 2026-09-13. The recorded run reported 100 Mbps/full duplex, validated 5/5 board TX frames and 64/64 host-to-board integrity frames, with `test_errors=0` and `g_das_eth_last_result == DAS_OK`.
+
+## Standing campaign
+
+Ethernet is now promoted into `scripts/stm32h755_test_campaign.sh` as the 39th acceptance point. The full campaign requires the Linux host interface explicitly:
+
+```bash
+./scripts/stm32h755_test_campaign.sh \
+  /path/to/STM32CubeH7 \
+  --eth-iface enp0s31f6 \
+  --clean
+```
+
+The campaign setup instructs the operator to connect CN14 directly to the selected host Ethernet port and keep that cable connected for the whole run. After the existing dual-core timer/PWM cases, the campaign stops its long-lived OpenOCD session and launches the self-contained Ethernet qualifier. Its build/flash log, host traffic log, OpenOCD log, GDB evidence, metadata and raw-Ethernet ELF/symbol information are copied into the normal timestamped campaign archive.
+
+The completed pre-Ethernet full-campaign baseline remains 38/38 until the enlarged 39-point campaign is itself executed successfully. Ethernet's focused physical qualification is already complete; only the new combined campaign baseline remains to be established.

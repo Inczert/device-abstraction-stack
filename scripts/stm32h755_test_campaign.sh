@@ -4,7 +4,7 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STM32_CUBE_H7_DIR="${STM32_CUBE_H7_DIR:-}"
 BUILD_DIR="${DAS_STM32_BUILD_DIR:-$ROOT_DIR/build/stm32h755}"
-ETH_IFACE="${DAS_ETH_IFACE:-${IFACE:-}}"
+ETH_IFACE="${DAS_ETH_IFACE:-${IFACE:-enp0s31f6}}"
 CM4_BUILD_DIR=""
 CUSTOM_BUILD_DIR=""
 ETH_BUILD_DIR=""
@@ -26,12 +26,13 @@ SUMMARY=""
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/stm32h755_test_campaign.sh /path/to/STM32CubeH7 --eth-iface <linux-interface> [options]
-  scripts/stm32h755_test_campaign.sh --stm32h7-root /path/to/STM32CubeH7 --eth-iface <linux-interface> [options]
+  scripts/stm32h755_test_campaign.sh /path/to/STM32CubeH7 [options]
+  scripts/stm32h755_test_campaign.sh --stm32h7-root /path/to/STM32CubeH7 [options]
 
 Options:
   --stm32h7-root DIR      STM32CubeH7 checkout root.
-  --eth-iface IFACE       Linux Ethernet interface connected directly to board CN14.
+  --eth-iface IFACE       Linux Ethernet interface connected directly to board CN14
+                          (default: enp0s31f6).
   --build-dir DIR         Build directory (default: build/stm32h755).
   --openocd-scripts DIR   OpenOCD scripts directory.
   --debug-timeout SEC     GDB timeout per case (default: 30).
@@ -43,7 +44,7 @@ Options:
 
 Environment alternatives:
   STM32_CUBE_H7_DIR=/path/to/STM32CubeH7
-  DAS_ETH_IFACE=enp0s31f6
+  DAS_ETH_IFACE=<linux-interface>
 USAGE
 }
 
@@ -90,15 +91,9 @@ else
 fi
 
 [[ -n "$STM32_CUBE_H7_DIR" ]] || { usage >&2; exit 2; }
-[[ -n "$ETH_IFACE" ]] || {
-  echo "Ethernet qualification is part of the standing campaign." >&2
-  echo "Specify the Linux interface connected to board CN14 with --eth-iface or DAS_ETH_IFACE." >&2
-  echo >&2
-  ip -br link >&2 || true
-  exit 2
-}
 [[ -d "/sys/class/net/$ETH_IFACE" ]] || {
   echo "Network interface not found: $ETH_IFACE" >&2
+  echo "Use --eth-iface <linux-interface> or DAS_ETH_IFACE to override the default." >&2
   ip -br link >&2 || true
   exit 2
 }

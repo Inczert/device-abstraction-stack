@@ -4,8 +4,10 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STM32_CUBE_H7_DIR="${STM32_CUBE_H7_DIR:-}"
 BUILD_DIR="${DAS_STM32_BUILD_DIR:-$ROOT_DIR/build/stm32h755}"
+ETH_IFACE="${DAS_ETH_IFACE:-${IFACE:-}}"
 CM4_BUILD_DIR=""
 CUSTOM_BUILD_DIR=""
+ETH_BUILD_DIR=""
 OPENOCD_SCRIPTS="${OPENOCD_SCRIPTS:-/usr/share/openocd/scripts}"
 DEBUG_TIMEOUT=30
 CLEAN=0
@@ -24,24 +26,31 @@ SUMMARY=""
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/stm32h755_test_campaign.sh /path/to/STM32CubeH7 [options]
-  scripts/stm32h755_test_campaign.sh --stm32h7-root /path/to/STM32CubeH7 [options]
+  scripts/stm32h755_test_campaign.sh /path/to/STM32CubeH7 --eth-iface <linux-interface> [options]
+  scripts/stm32h755_test_campaign.sh --stm32h7-root /path/to/STM32CubeH7 --eth-iface <linux-interface> [options]
 
 Options:
   --stm32h7-root DIR      STM32CubeH7 checkout root.
+  --eth-iface IFACE       Linux Ethernet interface connected directly to board CN14.
   --build-dir DIR         Build directory (default: build/stm32h755).
   --openocd-scripts DIR   OpenOCD scripts directory.
   --debug-timeout SEC     GDB timeout per case (default: 30).
   --clean                 Clean before building.
   --no-build              Reuse existing CM7/CM4 hardware, time, clock, button,
                           UART, SPI, I2C, DMA/cache, timer/PWM, and custom-link ELFs.
+                          The Ethernet installed-package qualifier is still rebuilt.
   -h, --help              Show help.
+
+Environment alternatives:
+  STM32_CUBE_H7_DIR=/path/to/STM32CubeH7
+  DAS_ETH_IFACE=enp0s31f6
 USAGE
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --stm32h7-root) STM32_CUBE_H7_DIR="$2"; shift 2 ;;
+    --eth-iface) ETH_IFACE="$2"; shift 2 ;;
     --build-dir) BUILD_DIR="$2"; shift 2 ;;
     --openocd-scripts) OPENOCD_SCRIPTS="$2"; shift 2 ;;
     --debug-timeout) DEBUG_TIMEOUT="$2"; shift 2 ;;
@@ -70,7 +79,7 @@ fi
 need() {
   command -v "$1" >/dev/null 2>&1 || { echo "Missing command: $1" >&2; exit 2; }
 }
-for command in cmake openocd timeout tee grep tar arm-none-eabi-nm; do need "$command"; done
+for command in cmake openocd timeout tee grep tar arm-none-eabi-nm ip python3 sudo; do need "$command"; done
 if command -v gdb-multiarch >/dev/null 2>&1; then
   GDB_BIN=gdb-multiarch
 elif command -v arm-none-eabi-gdb >/dev/null 2>&1; then
@@ -80,9 +89,19 @@ else
   exit 2
 fi
 
-if (( SKIP_BUILD == 0 )); then
-  [[ -n "$STM32_CUBE_H7_DIR" ]] || { usage >&2; exit 2; }
-fi
+[[ -n "$STM32_CUBE_H7_DIR" ]] || { usage >&2; exit 2; }
+[[ -n "$ETH_IFACE" ]] || {
+  echo "Ethernet qualification is part of the standing campaign." >&2
+  echo "Specify the Linux interface connected to board CN14 with --eth-iface or DAS_ETH_IFACE." >&2
+  echo >&2
+  ip -br link >&2 || true
+  exit 2
+}
+[[ -d "/sys/class/net/$ETH_IFACE" ]] || {
+  echo "Network interface not found: $ETH_IFACE" >&2
+  ip -br link >&2 || true
+  exit 2
+}
 
 if (( CLEAN != 0 )); then
   rm -rf -- "$BUILD_DIR"
@@ -90,6 +109,7 @@ fi
 
 CM4_BUILD_DIR="$BUILD_DIR/cm4-hw"
 CUSTOM_BUILD_DIR="$BUILD_DIR/custom-link"
+ETH_BUILD_DIR="$BUILD_DIR/ethernet-qualification"
 STAMP="$(date -u +'%Y%m%dT%H%M%SZ')"
 CAMPAIGN_ROOT="$BUILD_DIR/campaign"
 LOG_DIR="$CAMPAIGN_ROOT/$STAMP"
@@ -152,6 +172,7 @@ trap 'exit 143' TERM
   echo "CM7 hardware build dir: $BUILD_DIR"
   echo "CM4 hardware build dir: $CM4_BUILD_DIR"
   echo "Custom linker build dir: $CUSTOM_BUILD_DIR"
+  echo "Ethernet qualification build dir: $ETH_BUILD_DIR"
   echo "STM32CubeH7: ${STM32_CUBE_H7_DIR:-not supplied}"
   if [[ -n "$STM32_CUBE_H7_DIR" ]] && command -v git >/dev/null 2>&1; then
     echo "STM32CubeH7 commit: $(git -C "$STM32_CUBE_H7_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
@@ -165,6 +186,8 @@ trap 'exit 143' TERM
   echo "Persistent I2C SCL fixture: Arduino D15/PB8 <-> Zio D69/PF14 (CN9 pin 19)"
   echo "Persistent I2C SDA fixture: Arduino D14/PB9 <-> Zio D68/PF15 (CN9 pin 21)"
   echo "Switched GPIO/PWM fixture: CN10 D4/PE14 <-> CN10 D3/PE13"
+  echo "Persistent Ethernet fixture: board CN14 RJ45 <-> host $ETH_IFACE"
+  echo "Host Ethernet MAC: $(cat "/sys/class/net/$ETH_IFACE/address" 2>/dev/null || echo unknown)"
   if command -v sha256sum >/dev/null 2>&1; then
     sha256sum "$ROOT_DIR/cmake/targets/stm32h755_cm7.ld" 2>/dev/null || true
     sha256sum "$ROOT_DIR/cmake/targets/stm32h755_cm4.ld" 2>/dev/null || true
@@ -174,6 +197,9 @@ trap 'exit 143' TERM
     sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_i2c_case.gdb" 2>/dev/null || true
     sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_dma_case.gdb" 2>/dev/null || true
     sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_timer_case.gdb" 2>/dev/null || true
+    sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_eth_state.gdb" 2>/dev/null || true
+    sha256sum "$ROOT_DIR/scripts/host/stm32h755_eth_traffic.py" 2>/dev/null || true
+    sha256sum "$ROOT_DIR/scripts/stm32h755_eth_test.sh" 2>/dev/null || true
   fi
   echo "GDB: $GDB_BIN"
   "$GDB_BIN" --version 2>/dev/null | head -n 1 || true
@@ -334,7 +360,7 @@ wait_for_enter() {
 }
 
 initial_hardware_setup() {
-  cat <<'SETUP'
+  cat <<SETUP
 
 === Initial hardware setup ===
 1. Connect the NUCLEO-H755ZI-Q through the ST-LINK USB connection.
@@ -353,6 +379,10 @@ initial_hardware_setup() {
    D4 <-> D3; after that, leave it connected for the rest of the run.
 8. Leave Arduino D13 / SCK / PA5 and D10 / CS / PD14 otherwise unconnected.
 9. Leave the blue B1 USER button released.
+10. Ensure Ethernet jumpers JP6 and JP7 are fitted.
+11. Connect an Ethernet cable directly from board RJ45 CN14 to the host PC
+    interface '$ETH_IFACE' and LEAVE IT CONNECTED for the entire campaign.
+    No IP address is required; the Ethernet qualifier exchanges raw Layer-2 frames.
 
 Never connect the loopback signal pins to 3V3, 5V, or GND.
 SETUP
@@ -524,6 +554,49 @@ visual_case() {
   fi
 }
 
+run_ethernet_case() {
+  local label="CM7 Ethernet Layer-2"
+  local log="$LOG_DIR/CM7_Ethernet_Layer-2.log"
+  local evidence_dir="$LOG_DIR/ethernet"
+  local rc
+
+  # The focused Ethernet qualifier owns its own flash/OpenOCD lifecycle.
+  cleanup_openocd
+  mkdir -p "$evidence_dir"
+
+  set +e
+  DAS_ETH_TEST_BUILD_DIR="$ETH_BUILD_DIR" \
+  OPENOCD_SCRIPTS="$OPENOCD_SCRIPTS" \
+    "$ROOT_DIR/scripts/stm32h755_eth_test.sh" \
+      "$STM32_CUBE_H7_DIR" --iface "$ETH_IFACE" 2>&1 | tee "$log"
+  local pipe_status=("${PIPESTATUS[@]}")
+  rc=${pipe_status[0]}
+  local tee_rc=${pipe_status[1]}
+  set -e
+
+  if [[ -d "$ETH_BUILD_DIR/logs" ]]; then
+    cp -a "$ETH_BUILD_DIR/logs/." "$evidence_dir/"
+  fi
+  if [[ -s "$ETH_BUILD_DIR/firmware/app/das_eth_raw.elf" ]]; then
+    cp "$ETH_BUILD_DIR/firmware/app/das_eth_raw.elf" "$evidence_dir/das_eth_raw.elf"
+    if command -v arm-none-eabi-size >/dev/null 2>&1; then
+      arm-none-eabi-size "$ETH_BUILD_DIR/firmware/app/das_eth_raw.elf" \
+        >"$evidence_dir/das_eth_raw-size.txt" 2>&1 || true
+    fi
+    arm-none-eabi-nm -n "$ETH_BUILD_DIR/firmware/app/das_eth_raw.elf" \
+      >"$evidence_dir/das_eth_raw-symbols.txt" 2>&1 || true
+  fi
+
+  if (( rc == 0 && tee_rc == 0 )) &&
+     grep -q '^STM32H755 ETHERNET LAYER-2 QUALIFICATION: PASS$' "$log"; then
+    record "$label" PASS
+    return 0
+  fi
+
+  record "$label" FAIL
+  return 1
+}
+
 # Host/static qualification. These deliberately do not require the board.
 check_layout "STM32H755 CM7 memory layout" "$LOG_DIR/cm7_memory_layout.log" \
   --core cm7 "$CM7_ELF" "$CM7_MAP" || exit 1
@@ -533,8 +606,8 @@ check_layout "Custom linker override" "$LOG_DIR/custom_memory_layout.log" \
   --core cm7 --flash-begin 0x08020000 --flash-end 0x08100000 \
   "$CUSTOM_ELF" "$CUSTOM_MAP" || exit 1
 
-# One physical setup prompt covers every persistent serial fixture and leaves
-# D3/D4 free until the single later transition.
+# One physical setup prompt covers every persistent serial fixture, Ethernet, and
+# leaves D3/D4 free until the single later transition.
 initial_hardware_setup
 
 echo "Starting dual-core OpenOCD..."
@@ -632,5 +705,9 @@ run_simple_case "CM7 timer/PWM" "$CM7_TIMER_ELF" 3333 \
   "$ROOT_DIR/scripts/gdb/stm32h755_timer_case.gdb" || exit 1
 run_simple_case "CM4 timer/PWM" "$CM4_TIMER_ELF" 3334 \
   "$ROOT_DIR/scripts/gdb/stm32h755_timer_case.gdb" || exit 1
+
+# Ethernet owns its own flash/debug session. The cable was installed during the
+# initial fixture setup and stays connected; no mid-campaign network choreography.
+run_ethernet_case || exit 1
 
 (( FAIL_COUNT == 0 )) || exit 1

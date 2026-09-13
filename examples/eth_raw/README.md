@@ -88,9 +88,21 @@ Override the interface when needed:
 ./scripts/stm32h755_eth_test.sh /path/to/STM32CubeH7 --iface <linux-interface>
 ```
 
-The qualifier builds/flashes the example, verifies physical carrier, validates five STM32-to-host frames, injects 64 host-to-STM32 integrity frames and then reads firmware evidence through batch GDB.
+The qualifier is interactive only for the physical cable transition. It:
 
-The accepted 2026-09-13 run negotiated 100 Mbps/full duplex, validated 5/5 TX frames and 64/64 RX integrity frames with zero errors and `DAS_OK`. That same test is acceptance point 39 in the standing **39/39 PASS** STM32H755 campaign at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc`.
+1. builds/flashes the installed-package example and verifies initial carrier/link state;
+2. asks the operator to unplug CN14 (or the host end) and waits for host carrier loss;
+3. reads the running STM32 through batch GDB and requires `g_das_eth_link_up == 0`, zero speed and unknown duplex;
+4. asks the operator to reconnect the same cable and waits for carrier recovery;
+5. verifies the same running Ethernet instance reports link-up again with negotiated 10/100 Mbps and half/full duplex, without reinitializing DAS Ethernet;
+6. only after recovery, validates five STM32-to-host frames and injects 64 host-to-STM32 integrity frames;
+7. finishes with the normal PHY/MAC/DMA/cache GDB evidence check.
+
+The default operator timeout for each unplug/replug transition is 60 seconds. Override it with `DAS_ETH_LINK_TRANSITION_TIMEOUT=<seconds>` when necessary.
+
+The accepted 2026-09-13 baseline negotiated 100 Mbps/full duplex, validated 5/5 TX frames and 64/64 RX integrity frames with zero errors and `DAS_OK`. That run predates the explicit unplug/replug phase. The connected raw-TX/RX baseline remains valid, while the extended qualifier must be rerun once before link-loss/recovery is considered physically qualified.
+
+That same Ethernet qualifier remains acceptance point 39 in the standing STM32H755 campaign; extending the checks inside the case does not add another campaign acceptance point.
 
 ## Scope
 

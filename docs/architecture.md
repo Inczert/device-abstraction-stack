@@ -12,7 +12,7 @@ include/das/
 
 Application-facing headers use DAS and standard C types. STM32 and CMSIS device types do not leak into this layer.
 
-Current public areas are result/error handling, clock, monotonic time, IRQ control, GPIO/EXTI, UART, SPI, I2C, periodic timer/PWM, DMA, D-cache maintenance, board resources and optional Cortex-M startup/vector override symbols.
+Current public areas are result/error handling, clock, monotonic time, IRQ control, GPIO/EXTI, UART, SPI, I2C, periodic timer/PWM, generic DMA, D-cache maintenance, Layer-2 Ethernet, board resources and explicit Cortex-M startup/vector customization.
 
 ### Common logic
 
@@ -36,7 +36,7 @@ This layer owns Cortex-M architecture behavior:
 - SysTick time backend;
 - D-cache primitives/range maintenance.
 
-It does not own STM32 GPIO, RCC, DMA, UART, SPI, I2C or timer registers.
+It does not own STM32 peripheral registers.
 
 ### Device layer
 
@@ -44,7 +44,7 @@ It does not own STM32 GPIO, RCC, DMA, UART, SPI, I2C or timer registers.
 src/device/stm32h755/
 ```
 
-This layer owns STM32H755 silicon behavior currently implemented by DAS:
+This layer owns STM32H755 silicon behavior implemented by DAS:
 
 - GPIO and EXTI/SYSCFG routing;
 - RCC, PWR and FLASH clock/power sequencing;
@@ -52,9 +52,10 @@ This layer owns STM32H755 silicon behavior currently implemented by DAS:
 - SPI;
 - I2C;
 - general-purpose timer/PWM support;
-- DMA1/DMAMUX1;
-- default STM32H755 vector-table layout using CMSIS IRQ numbering;
-- core-aware register views where STM32H755 exposes CPU-specific state.
+- generic DMA1/DMAMUX1;
+- Ethernet MAC + dedicated Ethernet DMA + MDIO/LAN8742A management;
+- canonical STM32H755 vector-table layout using CMSIS IRQ numbering;
+- core-aware register views where the device exposes CPU-specific state.
 
 ADC, watchdog, internal-flash/reset-cause services and production dual-core lifecycle control remain separate follow-up work.
 
@@ -73,6 +74,7 @@ The board layer owns physical NUCLEO-H755ZI-Q policy and named resources:
 - Arduino SPI route and default CS GPIO;
 - Arduino D4 PWM route;
 - D3/D4 qualification GPIO aliases;
+- RJ45/RMII route to the on-board LAN8742A;
 - stock-board clock/power profiles.
 
 Board code knows connector/pin/AF/polarity facts. Device code knows peripheral registers. Application code sees semantic board resources plus generic peripheral handles.
@@ -84,15 +86,7 @@ cmake/targets/
 cmake/DASConfig.cmake.in
 ```
 
-The build layer owns:
-
-- CM7/CM4 default memory/linker scripts;
-- core/toolchain selection;
-- optional linker override;
-- default-vector-table link policy;
-- static-library installation/export;
-- relocatable installed `das::das` CMake target;
-- propagation of the selected linker script to the final firmware ELF.
+The build layer owns CM7/CM4 default linker scripts, core/toolchain selection, optional linker override, default-vector-table link policy, static-library installation/export and propagation of the selected linker script to the final firmware ELF.
 
 ## Target composition
 
@@ -101,7 +95,7 @@ DAS_DEVICE=nucleo_h755zi_q
 DAS_CORE=cm7 | cm4
 ```
 
-Composition becomes:
+Composition is:
 
 ```text
 application
@@ -124,7 +118,7 @@ common logic           board mapping/policy
                           CMSIS
 ```
 
-`DAS_DEVICE` names the board/target composition. `DAS_CORE` separately selects CPU/FPU flags, CMSIS core definitions, core-specific STM32 views and default linker layout.
+`DAS_DEVICE` names the board/target composition. `DAS_CORE` selects CPU/FPU flags, CMSIS core definitions, core-specific STM32 views and default linker layout.
 
 ## Startup and vector ownership
 
@@ -136,18 +130,26 @@ common logic           board mapping/policy
 4. execute architecture barriers;
 5. call `main()`.
 
-The startup source consumes linker symbols but contains no STM32H755 physical addresses.
+For STM32H755, `src/device/stm32h755/vector_table.c` is the canonical vector layout. CMSIS/ST supplies IRQ numbering; DAS supplies the table and weak standard handler symbols.
 
-For the STM32H755 composition, DAS also places a weak default vector table in the device layer. CMSIS supplies the IRQ numbering; DAS owns the actual default table so a normal bare-metal application does not have to duplicate startup boilerplate merely to boot or use the default SysTick time source.
+Normal firmware therefore uses:
 
-The default table provides the initial stack, weak Cortex-M handlers and SysTick entries. External STM32H755 IRQ slots safely route to `Default_Handler`; applications that need concrete external ISR bindings currently provide their own table.
+```text
+DAS vector table
+    ├── Reset_Handler      -> weak DAS default
+    ├── HardFault_Handler  -> weak DAS default / strong app or RTOS override
+    ├── PendSV_Handler     -> weak DAS default / strong RTOS override
+    ├── SysTick_Handler    -> weak DAS default / strong RTOS override
+    ├── TIM2_IRQHandler    -> weak DAS default / strong owner override
+    ├── USARTx_IRQHandler  -> weak DAS default / strong owner override
+    └── ...
+```
 
-The default is force-linked from the otherwise lazy static archive when `DAS_USE_DEFAULT_VECTOR_TABLE=ON`. Firmware that owns vector policy can either:
+A strong handler definition replaces only that handler while the DAS-owned table remains unchanged. Applications do not copy the complete vector table merely to bind an ISR.
 
-- set `DAS_USE_DEFAULT_VECTOR_TABLE=OFF` before adding/finding DAS and provide its own `.isr_vector`; or
-- provide a strong `g_das_vector_table`, which overrides the weak DAS definition.
+`DAS_USE_DEFAULT_VECTOR_TABLE=ON` is the normal source-tree and installed-package policy. CMake force-links `g_das_vector_table` so static archive extraction cannot silently omit the table.
 
-This leaves simple applications simple while preserving full bootloader/RTOS/application ownership when needed.
+Whole-table replacement is exceptional. A bootloader or specialized runtime may set `DAS_USE_DEFAULT_VECTOR_TABLE=OFF` and supply its own `.isr_vector`, or provide a strong `g_das_vector_table` definition.
 
 ## Memory ownership
 
@@ -163,21 +165,43 @@ CM4:
   D2 SRAM1     -> writable sections/stack, top 0x30020000
 ```
 
-Applications can replace this policy with a custom linker script. See [Memory/linker policy](memory-layout.md).
+Applications can replace this with a custom linker script. See [Memory/linker policy](memory-layout.md).
 
-## Linker and package propagation
+The CM7 AXI-SRAM default is also usable by the Ethernet DMA engine. DTCM must not be used for Ethernet descriptors/frame buffers.
 
-`das::das` is a static archive target. `libdas.a` is not assigned physical addresses when created.
+## DMA and cache ownership
 
-For a source-tree build, the selected linker script is carried on the target's build interface. For an installed package, `DASConfig.cmake` attaches the installed relocatable linker-script path to the imported target. When the default vector table is enabled, CMake also force-links the canonical weak vector symbol so that static-library extraction cannot silently omit the boot table.
+Two distinct DMA paths exist:
 
-In both cases the consumer contract remains:
-
-```cmake
-target_link_libraries(my_firmware PRIVATE das::das)
+```text
+generic das_dma_t / SPI DMA -> DMA1 + DMAMUX1
+Ethernet raw TX/RX          -> ETH peripheral DMA descriptors
 ```
 
-The installed package also exports only the public include tree, keeping implementation/source paths private.
+They are intentionally not conflated. Generic DMA register/DMAMUX configuration belongs to the device layer. Ethernet owns its private descriptor engine. D-cache maintenance belongs to the Cortex-M layer.
+
+Generic caller-owned DMA buffers require explicit caller coherency. The Ethernet backend owns cache maintenance for its internal descriptors/buffers.
+
+## Ethernet boundary
+
+DAS Ethernet stops at Layer 2:
+
+```text
+application / optional network stack
+        |
+        v
+DAS Layer-2 API
+        |
+        v
+STM32H755 MAC + ETH DMA
+        |
+        v
+RMII / LAN8742A / RJ45
+```
+
+ARP, IP, DHCP, UDP, TCP, DNS and socket semantics belong above DAS. A future lwIP adapter may consume the Layer-2 API without changing public DAS types.
+
+Current runtime ownership is CM7-only. CM4 keeps the API for build/source compatibility but rejects Ethernet initialization before changing board routing.
 
 ## Interrupt ownership
 
@@ -185,28 +209,24 @@ The installed package also exports only the public include tree, keeping impleme
 Cortex-M NVIC/core control       -> src/mcu/cortex_m/
 STM32 peripheral/source state    -> src/device/stm32h755/
 board route/polarity             -> src/board/nucleo_h755zi_q/
-default vector table             -> src/device/stm32h755/vector_table.c
-custom vector/ISR binding        -> application/RTOS when required
+canonical vector table           -> src/device/stm32h755/vector_table.c
+strong handler implementation    -> owning DAS driver / application / RTOS
 ```
 
-`das_irq_t` represents a controller line. GPIO, timer and DMA sources can resolve their controller line while keeping source-specific flags/masks in their own APIs.
+`das_irq_t` represents a controller line. GPIO, timer and generic DMA sources resolve their controller line while retaining source-specific flags/masks in their own APIs.
 
-## DMA and cache ownership
-
-STM32H755 DMA register/DMAMUX configuration belongs to the device layer. D-cache maintenance belongs to the Cortex-M layer. Application/driver code owns buffer coherency policy and therefore calls the cache API explicitly around DMA-visible cached memory.
-
-This avoids pretending a generic DMA call can infer cache ownership for arbitrary caller buffers.
+The current Ethernet baseline is polling-only, so no ETH IRQ ownership contract is introduced yet.
 
 ## Dual-core boundary
 
-The hardware campaign uses direct-DAP OpenOCD to expose both cores:
+The hardware campaign uses direct-DAP OpenOCD:
 
 ```text
 GDB :3333 -> CM7 / CPU1
 GDB :3334 -> CM4 / CPU2
 ```
 
-Independent images execute on both physical CPUs and exercise the currently supported peripheral paths. This validates CPU2 execution and core-aware backends, but it is not the production dual-core lifecycle.
+Independent images execute on both physical CPUs and exercise supported peripheral paths. This validates CPU2 execution and core-aware backends, but it is not production dual-core lifecycle control.
 
 Still separate under #20:
 
@@ -215,19 +235,22 @@ Still separate under #20:
 - HSEM/inter-core synchronization;
 - shared-memory ownership/cache policy.
 
+Ethernet is explicitly CM7-owned in the current baseline.
+
 ## Dependency rules
 
 1. `include/das/` exposes no vendor device types.
 2. `src/mcu/` contains architecture behavior, not STM32 peripheral drivers.
-3. `src/device/` contains silicon behavior, including the device vector layout, not NUCLEO connector policy.
+3. `src/device/` contains silicon behavior, including vector layout and peripheral engines, not NUCLEO connector policy.
 4. `src/board/` owns board wiring/policy and reuses generic/device backends.
 5. linker/memory/package policy stays in the build layer.
 6. applications do not include implementation files from `src/`.
 7. multi-core device code must not silently assume CPU1 when built for CPU2.
-8. DAS supplies a safe default vector table, while applications/RTOSes can replace it explicitly when they own ISR binding.
+8. normal firmware keeps the DAS vector table and overrides individual weak handlers; whole-table replacement is explicit.
+9. protocol/network stacks above Ethernet do not leak their types into core DAS APIs.
 
 ## Qualification
 
-The completed standing STM32H755 campaign is **38/38 PASS** at `c4bbc578d32c7b81f2ec5aaf38d637d128ca1942`. It includes static linker checks and physical qualification of startup, clock/power, time, board resources/button, GPIO/EXTI/IRQ, UART, SPI, I2C, DMA/cache and timer/PWM on both cores where applicable.
+The standing STM32H755 campaign is **39/39 PASS** at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc`, qualified on 2026-09-13 against STM32CubeH7 `f5c0b7a2b1f6eb26fde150f72edb2d7deb647066`.
 
-The installed `find_package(DAS)` CM7 LED blink application is separately hardware-validated on the packaging/example line before this default-vector refactor. The next LED smoke run should qualify the simpler application against the library-owned vector path.
+It includes static linker checks and physical qualification of startup/vector ownership, clock/power, time, board resources/button, GPIO/EXTI/IRQ, UART, SPI, I2C, generic DMA/cache and timer/PWM on both cores where applicable, plus CM7 polling Layer-2 Ethernet MAC/DMA/RMII/LAN8742A raw TX/RX.

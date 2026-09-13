@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STM32_CUBE_H7_DIR="${STM32_CUBE_H7_DIR:-}"
-IFACE="${DAS_ETH_IFACE:-${IFACE:-}}"
+IFACE="${DAS_ETH_IFACE:-${IFACE:-enp0s31f6}}"
 BUILD_ROOT="${DAS_ETH_TEST_BUILD_DIR:-$ROOT_DIR/build/stm32h755-eth}"
 OPENOCD_SCRIPTS="${OPENOCD_SCRIPTS:-/usr/share/openocd/scripts}"
 TX_COUNT="${DAS_ETH_TX_CAPTURE_COUNT:-5}"
@@ -13,12 +13,16 @@ OPENOCD_PID=""
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/stm32h755_eth_test.sh /path/to/STM32CubeH7 --iface <linux-interface>
-  scripts/stm32h755_eth_test.sh --stm32h7-root /path/to/STM32CubeH7 --iface <linux-interface>
+  scripts/stm32h755_eth_test.sh /path/to/STM32CubeH7 [--iface <linux-interface>]
+  scripts/stm32h755_eth_test.sh --stm32h7-root /path/to/STM32CubeH7 [--iface <linux-interface>]
+
+Options:
+  --iface IFACE          Linux Ethernet interface connected to board CN14.
+                         Default: enp0s31f6
 
 Environment alternatives:
   STM32_CUBE_H7_DIR=/path/to/STM32CubeH7
-  DAS_ETH_IFACE=enp0s31f6
+  DAS_ETH_IFACE=<linux-interface>
 USAGE
 }
 
@@ -55,13 +59,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -n "$STM32_CUBE_H7_DIR" && -n "$IFACE" ]] || { usage >&2; exit 2; }
+[[ -n "$STM32_CUBE_H7_DIR" ]] || { usage >&2; exit 2; }
 STM32_CUBE_H7_DIR="$(cd "$STM32_CUBE_H7_DIR" 2>/dev/null && pwd)" || {
   echo "Invalid STM32CubeH7 root: $STM32_CUBE_H7_DIR" >&2
   exit 2
 }
 [[ -d "/sys/class/net/$IFACE" ]] || {
   echo "Network interface not found: $IFACE" >&2
+  echo "Use --iface <linux-interface> or DAS_ETH_IFACE to override the default." >&2
+  ip -br link >&2 || true
   exit 2
 }
 

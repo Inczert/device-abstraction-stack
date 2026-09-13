@@ -2,8 +2,6 @@
 
 DAS exposes Ethernet as a Layer-2 device API. IP networking remains outside the core DAS contract.
 
-The stack boundary is:
-
 ```text
 application / network stack
         |
@@ -11,7 +9,7 @@ application / network stack
 DAS Layer-2 Ethernet API
         |
         v
-STM32H755 ETH MAC + DMA
+STM32H755 ETH MAC + dedicated ETH DMA
         |
         v
 RMII + LAN8742A PHY
@@ -20,11 +18,11 @@ RMII + LAN8742A PHY
 RJ45
 ```
 
-Protocol stacks such as lwIP may be integrated above DAS later without introducing lwIP types into the public DAS API.
+A higher stack such as lwIP may be integrated above DAS later without introducing lwIP types into the public DAS API.
 
 ## Public API
 
-The application-facing configuration contains only the station MAC address:
+Header: `<das/eth.h>`
 
 ```c
 das_eth_t eth = DAS_ETH_INVALID;
@@ -39,7 +37,7 @@ das_result_t result = das_board_eth_init(
     &eth);
 ```
 
-The low-level transport remains Layer 2:
+Raw Layer-2 operations are:
 
 ```c
 das_eth_send(eth, frame, length);
@@ -50,15 +48,15 @@ das_eth_link_state_t state;
 das_eth_link_state(eth, &state);
 ```
 
-`das_eth_send()` accepts one complete Ethernet frame supplied by the caller, excluding the Ethernet FCS. The current standard-frame ceiling is `DAS_ETH_MAX_FRAME_SIZE` (1518 bytes). DAS owns MAC CRC/padding, DMA descriptors and cache coherency.
+`das_eth_send()` accepts one complete Ethernet frame from destination MAC through payload, excluding Ethernet FCS. The current standard-frame ceiling is `DAS_ETH_MAX_FRAME_SIZE` (1518 bytes). DAS owns MAC CRC/padding, Ethernet-DMA descriptors and cache coherency.
 
-`das_eth_receive()` is polling/non-blocking. A successful call with no currently available frame returns `DAS_OK` with `received == 0`. Once an RX frame is available the backend copies one complete frame into the supplied buffer and reports its byte count.
+`das_eth_receive()` is polling/non-blocking. No available frame is represented by `DAS_OK` with `received == 0`. An available frame is copied as one complete Layer-2 frame into the caller buffer.
 
-`das_eth_link_state()` reports whether the PHY link is up plus its negotiated speed and duplex mode. A down link uses `speed_mbps == 0` and `DAS_ETH_DUPLEX_UNKNOWN`.
+`das_eth_link_state()` reports link up/down plus negotiated speed and duplex. A down link reports zero speed and `DAS_ETH_DUPLEX_UNKNOWN`.
 
-## NUCLEO-H755ZI-Q implementation
+## STM32H755 / NUCLEO-H755ZI-Q backend
 
-The initial hardware backend is deliberately CM7-owned and polling-only. `DAS_BOARD_ETH_RJ45` configures the on-board RMII route to the LAN8742A using AF11:
+The current backend is deliberately CM7-owned and polling-only. `DAS_BOARD_ETH_RJ45` configures the on-board RMII route to the LAN8742A using AF11:
 
 ```text
 PA1   RMII_REF_CLK
@@ -75,24 +73,27 @@ PB13  RMII_TXD1
 The backend:
 
 - enables/resets the STM32H755 Ethernet MAC/TX/RX clocks;
-- selects RMII in SYSCFG;
-- performs the MAC DMA software reset;
-- discovers the LAN8742A PHY over Clause-22 MDIO and restarts auto-negotiation;
-- synchronizes MAC speed/duplex from LAN8742A link state;
+- selects RMII through SYSCFG;
+- performs Ethernet DMA software reset;
+- discovers the LAN8742A over Clause-22 MDIO and restarts auto-negotiation;
+- synchronizes MAC speed/duplex from PHY state;
+- programs the configured station MAC;
 - uses four TX and four RX descriptors;
-- uses one 1536-byte internal buffer per descriptor;
-- performs raw one-frame TX/RX without interrupts;
-- owns CM7 D-cache clean/invalidate operations around DMA-visible descriptors and buffers.
+- uses one 1536-byte internal frame buffer per descriptor;
+- performs polling raw-frame TX/RX;
+- performs CM7 D-cache maintenance around descriptors and buffers.
 
-Each software descriptor occupies one 32-byte CM7 cache line. The STM32H755 descriptor-skip field is configured so the hardware descriptor stride matches that layout, preventing separate DMA-owned descriptors from sharing a cache line.
+Each software descriptor occupies one 32-byte CM7 cache line. The STM32H755 descriptor-skip field is configured so hardware uses the same stride, preventing independent DMA-owned descriptors from sharing a cache line.
 
-The DAS default CM7 linker places static data in AXI SRAM, which is used for the descriptor and buffer arrays. A custom linker used with this backend must likewise place those objects in SRAM accessible by the Ethernet DMA; DTCM is not an appropriate placement for Ethernet DMA data.
+The default CM7 linker places static writable data in AXI SRAM, which is Ethernet-DMA accessible. Custom linker scripts using Ethernet must likewise place descriptors/buffers in Ethernet-DMA-visible SRAM; DTCM is not suitable.
 
-CM4 builds keep the API available for source compatibility but `das_board_eth_init()` returns `DAS_ERROR_UNSUPPORTED` before configuring the RMII pins. Shared/dual-core Ethernet ownership is intentionally outside this baseline.
+The Ethernet peripheral owns its own DMA engine. It is **not** implemented through the generic `das_dma_t` DMA1/DMAMUX1 API.
 
-## Raw hardware example
+CM4 builds retain the API for source compatibility, but `das_board_eth_init()` returns `DAS_ERROR_UNSUPPORTED` before changing RMII board routing. Shared/dual-core Ethernet ownership is outside this baseline.
 
-`examples/eth_raw` is an installed-package consumer for physical Layer-2 bring-up. It uses MAC address `02:00:00:00:00:01` and broadcasts a 60-byte frame with experimental EtherType `0x88B5` once per second while polling RX.
+## Raw installed-package example
+
+`examples/eth_raw` is an installed-package consumer using station MAC `02:00:00:00:00:01`. It broadcasts a 60-byte experimental EtherType `0x88B5` frame approximately once per second while polling RX.
 
 Runtime indicators:
 
@@ -102,7 +103,7 @@ YELLOW LED   toggles after each successful TX
 RED LED      error observed
 ```
 
-Debugger observables:
+Debugger evidence variables include:
 
 ```text
 g_das_eth_link_up
@@ -117,29 +118,13 @@ g_das_eth_rx_last_sequence
 g_das_eth_last_result
 ```
 
-Build/install/flash it with:
+Build/install/flash only:
 
 ```bash
 ./scripts/build_and_flash_eth_raw.sh /path/to/STM32CubeH7
 ```
 
-Then capture the board's frames on the connected Linux Ethernet interface:
-
-```bash
-sudo tcpdump -i <iface> -e -XX 'ether proto 0x88b5'
-```
-
-The expected source is `02:00:00:00:00:01` and the destination is broadcast. The NUCLEO Ethernet route also requires JP6 and JP7 fitted on the standard NUCLEO-H755ZI-Q setup.
-
 ## Automated physical qualification
-
-The focused qualifier defaults to host interface `enp0s31f6`:
-
-```bash
-./scripts/stm32h755_eth_test.sh /path/to/STM32CubeH7
-```
-
-Override it only when necessary with `--iface <linux-interface>` or `DAS_ETH_IFACE=<linux-interface>`.
 
 Physical setup:
 
@@ -149,24 +134,71 @@ JP7 fitted
 NUCLEO-H755ZI-Q CN14 RJ45  <->  host PC Ethernet port
 ```
 
-No IP address, DHCP or higher network stack is required. The test uses Linux raw Layer-2 sockets on the host and raw DAS Ethernet frames on the board.
-
-The qualifier verifies physical carrier, negotiated PHY state, five STM32-to-host EtherType `0x88B5` frames, 64 host-to-STM32 EtherType `0x88B6` integrity frames with deterministic sequence/payload validation, repeated descriptor recycling and CM7 D-cache coherency. It finishes by reading the firmware evidence through batch GDB and requires zero RX integrity errors.
-
-The focused qualifier passed on commit `beecbeadc36b06992cbb8d3f91add466bf7ee701` on 2026-09-13. The recorded run reported 100 Mbps/full duplex, validated 5/5 board TX frames and 64/64 host-to-board integrity frames, with `test_errors=0` and `g_das_eth_last_result == DAS_OK`.
-
-## Standing campaign
-
-Ethernet is now promoted into `scripts/stm32h755_test_campaign.sh` as the 39th acceptance point. The campaign also defaults to host interface `enp0s31f6`:
+The focused test defaults to Linux interface `enp0s31f6`:
 
 ```bash
-./scripts/stm32h755_test_campaign.sh \
-  /path/to/STM32CubeH7 \
-  --clean
+./scripts/stm32h755_eth_test.sh /path/to/STM32CubeH7
 ```
 
-Use `--eth-iface <linux-interface>` or `DAS_ETH_IFACE=<linux-interface>` only when the host interface differs from the default.
+Override with `--iface <linux-interface>` or `DAS_ETH_IFACE=<linux-interface>` when necessary.
 
-The campaign setup instructs the operator to connect CN14 directly to the selected host Ethernet port and keep that cable connected for the whole run. After the existing dual-core timer/PWM cases, the campaign stops its long-lived OpenOCD session and launches the self-contained Ethernet qualifier. Its build/flash log, host traffic log, OpenOCD log, GDB evidence, metadata and raw-Ethernet ELF/symbol information are copied into the normal timestamped campaign archive.
+No IP address, DHCP or higher network stack is required. The host uses Linux raw Layer-2 sockets.
 
-The completed pre-Ethernet full-campaign baseline remains 38/38 until the enlarged 39-point campaign is itself executed successfully. Ethernet's focused physical qualification is already complete; only the new combined campaign baseline remains to be established.
+The qualifier checks:
+
+- physical carrier;
+- PHY link state, speed and duplex;
+- five valid STM32-to-host EtherType `0x88B5` frames;
+- 64 host-to-STM32 EtherType `0x88B6` integrity frames;
+- monotonic RX sequence tracking and deterministic payload validation;
+- zero firmware integrity errors;
+- repeated TX/RX descriptor recycling;
+- CM7 D-cache coherency;
+- installed-package consumption through `examples/eth_raw`.
+
+## Qualified result
+
+Ethernet is part of the standing **39/39 PASS** STM32H755 campaign at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc`, run on 2026-09-13.
+
+The recorded Ethernet evidence was:
+
+```text
+Host interface: enp0s31f6
+Physical carrier: PASS
+PHY: 100 Mbps / full duplex
+STM32 -> host: 5/5 validated frames
+TX interval: 0.995806 .. 0.995980 s
+Host -> STM32: 64 frames injected
+Firmware test_count: 64
+test_errors: 0
+last_sequence: 64
+last_result: DAS_OK
+RESULT: PASS
+```
+
+The firmware had transmitted eight frames by the debugger snapshot and had received 66 total Ethernet frames / 4229 bytes, of which all 64 dedicated integrity frames were accepted without error.
+
+The full campaign uses the same focused qualifier as acceptance point 39 and archives its build/flash, host-traffic, OpenOCD, GDB and ELF/symbol evidence.
+
+An explicit cable-disconnected/down-link transition was not exercised in the recorded campaign. That remains a narrower follow-up validation item and does not change the qualified connected raw-TX/RX baseline.
+
+## Current boundary
+
+Qualified:
+
+- STM32H755 ETH MAC and dedicated DMA;
+- RMII routing;
+- LAN8742A MDIO discovery/auto-negotiation;
+- connected link-state reporting;
+- polling raw TX/RX;
+- repeated descriptor recycling;
+- CM7 D-cache coherency;
+- installed-package consumer integration.
+
+Not part of this baseline:
+
+- Ethernet IRQ-driven operation;
+- lwIP;
+- ARP/IP/ICMP/DHCP;
+- UDP/TCP/DNS/socket APIs;
+- shared CM7/CM4 Ethernet ownership.

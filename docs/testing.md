@@ -29,17 +29,23 @@ Focused scripts remain useful for fast iteration:
 ./scripts/stm32h755_spi_test.sh   /path/to/STM32CubeH7
 ./scripts/stm32h755_i2c_test.sh   /path/to/STM32CubeH7
 ./scripts/stm32h755_dma_test.sh   /path/to/STM32CubeH7
+./scripts/stm32h755_eth_test.sh   /path/to/STM32CubeH7 --iface enp0s31f6
 ```
 
 The full campaign should be rerun whenever shared startup, clock, GPIO, RCC, IRQ, timebase, DMA/cache, board-resource or device-backend changes could affect previously qualified functionality.
 
 ## Running the full campaign
 
+The Ethernet qualifier is now a standing campaign case, so the host Ethernet interface connected directly to board CN14 must be supplied:
+
 ```bash
 ./scripts/stm32h755_test_campaign.sh \
   /home/dev/STM32Cube/Repository/STM32CubeH7/ \
+  --eth-iface enp0s31f6 \
   --clean
 ```
+
+`DAS_ETH_IFACE=enp0s31f6` may be used instead of `--eth-iface`.
 
 Every run produces a timestamped evidence archive under:
 
@@ -51,7 +57,7 @@ The archive is also produced after a logged failure.
 
 ## Fixture choreography
 
-The campaign groups tests by physical wiring state. Persistent serial fixtures are installed once at the beginning and are not mentioned again unless they genuinely need to change. D3/D4 remains free until both-core pull tests have completed, then one final fixture transition enables GPIO loopback and PWM qualification.
+The campaign groups tests by physical wiring state. Persistent serial fixtures and the host Ethernet cable are installed once at the beginning and are not mentioned again unless they genuinely need to change. D3/D4 remains free until both-core pull tests have completed, then one final fixture transition enables GPIO loopback and PWM qualification.
 
 ### Initial setup
 
@@ -81,11 +87,18 @@ D4 / PE14: disconnected
 
 jumper E: keep ready for the later D4 <-> D3 transition
 B1 USER: released
+
+Ethernet:
+JP6 and JP7 fitted
+board RJ45 CN14  <->  host PC Ethernet port selected by --eth-iface
+leave the Ethernet cable connected for the entire campaign
 ```
+
+The Ethernet test uses raw Layer-2 frames and does not require an IPv4/IPv6 address, DHCP or a network stack. The selected Linux interface only needs to exist and have physical carrier when the Ethernet case runs.
 
 Leave SPI D13/SCK/PA5 and D10/CS/PD14 otherwise unconnected. Never connect the loopback signal pins to 3V3, 5V or GND.
 
-The UART, SPI and I2C fixtures remain connected for the entire run. DMA reuses the SPI MOSI-to-MISO fixture and requires no additional wiring. Their pins do not overlap the D3/D4 qualification fixture.
+The UART, SPI, I2C and Ethernet fixtures remain connected for the entire run. DMA reuses the SPI MOSI-to-MISO fixture and requires no additional wiring. Their pins do not overlap the D3/D4 qualification fixture.
 
 ### Single D4/D3 transition
 
@@ -118,6 +131,7 @@ CM7 DMA/cache image
 CM7 timer/PWM image
 CM7 clock-profile image
 CM7 board-resource/button image
+CM7 raw-Ethernet installed-package consumer
 
 CM4 hardware image
 CM4 monotonic-time image
@@ -130,7 +144,7 @@ CM4 timer/PWM image
 CM7 custom-link smoke image
 ```
 
-The normal CM7/CM4 images use the selected DAS linker scripts. The custom-link image proves that the linker override propagates through `das::das`.
+The normal CM7/CM4 images use the selected DAS linker scripts. The custom-link image proves that the linker override propagates through `das::das`. The Ethernet case deliberately rebuilds its installed-package consumer even with `--no-build`, because it validates both the Layer-2 backend and the installed-package integration path used by that example.
 
 ## Host-only checks
 
@@ -194,6 +208,7 @@ Arduino UART             -> PB6 / PB7
 Arduino I2C              -> PB8 / PB9
 Arduino SPI              -> PA5 / PA6 / PB5, CS PD14
 Arduino PWM D4           -> PE14
+RJ45 CN14                -> ETH1 RMII / LAN8742A
 ```
 
 The B1 case uses the public board-button and generic IRQ APIs and checks released, pressed, press EXTI, released again and release EXTI. Mechanical bounce is tolerated; at least one event is required rather than an exact edge count.
@@ -259,6 +274,36 @@ Each core runs a dedicated timer/PWM image using the already-installed D4/D3 fix
 
 D3 is deliberately used as a GPIO observation input. Input-capture support is not introduced merely to make the test fixture more elaborate.
 
+## Ethernet Layer-2 qualification
+
+The Ethernet case is CM7-only in the current ownership model. The campaign stops its long-lived dual-core OpenOCD process after the timer/PWM cases and invokes the focused Ethernet qualifier, which owns its own flash/debug session.
+
+The fixture is:
+
+```text
+NUCLEO-H755ZI-Q CN14 RJ45  <->  host PC Ethernet port
+JP6 fitted
+JP7 fitted
+```
+
+The host interface is supplied with `--eth-iface`. No IP configuration is required.
+
+The qualifier verifies:
+
+- host physical carrier;
+- LAN8742A link state, negotiated 10/100 Mbps and duplex through MDIO;
+- five STM32-to-host broadcast frames using EtherType `0x88B5`, source MAC `02:00:00:00:00:01` and payload `DAS ETH L2 test`;
+- 64 host-to-STM32 integrity frames using EtherType `0x88B6`, monotonically increasing sequence numbers and deterministic payload data;
+- exact RX payload validation in firmware;
+- zero integrity errors;
+- polling TX/RX descriptor ownership and repeated descriptor recycling;
+- CM7 D-cache coherency across Ethernet descriptors and DMA buffers;
+- installed-package consumption of DAS by `examples/eth_raw`.
+
+The focused qualifier passed on commit `beecbeadc36b06992cbb8d3f91add466bf7ee701` on 2026-09-13. The recorded run negotiated 100 Mbps/full duplex, captured 5/5 STM32 TX frames, injected and validated 64/64 RX integrity frames, reported zero RX test errors and ended with `DAS_OK`. That focused result is the evidence used to promote Ethernet into the standing campaign; the next full campaign run establishes the first 39-point baseline.
+
+The campaign copies the Ethernet build/flash, raw-traffic, OpenOCD and GDB evidence plus the raw-Ethernet ELF/symbol information into the normal timestamped campaign archive.
+
 ## Board LED checks
 
 The visual CM7 checks remain:
@@ -273,9 +318,9 @@ all three blinking
 
 CM4 already proves physical GPIO output through the electrical loopback path, so duplicating the five human LED checks on CPU2 adds ceremony rather than coverage.
 
-## Expected 38-case summary
+## Expected 39-case summary
 
-After DMA/cache promotion the campaign contains **38 acceptance points**:
+After Ethernet promotion the campaign contains **39 acceptance points**:
 
 ```text
 STM32H755 CM7 memory layout       PASS   [host/static]
@@ -322,13 +367,14 @@ CM7 LED all blink                 PASS
 
 CM7 timer/PWM                     PASS
 CM4 timer/PWM                     PASS
+CM7 Ethernet Layer-2              PASS
 ```
 
-The completed STM32H755 hardware regression baseline is **38/38 PASS** at commit `c4bbc578d32c7b81f2ec5aaf38d637d128ca1942`, qualified on 2026-09-10. That run includes the promoted CM7 and CM4 DMA/cache acceptance points and preserves every previously qualified case.
+The completed pre-Ethernet STM32H755 hardware regression baseline remains **38/38 PASS** at commit `c4bbc578d32c7b81f2ec5aaf38d637d128ca1942`, qualified on 2026-09-10. The Ethernet focused qualifier passed separately on `beecbeadc36b06992cbb8d3f91add466bf7ee701` and is now the 39th standing campaign acceptance point. Do not claim a 39/39 full-campaign baseline until the enlarged campaign has completed successfully.
 
 ## Evidence bundle
 
-The archive includes the summary, metadata, build logs, OpenOCD log, per-case GDB logs, ELF/map files, symbol/size dumps, linker scripts and all dedicated peripheral images. `--no-build` requires every expected image, including both DMA/cache images; missing artifacts are errors rather than silently reducing coverage.
+The archive includes the summary, metadata, build logs, OpenOCD logs, per-case GDB logs, ELF/map files, symbol/size dumps, linker scripts, dedicated peripheral images and the nested Ethernet qualification evidence. `--no-build` requires every expected traditional campaign image; the Ethernet qualifier still rebuilds its installed-package consumer and therefore still requires the STM32CubeH7 root.
 
 ## Recovery
 
@@ -342,6 +388,6 @@ The normal campaign never performs an implicit mass erase.
 
 ## Qualification boundary
 
-After a successful 38-case run DAS can claim physically regression-qualified linker, startup, clock/power, monotonic time, semantic board resources, GPIO/IRQ, polling UART, SPI, I2C, DMA/cache coherency and the periodic-timer/PWM baseline on both cores.
+After a successful 39-case run DAS can claim physically regression-qualified linker, startup, clock/power, monotonic time, semantic board resources, GPIO/IRQ, polling UART, SPI, I2C, DMA/cache coherency, periodic timer/PWM on both cores where applicable, and the CM7 polling Layer-2 Ethernet MAC/DMA/RMII/LAN8742A baseline.
 
-That still does not imply timer input capture, production dual-core lifecycle/HSEM/shared-memory coordination, or later ADC/watchdog/flash services. Those remain separate work.
+That still does not imply Ethernet IRQ-driven operation, lwIP/IP/UDP/TCP, timer input capture, production dual-core lifecycle/HSEM/shared-memory coordination, or later ADC/watchdog/flash services. Those remain separate work.

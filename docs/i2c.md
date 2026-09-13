@@ -62,4 +62,4 @@ Run the focused qualifier with:
 
 Each core verifies 100/400 kHz timing, successful probe at `0x52`, expected NACK at `0x53`, physical write/read, repeated-START write/read, exact equality across 70 checked application bytes, no target-side bus/arbitration/overrun errors and continued execution.
 
-I2C is already promoted into the standing campaign and is included in the completed **38/38** STM32H755 regression baseline.
+I2C is part of the standing **39/39 PASS** STM32H755 regression baseline at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc`.

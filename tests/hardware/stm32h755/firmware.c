@@ -30,28 +30,6 @@
 static const das_gpio_pin_t GPIO_TEST_OUTPUT = {DAS_GPIO_PORT_E, 14u}; /* D4 */
 static const das_gpio_pin_t GPIO_TEST_INPUT = {DAS_GPIO_PORT_E, 13u};  /* D3 */
 
-extern uint32_t __StackTop;
-
-void EXTI15_10_IRQHandler(void);
-
-#define DAS_VECTOR_EXTI15_10 (16 + EXTI15_10_IRQn)
-
-__attribute__((section(".isr_vector"), used, aligned(256)))
-const uintptr_t g_das_vector_table[DAS_VECTOR_EXTI15_10 + 1] = {
-    [0] = (uintptr_t)&__StackTop,
-    [1] = (uintptr_t)&Reset_Handler,
-    [2] = (uintptr_t)&NMI_Handler,
-    [3] = (uintptr_t)&HardFault_Handler,
-    [4] = (uintptr_t)&MemManage_Handler,
-    [5] = (uintptr_t)&BusFault_Handler,
-    [6] = (uintptr_t)&UsageFault_Handler,
-    [11] = (uintptr_t)&SVC_Handler,
-    [12] = (uintptr_t)&DebugMon_Handler,
-    [14] = (uintptr_t)&PendSV_Handler,
-    [15] = (uintptr_t)&SysTick_Handler,
-    [DAS_VECTOR_EXTI15_10] = (uintptr_t)&EXTI15_10_IRQHandler,
-};
-
 typedef enum das_hw_command {
     DAS_HW_COMMAND_IDLE = 0,
     DAS_HW_COMMAND_ALL_OFF = 1,

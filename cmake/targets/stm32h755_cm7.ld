@@ -28,6 +28,8 @@ MEMORY
 PROVIDE(__stack_size__ = 16K);
 __StackTop = ORIGIN(AXISRAM) + LENGTH(AXISRAM);
 __StackLimit = __StackTop - __stack_size__;
+__RAM_START__ = ORIGIN(AXISRAM);
+__RAM_END__ = ORIGIN(AXISRAM) + LENGTH(AXISRAM);
 ASSERT(__StackLimit >= ORIGIN(AXISRAM),
        "STM32H755 CM7 stack reservation exceeds AXI SRAM")
 
@@ -40,6 +42,8 @@ SECTIONS
         KEEP(*(.isr_vector))
         __vector_table_end__ = .;
     } > FLASH
+    ASSERT(SIZEOF(.isr_vector) >= 8,
+           "STM32H755 CM7 firmware requires a vector table")
 
     .text :
     {

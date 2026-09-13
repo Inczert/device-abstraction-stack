@@ -27,6 +27,8 @@ MEMORY
 PROVIDE(__stack_size__ = 16K);
 __StackTop = ORIGIN(SRAM1) + LENGTH(SRAM1);
 __StackLimit = __StackTop - __stack_size__;
+__RAM_START__ = ORIGIN(SRAM1);
+__RAM_END__ = ORIGIN(SRAM1) + LENGTH(SRAM1);
 ASSERT(__StackLimit >= ORIGIN(SRAM1),
        "STM32H755 CM4 stack reservation exceeds SRAM1")
 
@@ -39,6 +41,8 @@ SECTIONS
         KEEP(*(.isr_vector))
         __vector_table_end__ = .;
     } > FLASH
+    ASSERT(SIZEOF(.isr_vector) >= 8,
+           "STM32H755 CM4 firmware requires a vector table")
 
     .text :
     {

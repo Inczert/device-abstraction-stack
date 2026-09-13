@@ -65,7 +65,7 @@ The STM32H755 backend derives the relevant APB peripheral clock from live DAS cl
 
 ## Hardware qualification
 
-The focused qualifier remains available for fast iteration:
+Focused qualifier:
 
 ```bash
 ./scripts/stm32h755_uart_test.sh /home/dev/STM32Cube/Repository/STM32CubeH7/
@@ -79,4 +79,4 @@ Arduino D1 / TX / PB6 <-> Arduino D0 / RX / PB7
 
 Both CM7 and CM4 verify timeout behavior, semantic route setup, live baud generation, all three advertised framing combinations, exact deterministic byte equality and continued execution.
 
-UART is already promoted into the standing campaign and is included in the completed **38/38** STM32H755 regression baseline.
+UART is part of the standing **39/39 PASS** STM32H755 regression baseline at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc`.

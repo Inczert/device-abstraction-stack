@@ -29,10 +29,12 @@ void SysTick_Handler(void);
 /*
  * Canonical DAS vector-table symbol.
  *
- * The STM32H755 backend supplies a weak default table. Applications that need
- * custom external IRQ bindings can provide a strong definition with this name
- * in their own .isr_vector section. DAS_USE_DEFAULT_VECTOR_TABLE=OFF disables
- * force-linking of the default archive member entirely.
+ * The device backend supplies one weak default table for the complete MCU IRQ
+ * layout. Normal firmware keeps that table and overrides individual weak
+ * handler symbols with strong ISR definitions as needed. A bootloader, RTOS or
+ * application with a genuinely custom vector/startup policy may instead define
+ * a strong g_das_vector_table, or set DAS_USE_DEFAULT_VECTOR_TABLE=OFF and
+ * provide its own .isr_vector section.
  */
 extern const uintptr_t g_das_vector_table[];
 

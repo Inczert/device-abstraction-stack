@@ -2,7 +2,7 @@
 
 DAS exposes interrupt-controller behavior through a device-agnostic API while keeping CMSIS and target-specific interrupt numbering below the public boundary.
 
-The goal is not to reimplement NVIC. On Cortex-M, DAS deliberately uses CMSIS-Core internally; application code sees only `das_irq_t` and generic controller operations.
+The goal is not to reimplement NVIC. On Cortex-M, DAS uses CMSIS-Core internally; application code sees `das_irq_t` and generic controller operations.
 
 ## Public contract
 
@@ -18,8 +18,10 @@ Current source APIs that resolve generic controller handles include:
 
 - GPIO/EXTI via `das_gpio_interrupt_get_irq()`;
 - periodic timer update via `das_timer_get_irq()`;
-- DMA execution resources via `das_dma_get_irq()`;
+- generic DMA execution resources via `das_dma_get_irq()`;
 - semantic board button interrupts via `das_board_button_interrupt_get_irq()`.
+
+The current Ethernet baseline is polling-only and therefore does not expose ETH IRQ ownership yet.
 
 ## Source versus controller
 
@@ -36,9 +38,7 @@ interrupt-controller line -> das_irq_t
 das_irq_enable / priority / pending
         |
         v
-backend controller
-        |
-        +-- Cortex-M -> CMSIS NVIC
+CMSIS NVIC backend
 ```
 
 Source-specific event masks/pending/clear remain in the owning API. Controller enable/priority/pending remain in `das_irq_*()`. This distinction matters when several sources share one controller line.
@@ -67,21 +67,30 @@ Priority values are logical levels:
 das_irq_priority_levels()-1   lowest priority
 ```
 
-On Cortex-M, DAS maps these operations onto CMSIS NVIC helpers and the device-provided priority width.
+## Handler and vector ownership
 
-## Shared lines
+The IRQ API controls interrupt-controller state. It does **not** provide generic runtime handler registration.
 
-A `das_irq_t` identifies a controller line, not necessarily a unique peripheral source. STM32 GPIO EXTI lines are a direct example: several source lines share one NVIC vector. Enabling the controller therefore affects every source on that line, while each peripheral/source API remains responsible for identifying and clearing its own event.
+For STM32H755, DAS owns one canonical weak vector table covering the complete fixed MCU layout. External vector slots reference their standard STM32/CMSIS handler symbols, and DAS supplies weak definitions that fall through to `Default_Handler`.
 
-## Handler binding
+Normal firmware therefore keeps the DAS vector table and overrides only the handlers it owns:
 
-The current IRQ API controls interrupt-controller state. It does **not** provide generic runtime handler registration.
+```c
+void TIM2_IRQHandler(void)
+{
+    /* application, test or RTOS-owned handling */
+}
+```
 
-For STM32H755, DAS supplies a weak default vector table so ordinary bare-metal applications can boot and use core services such as SysTick without defining startup boilerplate. External IRQ entries in that default table route to `Default_Handler`.
+That strong definition replaces the weak DAS `TIM2_IRQHandler`; no copied vector table is required. The same model applies to UART, SPI, I2C, DMA, GPIO/EXTI and other peripheral handlers.
 
-Applications that require concrete external ISR bindings can either set `DAS_USE_DEFAULT_VECTOR_TABLE=OFF` and provide their own `.isr_vector`, or provide a strong `g_das_vector_table` definition that overrides the weak DAS table. The hardware qualification images use their own strong vector tables for their test-specific handlers.
+Core exception handlers supplied by the Cortex-M layer are weak as well. An RTOS can provide strong `SysTick_Handler`, `PendSV_Handler` or fault handlers while retaining the DAS device vector table. The HardRT integration uses exactly this model.
 
-Portable callback/dispatch registration is a separate design problem involving vector ownership, shared lines, static/runtime binding and RTOS/application policy. DAS does not hide that problem inside `das_irq_enable()`.
+Whole-table replacement remains available only for firmware that genuinely owns startup/vector policy. Such firmware may provide a strong `g_das_vector_table`, or set `DAS_USE_DEFAULT_VECTOR_TABLE=OFF` and provide its own `.isr_vector`.
+
+Hardware qualification firmware uses the same default DAS table as normal applications and supplies only test-specific strong ISR functions. The dedicated custom-vector consumer is intentionally the exception because its purpose is to validate complete table replacement.
+
+Portable runtime callback/dispatch registration is a separate design problem involving shared lines, static/runtime binding and RTOS/application policy. DAS does not hide that problem inside `das_irq_enable()`.
 
 ## CMSIS boundary
 
@@ -91,10 +100,10 @@ das_irq_*()
     -> NVIC hardware
 ```
 
-The STM32H755 default vector-table implementation also uses the CMSIS device header's IRQ numbering internally. No CMSIS or STM32 types appear in `<das/irq.h>`.
+The STM32H755 vector implementation follows the CMSIS/ST device IRQ layout internally. No CMSIS or STM32 types appear in `<das/irq.h>`.
 
 ## Qualification
 
-The standing STM32H755 campaign exercises IRQ controller semantics through physical GPIO/EXTI on CM7 and CM4, the board-button path, periodic TIM2 update delivery, and DMA IRQ resolution. It verifies controller state/priority/pending behavior while preserving source-specific pending/clear handling.
+The current STM32H755 campaign is **39/39 PASS** at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc` (2026-09-13).
 
-These paths are included in the completed **38/38** regression baseline.
+It exercises the canonical vector model on real CM7 and CM4 hardware through GPIO/EXTI, B1 button interrupts and TIM2 delivery, plus generic DMA IRQ resolution. CI additionally enforces one DAS vector table per regular hardware-test ELF, validates whole-table replacement separately, and verifies the HardRT strong `HardFault_Handler`, `PendSV_Handler` and `SysTick_Handler` coexist with the DAS-owned table.

@@ -35,9 +35,9 @@ das_spi_transfer_dma(spi, tx, rx, size);
 das_spi_transfer_dma_timeout(spi, tx, rx, size, timeout_ms);
 ```
 
-The current DMA path requires both TX and RX buffers for non-zero transfers and uses implementation-selected DMA1/DMAMUX1 resources.
+The current SPI DMA path requires both TX and RX buffers for non-zero transfers and uses implementation-selected DMA1/DMAMUX1 resources through the generic DMA backend.
 
-DMA does not make cacheable memory coherent automatically. On CM7, callers explicitly clean TX data and prepare/invalidate RX storage with `<das/cache.h>`. See [DMA and cache coherency](dma.md).
+DMA does not make arbitrary caller-owned cacheable memory coherent automatically. On CM7, callers explicitly clean TX data and prepare/invalidate RX storage with `<das/cache.h>`. See [DMA and cache coherency](dma.md).
 
 ## Chip select
 
@@ -89,4 +89,4 @@ Polling qualification covers modes 0..3, both bit orders, 1/2/4/8 MHz requested 
 
 SPI-DMA qualification covers a 192-byte full-duplex physical transfer at 4 MHz on each core, with explicit CM7 cache maintenance.
 
-Both polling and DMA SPI paths are part of the completed **38/38** standing STM32H755 campaign.
+Both polling and DMA SPI paths are part of the standing **39/39 PASS** STM32H755 regression baseline at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc`.

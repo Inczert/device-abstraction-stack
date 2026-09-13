@@ -24,7 +24,7 @@ The API exposes:
 - update-event source enable/pending/clear;
 - generic `das_irq_t` resolution.
 
-The final application still owns the concrete vector/handler binding.
+DAS owns the canonical STM32H755 vector table. The timer/application owner supplies a strong `TIM2_IRQHandler` when it needs interrupt handling; that strong handler replaces the weak DAS default without requiring a copied vector table.
 
 ## PWM
 
@@ -44,7 +44,7 @@ Duty uses integer per-mille `0..1000`, providing 0.1% resolution without requiri
 Current route:
 
 ```text
-DAS_BOARD_PWM_ARDUINO_D4 -> PE14 -> TIM1_CH4 / AF1 internally
+DAS_BOARD_PWM_ARDUINO_D4 -> PE14 -> TIM1_CH4 AF1 internally
 ```
 
 The API supports start/stop/running state, set/get duty and effective-frequency query.
@@ -55,7 +55,7 @@ The STM32H755 backend derives timer kernel frequency from the live DAS clock tre
 
 ## Hardware qualification
 
-The focused qualifier remains available:
+Focused qualifier:
 
 ```bash
 ./scripts/stm32h755_timer_test.sh /home/dev/STM32Cube/Repository/STM32CubeH7/
@@ -71,4 +71,4 @@ Each core verifies a 1 kHz periodic timer, start/stop/counter behavior, TIM2 upd
 
 Timer input capture is intentionally outside the current baseline.
 
-Timer/PWM is already promoted into the standing campaign and is included in the completed **38/38** STM32H755 regression baseline.
+Timer/PWM is part of the standing **39/39 PASS** STM32H755 regression baseline at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc`.

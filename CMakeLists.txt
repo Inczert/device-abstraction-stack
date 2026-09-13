@@ -60,11 +60,13 @@ if(DAS_DEVICE STREQUAL "nucleo_h755zi_q")
         src/device/stm32h755/spi.c
         src/device/stm32h755/i2c.c
         src/device/stm32h755/dma.c
+        src/device/stm32h755/eth.c
         src/device/stm32h755/vector_table.c)
 
     set(DAS_BOARD_SOURCES
         src/board/nucleo_h755zi_q/board.c
         src/board/nucleo_h755zi_q/resources.c
+        src/board/nucleo_h755zi_q/ethernet.c
         src/board/nucleo_h755zi_q/clock.c
         src/board/nucleo_h755zi_q/time.c)
 else()

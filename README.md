@@ -14,9 +14,9 @@ The current STM32 path uses **CMSIS definitions directly**. It does not require 
 | Device | STM32H755 |
 | Board | NUCLEO-H755ZI-Q |
 | Cores | CM7 and CM4 builds; both physically qualified under debugger control |
-| Startup | reusable weak Cortex-M reset/runtime handlers plus default STM32H755 vector table |
+| Startup | reusable weak Cortex-M reset/runtime handlers plus canonical STM32H755 vector table |
 | Linker | default CM7/CM4 layouts plus custom-linker override |
-| Interrupts | opaque DAS IRQ handles; CMSIS NVIC backend; GPIO/timer/DMA IRQ resolution |
+| Interrupts | opaque DAS IRQ handles; CMSIS NVIC backend; weak per-handler vector ownership |
 | Clock/power | 64/200/300/400 MHz stock-board profiles; RCC/PWR/FLASH sequencing |
 | Time | monotonic milliseconds, SysTick backend, external/RTOS source injection |
 | GPIO | input/output, pulls, output type/speed, AF configuration, EXTI |
@@ -24,10 +24,11 @@ The current STM32 path uses **CMSIS definitions directly**. It does not require 
 | SPI | modes 0..3, both bit orders, polling and full-duplex DMA transfer |
 | I2C | 7-bit controller, 100/400 kHz, probe/read/write/repeated-START |
 | Timer/PWM | periodic timer IRQ path plus PWM frequency/duty control |
-| DMA/cache | generic DMA API, STM32H755 DMA1/DMAMUX1, explicit CM7 D-cache coherency |
-| Board API | LEDs, B1, ST-LINK VCP, Arduino UART/I2C/SPI/PWM and D3/D4 resources |
+| DMA/cache | generic DMA1/DMAMUX1 API plus explicit CM7 D-cache coherency |
+| Ethernet | CM7 polling Layer-2 MAC/DMA/RMII backend with LAN8742A PHY and raw frame TX/RX; CM4 runtime ownership intentionally unsupported |
+| Board API | LEDs, B1, ST-LINK VCP, Arduino UART/I2C/SPI/PWM, D3/D4 and RJ45 Ethernet resources |
 | Packaging | static `libdas.a`, install/export, relocatable `find_package(DAS CONFIG REQUIRED)` package |
-| Qualification | packaged dual-core OpenOCD/GDB hardware campaign, **38/38 PASS** |
+| Qualification | STM32H755 physical regression **39/39 PASS** including CM7 Ethernet Layer 2 |
 
 DAS is still early development. The project version is currently `0.1.0`.
 
@@ -106,69 +107,49 @@ add_executable(my_firmware src/main.c)
 target_link_libraries(my_firmware PRIVATE das::das)
 ```
 
+Application code can include individual public headers or use the convenience umbrella:
+
+```c
+#include <das/das.h>
+```
+
 Configure the application with the matching ARM core toolchain and install prefix in `CMAKE_PREFIX_PATH`. The imported `das::das` target carries the installed linker script to the final ELF.
 
 Source-tree `add_subdirectory()` and `FetchContent` integration remain supported as alternatives. See [Building and integration](docs/integration.md).
 
 ## Startup and vector-table ownership
 
-DAS supplies weak reusable Cortex-M reset/runtime handlers, the linker-symbol contract and a default STM32H755 vector table. The device table uses the CMSIS STM32H755 IRQ numbering internally, provides the core exception/SysTick entries required for a simple bare-metal application, and routes unused external IRQ slots to `Default_Handler`.
+DAS supplies weak reusable Cortex-M reset/runtime handlers, the linker-symbol contract and the canonical STM32H755 vector table. The table contains the fixed CMSIS/ST device layout and references weak standard handler symbols for core exceptions and external IRQs.
 
-Normal applications therefore do **not** need to write an `.isr_vector` merely to boot. `DAS_USE_DEFAULT_VECTOR_TABLE` is `ON` by default for source-tree and installed-package consumers.
+Normal firmware keeps that DAS-owned table and overrides only the handlers it owns with strong definitions. Applications and RTOSes therefore do **not** need to copy `.isr_vector` merely to provide `SysTick_Handler`, `PendSV_Handler`, `TIM2_IRQHandler`, USART/SPI/I2C/DMA handlers, or similar entries.
 
-Firmware that owns its vector/ISR policy can set:
+Whole-table replacement is deliberately exceptional. Firmware with a custom boot/startup policy may set:
 
 ```cmake
 set(DAS_USE_DEFAULT_VECTOR_TABLE OFF)
 find_package(DAS CONFIG REQUIRED)
 ```
 
-or provide a strong `g_das_vector_table` definition, which overrides the weak DAS default. The default linker scripts still place `.isr_vector` at the correct core image base and provide `__StackTop` plus the `.data`/`.bss` symbols consumed by DAS startup.
+or provide a strong `g_das_vector_table` definition. The default linker scripts still place `.isr_vector` at the correct core image base and provide the runtime symbols consumed by DAS startup.
 
-## External-consumer LED example
-
-`examples/led_blink` is deliberately a separate CMake project. It does not add the DAS source tree and contains no application vector table or local startup/halt boilerplate. The helper builds and installs `libdas.a`, resolves it with `find_package(DAS)`, links the application, flashes CM7 with OpenOCD, resets into the new image, and asks for physical confirmation of the green LED blink:
-
-```bash
-./scripts/build_and_flash_led_blink.sh /path/to/STM32CubeH7
-```
-
-This installed-package path has been physically validated on the NUCLEO-H755ZI-Q before the default-vector refactor; rerun it after pulling `develop` to qualify the new library-owned vector path.
+See [Interrupt model](docs/interrupts.md) and [Building and integration](docs/integration.md).
 
 ## Hardware qualification
 
-The standing STM32H755 regression is **38/38 PASS** at commit `c4bbc578d32c7b81f2ec5aaf38d637d128ca1942`, qualified on 2026-09-10. It covers linker/layout checks and physical execution of startup, clock/time, GPIO/EXTI, board resources/button, UART, SPI, I2C, DMA/cache and timer/PWM on both cores where applicable.
+The standing NUCLEO-H755ZI-Q campaign is **39/39 PASS** at commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc`, qualified on 2026-09-13 against STM32CubeH7 commit `f5c0b7a2b1f6eb26fde150f72edb2d7deb647066`.
 
-Run the current campaign with:
+The campaign covers linker/layout, startup, clock/time, GPIO/EXTI/IRQ, board resources/button, UART, SPI, I2C, DMA/cache and timer/PWM on both cores where applicable, plus the CM7 Layer-2 Ethernet MAC/DMA/RMII/LAN8742A path.
+
+Ethernet qualification requires JP6 and JP7 fitted and board RJ45 CN14 connected directly to a Linux host Ethernet port. The scripts default to host interface `enp0s31f6`:
 
 ```bash
 ./scripts/stm32h755_test_campaign.sh \
-  /home/dev/STM32Cube/Repository/STM32CubeH7/ \
+  /path/to/STM32CubeH7 \
   --clean
 ```
 
-Every run produces a timestamped evidence archive. The installed-package LED example is a separate application/package smoke test and is not counted as a 39th campaign acceptance point.
+Override only when necessary with `--eth-iface <linux-interface>` or `DAS_ETH_IFACE=<linux-interface>`. No IP address is required; the Ethernet case exchanges raw Layer-2 frames.
 
-See [Hardware qualification](docs/testing.md).
+The qualified Ethernet run negotiated 100 Mbps/full duplex, validated 5/5 STM32-to-host frames and 64/64 host-to-STM32 integrity frames, with zero integrity errors and `DAS_OK` at completion.
 
-## Documentation
-
-- [Public API reference](docs/api.md)
-- [Architecture](docs/architecture.md)
-- [Building and integration](docs/integration.md)
-- [STM32H755 memory/linker policy](docs/memory-layout.md)
-- [Board resources](docs/board.md)
-- [Clock control](docs/clocks.md)
-- [Monotonic time](docs/time.md)
-- [Interrupt model](docs/interrupts.md)
-- [UART](docs/uart.md)
-- [SPI](docs/spi.md)
-- [I2C](docs/i2c.md)
-- [Timers and PWM](docs/timer.md)
-- [DMA and cache coherency](docs/dma.md)
-- [Hardware qualification](docs/testing.md)
-- [Porting](docs/porting.md)
-
-## Current boundaries
-
-The qualified baseline does **not** yet include production CM7-to-CM4 boot/release and HSEM/shared-memory coordination, ADC, watchdog, internal-flash/reset-cause services, timer input capture, or a generic asynchronous UART callback/buffering model. Those remain explicit follow-up work rather than being implied by the current hardware qualification.
+See [Hardware qualification](docs/testing.md) and [Ethernet](docs/ethernet.md).

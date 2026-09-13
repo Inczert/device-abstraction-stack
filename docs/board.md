@@ -13,7 +13,7 @@ application
 semantic board resource
     |
     v
-generic DAS peripheral/GPIO API
+generic DAS peripheral API
     |
     v
 STM32H755 device backend
@@ -40,7 +40,7 @@ released -> low
 pressed  -> high
 ```
 
-The stock board provides the signal bias. DAS exposes logical press/release state plus press/release/both-event interrupt configuration, source enable/pending/clear and generic `das_irq_t` resolution.
+The stock board provides the signal bias. DAS exposes logical state plus press/release/both-event interrupt configuration, source enable/pending/clear and generic `das_irq_t` resolution.
 
 ## UART routes
 
@@ -49,7 +49,7 @@ The stock board provides the signal bias. DAS exposes logical press/release stat
 | `DAS_BOARD_UART_STLINK_VCP` | ST-LINK USB VCP | PD8 | PD9 | USART3 / AF7 |
 | `DAS_BOARD_UART_ARDUINO` | Arduino D1/D0 | PB6 | PB7 | USART1 / AF7 |
 
-`das_board_uart_init()` configures the route and returns an opaque `das_uart_t`. The STM32 USART instance and AF values remain board/backend facts.
+`das_board_uart_init()` configures the route and returns an opaque `das_uart_t`.
 
 ## Arduino I2C
 
@@ -73,7 +73,7 @@ MOSI  -> PB5 / SPI1_MOSI AF5
 CS    -> PD14 / GPIO, active low
 ```
 
-`das_board_spi_init()` configures the bus and returns an opaque `das_spi_t`. Chip select remains transaction policy outside `das_spi_transfer*()`. `das_board_spi_chip_select()` controls the route's default active-low CS; applications can use arbitrary DAS GPIOs for additional devices.
+`das_board_spi_init()` returns an opaque `das_spi_t`. Chip select remains transaction policy outside `das_spi_transfer*()`. `das_board_spi_chip_select()` controls the route's default active-low CS.
 
 ## PWM route
 
@@ -81,7 +81,7 @@ CS    -> PD14 / GPIO, active low
 DAS_BOARD_PWM_ARDUINO_D4 -> D4 / PE14 -> TIM1_CH4 AF1 internally
 ```
 
-`das_board_pwm_init()` returns an opaque `das_pwm_t`. Application code selects frequency/duty rather than timer instance/channel/AF fields.
+`das_board_pwm_init()` returns an opaque `das_pwm_t`.
 
 ## Qualification GPIO aliases
 
@@ -90,7 +90,35 @@ DAS_BOARD_GPIO_ARDUINO_D3 -> PE13
 DAS_BOARD_GPIO_ARDUINO_D4 -> PE14
 ```
 
-The D4-to-D3 jumper is reused for physical GPIO loopback/open-drain/EXTI and PWM observation in the standing hardware campaign.
+The D4-to-D3 jumper is reused for physical GPIO loopback/open-drain/EXTI and PWM observation.
+
+## RJ45 Ethernet
+
+```text
+DAS_BOARD_ETH_RJ45
+    -> STM32H755 ETH1 MAC / dedicated ETH DMA
+    -> RMII
+    -> on-board LAN8742A PHY
+    -> CN14 RJ45
+```
+
+The board layer owns the physical RMII route:
+
+```text
+PA1   RMII_REF_CLK
+PA2   RMII_MDIO
+PC1   RMII_MDC
+PA7   RMII_CRS_DV
+PC4   RMII_RXD0
+PC5   RMII_RXD1
+PG11  RMII_TX_EN
+PG13  RMII_TXD0
+PB13  RMII_TXD1
+```
+
+The standard qualified Ethernet setup has JP6 and JP7 fitted. `das_board_eth_init()` configures the route and returns an opaque `das_eth_t`; applications do not receive STM32 ETH/LAN8742 register types.
+
+The current runtime ownership is CM7-only. CM4 returns `DAS_ERROR_UNSUPPORTED` before changing the board route.
 
 ## Why not map every connector pin?
 
@@ -100,17 +128,20 @@ Add a semantic resource when the board gives the signal a function, a normal rou
 
 ## Hardware qualification
 
-The current 38-case campaign physically qualifies:
+The current **39/39 PASS** campaign physically qualifies:
 
 - LED behavior;
 - B1 polling and press/release EXTI;
-- both UART routes' underlying backend through qualified paths;
+- UART backend routes through the standing UART cases;
 - Arduino SPI polling and DMA loopback;
 - Arduino I2C controller against a test-only I2C4 target;
 - Arduino D4 PWM observed through D3;
-- D3/D4 GPIO loopback/open-drain/EXTI.
+- D3/D4 GPIO loopback/open-drain/EXTI;
+- CN14 Ethernet physical carrier and CM7 bidirectional raw Layer-2 traffic through LAN8742A/RMII/MAC/DMA with D-cache enabled.
 
-The stock solder-bridge/configuration assumptions documented here are the qualified board profile. Modified board routing requires an explicit board configuration rather than guesswork.
+The accepted campaign is DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc`, run on 2026-09-13.
+
+The stock solder-bridge/jumper assumptions documented here are the qualified board profile. Modified board routing requires an explicit board configuration rather than guesswork.
 
 ## Source of truth
 

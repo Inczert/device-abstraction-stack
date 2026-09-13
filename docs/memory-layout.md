@@ -7,7 +7,7 @@ cmake/targets/stm32h755_cm7.ld
 cmake/targets/stm32h755_cm4.ld
 ```
 
-The defaults are intended to make a simple bare-metal image link without CubeIDE/CubeMX-generated files while remaining easy to replace for a real product.
+The defaults make a simple bare-metal image link without CubeIDE/CubeMX-generated files while remaining replaceable for a product-specific layout.
 
 ## Core selection
 
@@ -25,7 +25,7 @@ or:
 -DDAS_CORE=cm4
 ```
 
-`DAS_CORE` also selects the compiler/FPU flags, CMSIS core header, `CORE_CM7`/`CORE_CM4` device definition, and the default linker script.
+`DAS_CORE` also selects compiler/FPU flags, CMSIS core definitions, the `CORE_CM7`/`CORE_CM4` device view and the default linker script.
 
 ## Default dual-core partition
 
@@ -36,21 +36,13 @@ The STM32H755 contains 2 MiB of internal flash arranged as two 1 MiB banks. DAS 
 | CM7 | bank 1, `0x08000000..0x080FFFFF` | AXI SRAM, `0x24000000..0x2407FFFF` | `0x24080000` |
 | CM4 | bank 2, `0x08100000..0x081FFFFF` | D2 SRAM1, `0x30000000..0x3001FFFF` | `0x30020000` |
 
-This is a safe default partition, not a claim that each core can only access those regions. The split simply prevents two independently linked default images from owning the same flash and RAM ranges.
+This is a safe default partition, not a claim that each core can only access those regions. The split prevents two independently linked default images from owning the same flash/RAM ranges.
 
-### CM7 script
+The CM7 AXI-SRAM default is also accessible by the STM32H755 Ethernet DMA engine and is therefore suitable for the current Ethernet descriptor/frame-buffer placement. DTCM is not accessible to Ethernet DMA and must not be used for those objects.
 
-`stm32h755_cm7.ld` places the vector table, code, read-only data and `.data` load image in flash bank 1. Normal writable sections, heap bounds and stack are placed in AXI SRAM.
+## Linker/runtime contract
 
-### CM4 script
-
-`stm32h755_cm4.ld` places the vector table, code, read-only data and `.data` load image in flash bank 2. Normal writable sections, heap bounds and stack are placed in D2 SRAM1.
-
-The CM4 default boot address therefore matches the second flash bank at `0x08100000`.
-
-## Startup contract
-
-Both scripts export the symbols consumed by the reusable Cortex-M reset path:
+Both default scripts export the symbols consumed by DAS startup and by integrations that need the selected writable-RAM bounds:
 
 ```text
 __vector_table_start__
@@ -71,9 +63,14 @@ __HeapLimit
 
 __StackLimit
 __StackTop
+
+__RAM_START__
+__RAM_END__
 ```
 
-The Cortex-M startup code knows what these symbols mean. It does not know their STM32 addresses.
+`__RAM_START__` / `__RAM_END__` describe the default writable region selected for the configured core. HardRT uses these bounds for task-stack validation. A custom linker used with that integration must provide equivalent symbols.
+
+The Cortex-M startup code consumes the runtime symbols without knowing STM32 physical addresses:
 
 ```text
 Cortex-M startup mechanics    src/mcu/cortex_m/
@@ -82,9 +79,7 @@ STM32H755 memory addresses    cmake/targets/stm32h755_*.ld
 
 ## How the linker script reaches the firmware
 
-`libdas.a` itself is a static archive. It is not assigned final flash/RAM addresses when the archive is created.
-
-The linker script matters when the final executable is linked:
+`libdas.a` is a static archive and has no final physical addresses by itself. The selected linker script applies when the firmware executable is linked:
 
 ```text
 DAS objects ─┐
@@ -98,7 +93,7 @@ DAS attaches the selected linker script as an **INTERFACE link option** of `das:
 target_link_libraries(my_firmware PRIVATE das::das)
 ```
 
-There is no `das::linker` library target and no firmware-configuration helper.
+There is no linker pseudo-library and no required firmware-configuration helper.
 
 ## Custom linker script
 
@@ -111,7 +106,7 @@ cmake ... \
   -DDAS_LINKER_SCRIPT=/absolute/or/relative/path/application.ld
 ```
 
-or from a parent `CMakeLists.txt`:
+or from a parent project:
 
 ```cmake
 set(DAS_LINKER_SCRIPT
@@ -122,45 +117,29 @@ add_subdirectory(third_party/device-abstraction-stack)
 target_link_libraries(my_firmware PRIVATE das::das)
 ```
 
-An empty `DAS_LINKER_SCRIPT` means: use the default selected by `DAS_DEVICE + DAS_CORE`.
+An empty `DAS_LINKER_SCRIPT` means use the default selected by `DAS_DEVICE + DAS_CORE`.
 
-Custom layouts are expected for bootloaders, A/B image slots, TCM placement, external RAM, DMA/non-cacheable sections, shared-memory windows, or different stack/heap policy.
+Custom layouts are expected for bootloaders, A/B slots, TCM placement, external RAM, DMA/non-cacheable sections, shared-memory windows or different stack/heap policy.
 
-If the DAS reusable startup is retained, the custom script must still provide its linker-symbol contract. If the application also replaces startup, it may define a completely different contract.
+If DAS startup is retained, the custom script must provide its startup-symbol contract. Integrations may impose additional symbols such as `__RAM_START__` / `__RAM_END__`.
+
+If Ethernet is used, the custom layout must place Ethernet descriptors/buffers in SRAM reachable by the Ethernet DMA engine. Merely being CPU-accessible is not sufficient.
 
 ## Custom-linker qualification fixture
 
-The repository contains a test-only linker script:
+The repository contains:
 
 ```text
 tests/link/stm32h755/custom_cm7.ld
 ```
 
-It deliberately relocates the CM7 vector table and image start from `0x08000000` to:
+It deliberately relocates the CM7 image/vector start to `0x08020000`. The campaign links the normal `das::das` consumer against this script and checks the generated ELF/map, proving both the override and its transitive propagation through the target.
 
-```text
-0x08020000
-```
-
-The campaign configures a separate build with:
-
-```text
-DAS_CORE=cm7
-DAS_LINKER_SCRIPT=tests/link/stm32h755/custom_cm7.ld
-```
-
-and links the normal `das::das` consumer test without any explicit `-T` option in that target. The generated ELF/map are then checked against the relocated flash range.
-
-This proves two things independently:
-
-1. `DAS_LINKER_SCRIPT` really overrides the device/core default;
-2. the override reaches the final executable transitively through `das::das`.
-
-The fixture is not flashed to hardware. Its purpose is to validate build-system/linker selection, not to consume another flash sector for ceremonial reasons.
+The fixture is static-only; it is not flashed.
 
 ## Stack and heap
 
-Both default scripts reserve 16 KiB for the reset/application stack. The value can be overridden at final link time:
+Both defaults reserve 16 KiB for the reset/application stack. The size may be overridden at final link time:
 
 ```cmake
 target_link_options(my_firmware PRIVATE
@@ -169,11 +148,11 @@ target_link_options(my_firmware PRIVATE
 
 The scripts assert that static data/heap bounds do not overlap the reserved stack.
 
-DAS does not provide a heap allocator. `__HeapBase` and `__HeapLimit` are boundaries available to an application/runtime that chooses to use them.
+DAS does not provide a heap allocator. `__HeapBase` and `__HeapLimit` are boundaries for an application/runtime that chooses to use them.
 
 ## Qualification
 
-The full campaign validates three link configurations:
+The standing campaign validates:
 
 ```text
 CM7 default layout      static + physical execution
@@ -181,6 +160,6 @@ CM4 default layout      static + physical execution
 CM7 custom override     static linker-selection test
 ```
 
-Physical execution of the CM4 image proves that the selected bank-2/D2-SRAM layout can actually boot under debugger control and reconstruct the C runtime correctly.
+The current full hardware baseline is **39/39 PASS** at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc` (2026-09-13). Physical CM4 execution proves the bank-2/D2-SRAM default image boots under debugger control and reconstructs the C runtime. CM7 Ethernet qualification additionally exercises Ethernet-DMA-visible storage under the default AXI-SRAM policy.
 
-That still does not qualify production CM7-to-CM4 release sequencing, HSEM or shared-memory ownership. Those are dual-core system behaviors rather than linker behaviors.
+This still does not qualify production CM7-to-CM4 release sequencing, HSEM or shared-memory ownership; those are system-lifecycle concerns rather than linker behavior.

@@ -3,6 +3,7 @@
 #ifndef DAS_BOARD_RESOURCES_H
 #define DAS_BOARD_RESOURCES_H
 
+#include <das/eth.h>
 #include <das/gpio.h>
 #include <das/i2c.h>
 #include <das/result.h>
@@ -27,6 +28,17 @@ das_result_t das_board_uart_get_pins(das_board_uart_resource_t resource,
 das_result_t das_board_uart_init(das_board_uart_resource_t resource,
                                  const das_uart_config_t* config,
                                  das_uart_t* uart);
+
+/** Semantic on-board Ethernet connections. */
+typedef enum das_board_eth_resource {
+    DAS_BOARD_ETH_RJ45 = 0,
+    DAS_BOARD_ETH_COUNT
+} das_board_eth_resource_t;
+
+/** Resolve and initialize the board's Layer-2 Ethernet interface. */
+das_result_t das_board_eth_init(das_board_eth_resource_t resource,
+                                const das_eth_config_t* config,
+                                das_eth_t* eth);
 
 /** Semantic PWM-capable board outputs. */
 typedef enum das_board_pwm_resource {

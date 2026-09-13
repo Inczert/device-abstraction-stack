@@ -113,7 +113,7 @@ Application code can include individual public headers or use the convenience um
 #include <das/das.h>
 ```
 
-The umbrella exposes the normal application-facing API. Architecture-specific startup/vector customization remains explicit through headers such as `das/cortex_m/startup.h`.
+The umbrella exposes the normal application-facing API. Architecture-specific startup/vector replacement remains explicit through headers such as `das/cortex_m/startup.h` and is not required merely to override individual weak ISR handlers.
 
 Configure the application with the matching ARM core toolchain and install prefix in `CMAKE_PREFIX_PATH`. The imported `das::das` target carries the installed linker script to the final ELF.
 
@@ -121,18 +121,18 @@ Source-tree `add_subdirectory()` and `FetchContent` integration remain supported
 
 ## Startup and vector-table ownership
 
-DAS supplies weak reusable Cortex-M reset/runtime handlers, the linker-symbol contract and a default STM32H755 vector table. The device table uses the CMSIS STM32H755 IRQ numbering internally, provides the core exception/SysTick entries required for a simple bare-metal application, and routes unused external IRQ slots to weak default handlers.
+DAS supplies weak reusable Cortex-M reset/runtime handlers, the linker-symbol contract and the normal STM32H755 vector table. The device table uses the CMSIS STM32H755 IRQ numbering internally, provides the core exception/SysTick entries required for a simple bare-metal application, and routes unused external IRQ slots to weak default handlers.
 
-Normal applications therefore do **not** need to write an `.isr_vector` merely to boot. `DAS_USE_DEFAULT_VECTOR_TABLE` is `ON` by default for source-tree and installed-package consumers.
+Normal applications therefore do **not** need to write an `.isr_vector` merely to boot or to provide application/RTOS ISR implementations. `DAS_USE_DEFAULT_VECTOR_TABLE` is `ON` by default for source-tree and installed-package consumers, and strong application or RTOS handler symbols replace the corresponding weak DAS handlers while the DAS-owned table remains in place.
 
-Firmware that owns its vector/ISR policy can set:
+Only firmware that deliberately replaces the complete startup/vector policy should set:
 
 ```cmake
 set(DAS_USE_DEFAULT_VECTOR_TABLE OFF)
 find_package(DAS CONFIG REQUIRED)
 ```
 
-or provide a strong `g_das_vector_table` definition, which overrides the weak DAS default. The default linker scripts still place `.isr_vector` at the correct core image base and provide `__StackTop` plus the `.data`/`.bss` symbols consumed by DAS startup.
+or provide a strong `g_das_vector_table` definition to replace the weak DAS table. The default linker scripts still place `.isr_vector` at the correct core image base and provide `__StackTop` plus the `.data`/`.bss` symbols consumed by DAS startup.
 
 ## External-consumer LED example
 

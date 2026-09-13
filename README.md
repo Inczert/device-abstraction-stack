@@ -146,14 +146,15 @@ or provide a strong `g_das_vector_table` definition to replace the weak DAS tabl
 
 The completed pre-Ethernet STM32H755 regression baseline is **38/38 PASS**. It covers linker/layout checks and physical execution of startup, clock/time, GPIO/EXTI, board resources/button, UART, SPI, I2C, DMA/cache and timer/PWM on both cores where applicable.
 
-The CM7 Ethernet Layer-2 focused qualifier has also passed physically and is promoted into the standing campaign as acceptance point 39. The full campaign now requires JP6 and JP7 fitted plus a direct Ethernet cable from board RJ45 CN14 to a Linux host Ethernet port. Supply that host interface explicitly:
+The CM7 Ethernet Layer-2 focused qualifier has also passed physically and is promoted into the standing campaign as acceptance point 39. The full campaign requires JP6 and JP7 fitted plus a direct Ethernet cable from board RJ45 CN14 to a Linux host Ethernet port. The default host interface is `enp0s31f6`, so the normal command is:
 
 ```bash
 ./scripts/stm32h755_test_campaign.sh \
   /path/to/STM32CubeH7 \
-  --eth-iface enp0s31f6 \
   --clean
 ```
+
+Override the interface only when needed with `--eth-iface <linux-interface>` or `DAS_ETH_IFACE=<linux-interface>`.
 
 No IP address is required for the Ethernet case; qualification uses raw Layer-2 frames. The enlarged campaign must complete successfully before replacing the historical 38/38 result with a 39/39 full-campaign baseline.
 

@@ -1,10 +1,19 @@
 # DMA and data-cache coherency
 
-DAS exposes DMA through an opaque execution-resource handle. Applications do not select STM32 DMA streams, DMAMUX channels, RCC bits or interrupt numbers. The STM32H755 baseline uses DMA1 internally and allocates an available stream when `das_dma_acquire()` is called.
+DAS exposes generic DMA through an opaque execution-resource handle. Applications do not select STM32 DMA streams, DMAMUX channels, RCC bits or interrupt numbers.
+
+The STM32H755 target currently has **two distinct DMA domains**:
+
+```text
+generic das_dma_t / SPI DMA -> DMA1 + DMAMUX1
+Ethernet raw TX/RX          -> Ethernet peripheral DMA descriptor engine
+```
+
+The Ethernet engine is not routed through `das_dma_t`.
 
 ## Generic DMA API
 
-A transfer is described in terms of logical source and destination rather than STM32's peripheral/memory register naming:
+A transfer is described in terms of logical source and destination:
 
 ```c
 das_dma_t dma = DAS_DMA_INVALID;
@@ -24,31 +33,41 @@ das_dma_wait_timeout(dma, 50u);
 das_dma_release(dma);
 ```
 
-`count` is a number of configured transfer elements, not a byte count. The first STM32H755 baseline uses direct mode, supports byte/halfword/word elements with equal source and destination widths, and bounds one hardware transfer to 65535 elements.
+`count` is a number of configured transfer elements, not bytes. The current generic STM32H755 backend uses direct mode, supports equal byte/halfword/word source/destination widths and bounds one hardware transfer to 65535 elements.
 
-`das_dma_get_state()` distinguishes idle, busy, complete and terminal hardware-error states. `das_dma_get_remaining()` exposes the remaining element count. On STM32H755, transfer error (`TEIF`) is terminal and maps to `DAS_DMA_STATE_ERROR` / `DAS_ERROR_IO`; FIFO/direct-mode conditions do not by themselves terminate polling completion. A started transfer remains busy until hardware reports completion or a terminal error; the stream enable bit is not used as the completion criterion because hardware may clear it before the completion flag becomes observable. A finite wait uses the generic DAS monotonic time source; it aborts the stream and returns `DAS_ERROR_TIMEOUT` when the deadline expires.
+`das_dma_get_state()` distinguishes idle, busy, complete and terminal hardware-error states. `das_dma_get_remaining()` exposes the remaining element count. A finite wait uses the DAS monotonic time source and aborts the stream with `DAS_ERROR_TIMEOUT` when its deadline expires.
 
-`das_dma_get_irq()` resolves the stream's generic `das_irq_t` without exposing STM32 IRQ types. Interrupt-driven transfer ownership/callback policy can build on this primitive later; the current baseline qualifies completion through polling so no backend ISR contract is invented prematurely.
+`das_dma_get_irq()` resolves the stream's generic `das_irq_t`. The current generic baseline qualifies completion through polling; no generic callback framework is implied.
 
-## STM32H755 backend
+## STM32H755 generic backend
 
-The current backend owns DMA1 streams 0..7 and their corresponding DMAMUX1 channels. The stream allocator is intentionally local to one executing core. It is not yet a cross-core resource arbiter; production CM7/CM4 ownership and HSEM coordination belong with #20.
+The generic backend owns DMA1 streams 0..7 and corresponding DMAMUX1 channels. Allocation is local to one executing core; it is not a production cross-core resource arbiter.
 
-For memory-to-memory transfers the DMAMUX request is zero. Peripheral drivers may select a private device request internally. Raw DMAMUX request identifiers are never part of `das/dma.h`.
-
-The current SPI DMA path uses the STM32H755-private SPI1 RX/TX requests and two implementation-selected DMA streams. Application code remains:
+The SPI DMA path uses private SPI1 RX/TX DMAMUX requests and two implementation-selected streams. Application code remains:
 
 ```c
 das_spi_transfer_dma_timeout(spi, tx, rx, size, 50u);
 ```
 
-The existing MOSI/MISO board route and SPI framing/clock setup are reused unchanged.
+## Ethernet DMA
 
-## Cache coherency is explicit
+STM32H755 Ethernet contains its own DMA engine and descriptor rings. DAS Ethernet therefore manages:
 
-DMA engines and Cortex-M7 D-cache are independent observers of memory. A DMA API that silently pretends otherwise eventually produces a bug whose most endearing property is intermittency.
+- four TX descriptors + internal TX buffers;
+- four RX descriptors + internal RX buffers;
+- descriptor ownership transitions;
+- descriptor/buffer cache maintenance;
+- DMA tail/ring progression.
 
-DAS therefore does **not** perform cache maintenance automatically in generic DMA or SPI-DMA calls. The Cortex-M layer exposes:
+Those objects are private to the Ethernet backend and never appear as `das_dma_t` resources.
+
+Each software Ethernet descriptor occupies one 32-byte CM7 cache line and the hardware descriptor stride is configured to match. This prevents two independently owned descriptors from sharing a cache line.
+
+See [Ethernet](ethernet.md).
+
+## Cache coherency
+
+DMA engines and Cortex-M7 D-cache are independent observers of memory. The Cortex-M layer exposes:
 
 ```c
 das_cache_data_available();
@@ -61,72 +80,53 @@ das_cache_data_invalidate(ptr, size);
 das_cache_data_clean_invalidate(ptr, size);
 ```
 
-On Cortex-M7 the range helpers expand an arbitrary byte range to complete 32-byte cache lines before calling CMSIS-Core cache maintenance primitives. On the current Cortex-M4 target there is no D-cache: range maintenance is a successful no-op, while trying to enable/disable a nonexistent D-cache returns `DAS_ERROR_UNSUPPORTED`.
+On CM7, range helpers expand arbitrary byte ranges to complete 32-byte cache lines before invoking CMSIS-Core cache maintenance. CM4 has no D-cache: range maintenance is a successful no-op, while enabling/disabling a nonexistent cache returns `DAS_ERROR_UNSUPPORTED`.
 
-### DMA reads memory: CPU -> DMA
+### Generic caller-owned DMA buffers
 
-Before DMA reads a buffer that the CPU may have modified in cache, clean it:
+Generic DMA and SPI-DMA do **not** infer arbitrary caller-buffer ownership. Before DMA reads CPU-modified cacheable memory, clean it. Before/after DMA writes a cacheable destination, prepare/invalidate it according to the ownership transition.
 
-```c
-das_cache_data_clean(tx, tx_size);
-```
+Because maintenance works on complete cache lines, DMA destination buffers should be aligned/isolated when unrelated writable data could otherwise share the first or last line.
 
-This writes dirty cache lines back to DMA-visible SRAM.
+### Ethernet private buffers
 
-### DMA writes memory: DMA -> CPU
-
-Before a DMA destination is handed to hardware, make sure dirty CPU data cannot later overwrite DMA results. For an isolated DMA buffer:
-
-```c
-das_cache_data_clean_invalidate(rx, rx_size);
-```
-
-After DMA completes, invalidate before reading the result:
-
-```c
-das_cache_data_invalidate(rx, rx_size);
-```
-
-Because maintenance operates on whole cache lines, DMA destination buffers should be aligned and isolated at cache-line granularity whenever unrelated writable objects could otherwise share the first or last line. Invalidating a dirty shared line can discard unrelated CPU writes. The helper hides CMSIS alignment mechanics, not the ownership rule.
+The Ethernet backend owns its descriptor and frame buffers and therefore owns their cache transitions internally. Callers of `das_eth_send()` / `das_eth_receive()` do not manipulate Ethernet descriptor cache state.
 
 ## DMA-visible memory
 
-The STM32H755 DMA1 engine cannot access every CPU-local memory region. The current hardware qualification deliberately uses memory already selected by DAS linker policy:
+The current default layouts place normal writable data in:
 
 ```text
 CM7 .data/.bss -> AXI SRAM, 0x24000000...
 CM4 .data/.bss -> D2 SRAM1, 0x30000000...
 ```
 
-Both are DMA-visible. Code that later places DMA buffers into TCM or another special region must verify that the chosen DMA engine can reach it. DAS does not turn an unreachable physical address into a reachable one by optimism.
+Both are appropriate for the standing generic-DMA tests. The CM7 AXI SRAM placement is also accessible by Ethernet DMA. DTCM is not a valid location for Ethernet descriptors/buffers.
+
+Custom linkers must verify visibility for the specific DMA engine involved.
 
 ## Hardware qualification
 
-The focused qualifier remains available for DMA-specific iteration:
+Focused generic DMA qualification remains available:
 
 ```bash
 ./scripts/stm32h755_dma_test.sh /home/dev/STM32Cube/Repository/STM32CubeH7/
 ```
 
-The peripheral part reuses the qualified SPI loopback fixture:
+It reuses:
 
 ```text
 Arduino D11 / PB5 / SPI1_MOSI  <->  Arduino D12 / PA6 / SPI1_MISO
 ```
 
-Each core runs a dedicated image. The qualifier checks:
+Each core qualifies:
 
-- opaque DMA allocation/configuration/release;
+- generic DMA allocation/configuration/release;
 - generic DMA IRQ resolution;
-- 256-byte memory-to-memory integrity and completion state;
-- zero remaining elements after completion;
-- CM7 D-cache availability, 32-byte line size, enable state and explicit clean/invalidate path;
-- CM4 no-cache behavior through the same range-maintenance API;
-- 192-byte full-duplex SPI1 transfer through DMAMUX1/DMA1;
-- explicit cache preparation/invalidation around the SPI buffers;
-- exact physical MOSI-to-MISO equality;
-- continued execution after the complete sequence.
+- 256-byte memory-to-memory integrity;
+- completion/error state and zero remaining elements;
+- 192-byte full-duplex SPI1 DMA transfer at 4 MHz;
+- physical MOSI-to-MISO equality;
+- cache behavior appropriate to that core.
 
-The focused CM7/CM4 run passed 2/2 on commit `6cf59835d52c3a2d1d74ac6aa9d8f0cc44bb95ae`. CM7 passed at the qualified 400 MHz profile with D-cache enabled; CM4 passed at 64 MHz with the expected no-cache behavior. Both reported 256 memory-DMA bytes, 192 SPI-DMA bytes at 4 MHz and full acceptance flags `0x3f`.
-
-Those same two cases are integrated into `scripts/stm32h755_test_campaign.sh` as standing regression coverage. They reuse the persistent SPI fixture and add no new hardware setup transition. The integrated campaign passed **38/38** on 2026-09-10 at commit `c4bbc578d32c7b81f2ec5aaf38d637d128ca1942`, establishing DMA/cache as part of the completed STM32H755 hardware regression baseline.
+The standing **39/39 PASS** STM32H755 campaign at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc` includes both generic DMA/cache cases and the separate CM7 Ethernet DMA/cache data path.

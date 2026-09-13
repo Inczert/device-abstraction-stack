@@ -29,23 +29,24 @@ Focused scripts remain useful for fast iteration:
 ./scripts/stm32h755_spi_test.sh   /path/to/STM32CubeH7
 ./scripts/stm32h755_i2c_test.sh   /path/to/STM32CubeH7
 ./scripts/stm32h755_dma_test.sh   /path/to/STM32CubeH7
-./scripts/stm32h755_eth_test.sh   /path/to/STM32CubeH7 --iface enp0s31f6
+./scripts/stm32h755_eth_test.sh   /path/to/STM32CubeH7
 ```
+
+The Ethernet scripts default to host interface `enp0s31f6`. Override it when necessary with `--iface <linux-interface>` for the focused qualifier, `--eth-iface <linux-interface>` for the full campaign, or `DAS_ETH_IFACE=<linux-interface>` for either.
 
 The full campaign should be rerun whenever shared startup, clock, GPIO, RCC, IRQ, timebase, DMA/cache, board-resource or device-backend changes could affect previously qualified functionality.
 
 ## Running the full campaign
 
-The Ethernet qualifier is now a standing campaign case, so the host Ethernet interface connected directly to board CN14 must be supplied:
+The Ethernet qualifier is now a standing campaign case. The default host Ethernet interface connected directly to board CN14 is `enp0s31f6`:
 
 ```bash
 ./scripts/stm32h755_test_campaign.sh \
   /home/dev/STM32Cube/Repository/STM32CubeH7/ \
-  --eth-iface enp0s31f6 \
   --clean
 ```
 
-`DAS_ETH_IFACE=enp0s31f6` may be used instead of `--eth-iface`.
+Use `--eth-iface <linux-interface>` or `DAS_ETH_IFACE=<linux-interface>` only when the host interface differs from the default.
 
 Every run produces a timestamped evidence archive under:
 
@@ -90,7 +91,8 @@ B1 USER: released
 
 Ethernet:
 JP6 and JP7 fitted
-board RJ45 CN14  <->  host PC Ethernet port selected by --eth-iface
+board RJ45 CN14  <->  host PC Ethernet port
+host interface defaults to enp0s31f6; override only if necessary
 leave the Ethernet cable connected for the entire campaign
 ```
 
@@ -286,7 +288,7 @@ JP6 fitted
 JP7 fitted
 ```
 
-The host interface is supplied with `--eth-iface`. No IP configuration is required.
+The host interface defaults to `enp0s31f6`. Override it only when necessary with `--eth-iface <linux-interface>` or `DAS_ETH_IFACE=<linux-interface>`. No IP configuration is required.
 
 The qualifier verifies:
 

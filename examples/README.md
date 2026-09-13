@@ -16,6 +16,9 @@ Current examples:
 - `time_periodic` - clock profile + monotonic periodic work;
 - `uart_console` - ST-LINK VCP UART output;
 - `clock_uart` - configure CPU clock before clock-dependent UART setup and inspect the effective values;
-- `hardrt_uart` - HardRT 0.5.1 scheduler with DAS clock/GPIO/UART and the RTOS-provided monotonic time source.
+- `hardrt_uart` - HardRT 0.5.1 scheduler with DAS clock/GPIO/UART and the RTOS-provided monotonic time source;
+- `eth_raw` - CM7 raw Layer-2 Ethernet smoke/qualification consumer using the NUCLEO-H755ZI-Q LAN8742A/RJ45 route.
 
-The HardRT example also has `scripts/build_and_flash_hardrt_uart.sh` for building/installing both libraries, flashing CM7 and optionally monitoring the ST-LINK VCP.
+The HardRT example has `scripts/build_and_flash_hardrt_uart.sh` for building/installing both libraries, flashing CM7 and optionally monitoring the ST-LINK VCP.
+
+The Ethernet example has `scripts/build_and_flash_eth_raw.sh` for raw bring-up and `scripts/stm32h755_eth_test.sh` for automated bidirectional Layer-2 qualification against a Linux host Ethernet interface.

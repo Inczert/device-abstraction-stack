@@ -19,6 +19,12 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Syntax-check hardware qualification scripts
+        run: |
+          bash -n scripts/stm32h755_test_campaign.sh
+          bash -n scripts/stm32h755_eth_test.sh
+          bash -n scripts/build_and_flash_eth_raw.sh
+          python3 -m py_compile scripts/host/stm32h755_eth_traffic.py
       - name: Compile public headers without vendor includes
         run: |
           cc -std=c11 -Wall -Wextra -Werror -pedantic \

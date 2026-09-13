@@ -25,9 +25,10 @@ The current STM32 path uses **CMSIS definitions directly**. It does not require 
 | I2C | 7-bit controller, 100/400 kHz, probe/read/write/repeated-START |
 | Timer/PWM | periodic timer IRQ path plus PWM frequency/duty control |
 | DMA/cache | generic DMA API, STM32H755 DMA1/DMAMUX1, explicit CM7 D-cache coherency |
-| Board API | LEDs, B1, ST-LINK VCP, Arduino UART/I2C/SPI/PWM and D3/D4 resources |
+| Ethernet | CM7 polling Layer-2 MAC/DMA/RMII backend with LAN8742A PHY and raw frame TX/RX; CM4 runtime ownership intentionally unsupported |
+| Board API | LEDs, B1, ST-LINK VCP, Arduino UART/I2C/SPI/PWM, D3/D4 and RJ45 Ethernet resources |
 | Packaging | static `libdas.a`, install/export, relocatable `find_package(DAS CONFIG REQUIRED)` package |
-| Qualification | packaged dual-core OpenOCD/GDB hardware campaign, **38/38 PASS** |
+| Qualification | completed pre-Ethernet dual-core campaign **38/38 PASS**; Ethernet Layer-2 focused qualifier PASS and promoted as campaign case 39 |
 
 DAS is still early development. The project version is currently `0.1.0`.
 
@@ -143,4 +144,17 @@ or provide a strong `g_das_vector_table` definition, which overrides the weak DA
 
 ## Hardware qualification
 
-The standing STM32H755 regression is **38/38 PASS** at commit `fd9246abf76278556962724684b308264d37049f`, qualified after the centralized vector-table refactor. It covers linker/layout checks and physical execution of startup, clock/time, GPIO/EXTI, board resources/button, UART, SPI, I2C, DMA/cache and timer/PWM on both cores where applicable.
+The completed pre-Ethernet STM32H755 regression baseline is **38/38 PASS**. It covers linker/layout checks and physical execution of startup, clock/time, GPIO/EXTI, board resources/button, UART, SPI, I2C, DMA/cache and timer/PWM on both cores where applicable.
+
+The CM7 Ethernet Layer-2 focused qualifier has also passed physically and is promoted into the standing campaign as acceptance point 39. The full campaign now requires JP6 and JP7 fitted plus a direct Ethernet cable from board RJ45 CN14 to a Linux host Ethernet port. Supply that host interface explicitly:
+
+```bash
+./scripts/stm32h755_test_campaign.sh \
+  /path/to/STM32CubeH7 \
+  --eth-iface enp0s31f6 \
+  --clean
+```
+
+No IP address is required for the Ethernet case; qualification uses raw Layer-2 frames. The enlarged campaign must complete successfully before replacing the historical 38/38 result with a 39/39 full-campaign baseline.
+
+See [Hardware qualification](docs/testing.md) and [Ethernet](docs/ethernet.md).

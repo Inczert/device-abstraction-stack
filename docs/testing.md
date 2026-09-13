@@ -16,7 +16,7 @@ Debugger-driven CM4 execution proves the CM4 image and supported device paths on
 
 ## Qualified baseline
 
-The current standing regression baseline is **39/39 PASS**:
+The latest completed standing regression baseline is **39/39 PASS**:
 
 ```text
 DAS commit:       f6b65672d9ae69cf28cd574d0dbba01cf875d8dc
@@ -29,6 +29,8 @@ Evidence archive: das-stm32h755-campaign-20260913T152845Z.tar.gz
 ```
 
 The campaign includes the CM7 Ethernet Layer-2 case in addition to the previously qualified dual-core linker/startup/clock/time/GPIO/UART/SPI/I2C/DMA/timer paths.
+
+That recorded run predates the explicit Ethernet cable unplug/replug phase now implemented on `develop`. The connected raw-TX/RX baseline remains qualified; the extended Ethernet case requires one physical rerun before link-loss/recovery itself is added to the qualified claim.
 
 ## Testing model
 
@@ -103,7 +105,8 @@ JP6 fitted
 JP7 fitted
 board RJ45 CN14  <->  host PC Ethernet port
 host interface defaults to enp0s31f6
-leave the Ethernet cable connected for the entire campaign
+keep the cable connected initially; the Ethernet qualifier later prompts for one
+unplug/replug cycle and automatically verifies both transitions
 ```
 
 The Ethernet case uses raw Layer-2 frames. It does not require IPv4/IPv6 configuration, DHCP or a network stack.
@@ -227,7 +230,20 @@ JP6 fitted
 JP7 fitted
 ```
 
-The accepted campaign run recorded:
+The current Ethernet qualifier performs this sequence on one firmware boot and one DAS Ethernet initialization:
+
+```text
+initial carrier/link up
+        -> operator unplugs cable
+host carrier down + STM32 link down
+        -> operator reconnects cable
+host carrier up + STM32 negotiated link recovery
+        -> raw TX/RX integrity traffic after recovery
+```
+
+The script waits up to 60 seconds for each physical transition by default. Linux carrier state proves the wire transition, while batch GDB verifies the running STM32 reports down and later negotiated up state. The firmware is resumed after each observation; Ethernet is not reinitialized between unplug and recovery.
+
+The accepted 2026-09-13 campaign run, before this extension, recorded:
 
 ```text
 host interface:                  enp0s31f6
@@ -244,7 +260,7 @@ DAS final result:                DAS_OK
 
 STM32-to-host qualification uses broadcast EtherType `0x88B5` frames from MAC `02:00:00:00:00:01` with payload `DAS ETH L2 test`. Host-to-STM32 qualification uses EtherType `0x88B6`, monotonic sequence numbers and deterministic payload data validated by firmware.
 
-The GDB evidence for the accepted run reported:
+The GDB evidence for the accepted connected run reported:
 
 ```text
 ETH_LINK up=1 speed_mbps=100 duplex=2
@@ -254,9 +270,9 @@ ETH_RESULT last_result=0
 RESULT: PASS
 ```
 
-This qualifies RMII routing, LAN8742A/MDIO link management, MAC configuration, TX/RX descriptor recycling, raw frame transfer and CM7 D-cache coherency for the polling Layer-2 baseline. It does **not** qualify lwIP, ARP, IP, UDP/TCP, Ethernet IRQ-driven operation or shared CM7/CM4 Ethernet ownership.
+This qualifies RMII routing, LAN8742A/MDIO link management, MAC configuration, TX/RX descriptor recycling, raw frame transfer and CM7 D-cache coherency for the polling Layer-2 connected baseline. The newly added link-loss/recovery phase must pass once on hardware before adding that behavior to the qualified claim.
 
-An explicit cable-disconnected/down-link transition is not part of the recorded 39-case campaign and remains a narrower follow-up validation item.
+The Ethernet case still counts as one acceptance point, so the standing campaign remains a 39-case campaign rather than inflating the case count every time one peripheral gains a stronger internal check.
 
 ## 39-case acceptance summary
 
@@ -304,7 +320,7 @@ CM7 Ethernet Layer-2               PASS
 
 ## Evidence bundle
 
-The campaign archive contains summary/metadata, build logs, OpenOCD logs, per-case GDB evidence, ELF/map files, symbol/size dumps, linker scripts and nested Ethernet build/traffic/debug evidence.
+The campaign archive contains summary/metadata, build logs, OpenOCD logs, per-case GDB evidence, ELF/map files, symbol/size dumps, linker scripts and nested Ethernet build/traffic/debug evidence. Current Ethernet evidence additionally includes initial/down/recovered link-state GDB logs when the extended qualifier runs.
 
 The accepted archive is:
 
@@ -328,6 +344,8 @@ The normal campaign never performs an implicit mass erase.
 
 ## Qualification boundary
 
-The 39/39 baseline supports claims for the current linker/startup/vector model, clock/power, monotonic time, semantic board resources, GPIO/IRQ, polling UART, SPI, I2C, generic DMA/cache coherency, periodic timer/PWM on both cores where applicable, and CM7 polling Layer-2 Ethernet MAC/DMA/RMII/LAN8742A operation.
+The recorded 39/39 baseline supports claims for the current linker/startup/vector model, clock/power, monotonic time, semantic board resources, GPIO/IRQ, polling UART, SPI, I2C, generic DMA/cache coherency, periodic timer/PWM on both cores where applicable, and connected CM7 polling Layer-2 Ethernet MAC/DMA/RMII/LAN8742A operation.
 
-It does not imply production dual-core lifecycle/HSEM/shared-memory coordination, Ethernet IRQ operation, IP networking, timer input capture, ADC, watchdog or internal-flash/reset-cause services.
+The current `develop` qualifier additionally implements cable link-loss/recovery checking, pending one physical rerun.
+
+The baseline does not imply production dual-core lifecycle/HSEM/shared-memory coordination, Ethernet IRQ operation, IP networking, timer input capture, ADC, watchdog or internal-flash/reset-cause services.

@@ -1,6 +1,6 @@
 # Hardware qualification
 
-DAS treats physical target testing as part of backend qualification. The STM32H755 campaign combines static linker/image checks with real execution on both Cortex-M cores and packages the evidence into one timestamped archive.
+DAS treats physical target testing as part of backend qualification. The STM32H755 campaign combines static image/linker checks with execution on the real NUCLEO-H755ZI-Q and packages evidence into timestamped archives.
 
 Current target:
 
@@ -12,11 +12,11 @@ CPU2:     Cortex-M4
 Debug:    ST-LINK direct DAP + OpenOCD + GDB
 ```
 
-Debugger-driven CM4 execution proves the CM4 image and supported device paths on the real CPU2. It does not yet prove production CM7-to-CM4 boot/release, HSEM or shared-memory ownership policy.
+Debugger-driven CM4 execution proves the CM4 image and supported device paths on real CPU2 silicon. It does not yet prove the production CM7-to-CM4 boot/release, HSEM or shared-memory ownership model tracked separately.
 
-## Qualified baseline
+## Standing regression baseline
 
-The current standing regression baseline is **39/39 PASS**:
+The latest completed full campaign is **39/39 PASS**:
 
 ```text
 DAS commit:       f6b65672d9ae69cf28cd574d0dbba01cf875d8dc
@@ -28,16 +28,18 @@ Exit code:        0
 Evidence archive: das-stm32h755-campaign-20260913T152845Z.tar.gz
 ```
 
-The campaign includes the CM7 Ethernet Layer-2 case in addition to the previously qualified dual-core linker/startup/clock/time/GPIO/UART/SPI/I2C/DMA/timer paths.
+That campaign covers linker/layout, startup/vector ownership, time, clock/power, semantic board resources, GPIO/EXTI/IRQ, UART, SPI, I2C, generic DMA/cache, timer/PWM and CM7 Layer-2 Ethernet.
+
+After that full campaign, the Ethernet acceptance path was strengthened with an explicit cable unplug/replug phase. The focused Ethernet qualifier was physically rerun successfully on 2026-09-13 with recovery-test implementation commit `9a8b628dcea8ad724282103659a721066efcd9dd`. Link-loss/recovery is therefore also qualified; it remains part of Ethernet acceptance point 39 rather than creating a 40th case.
 
 ## Testing model
 
-Peripheral development uses two levels of physical testing:
+Peripheral development uses two physical-test levels:
 
-1. a focused qualifier while a peripheral is being implemented or debugged;
-2. after that focused test passes, the same acceptance path is promoted into the main campaign as standing regression coverage.
+1. focused qualifier during implementation/debugging;
+2. promotion of the same acceptance path into the full campaign once the focused path passes.
 
-Focused scripts remain useful for iteration:
+Focused scripts include:
 
 ```bash
 ./scripts/stm32h755_uart_test.sh  /path/to/STM32CubeH7
@@ -48,9 +50,7 @@ Focused scripts remain useful for iteration:
 ./scripts/stm32h755_eth_test.sh   /path/to/STM32CubeH7
 ```
 
-The Ethernet scripts default to Linux host interface `enp0s31f6`. Override it with `--iface` for the focused qualifier, `--eth-iface` for the full campaign, or `DAS_ETH_IFACE` for either.
-
-The full campaign should be rerun whenever shared startup, clock, GPIO, RCC, IRQ, timebase, DMA/cache, board-resource or device-backend changes could affect previously qualified behavior.
+Ethernet defaults to Linux interface `enp0s31f6`. Use `--iface` for the focused qualifier, `--eth-iface` for the full campaign, or `DAS_ETH_IFACE` for either when the host interface differs.
 
 ## Running the full campaign
 
@@ -60,19 +60,17 @@ The full campaign should be rerun whenever shared startup, clock, GPIO, RCC, IRQ
   --clean
 ```
 
-Use `--eth-iface <linux-interface>` only when the host Ethernet interface differs from the default `enp0s31f6`.
-
-Every run produces a timestamped evidence directory and archive under:
+Evidence directories and archives are stored under:
 
 ```text
 build/stm32h755/campaign/
 ```
 
-The archive is also produced after a logged failure.
+An archive is also produced after a logged failure.
 
 ## Initial hardware setup
 
-Install the persistent fixtures before starting the campaign:
+Install the persistent fixtures before starting:
 
 ```text
 NUCLEO-H755ZI-Q connected through ST-LINK USB
@@ -95,32 +93,32 @@ Arduino D14 / PB9 / I2C_A_SDA  <->  Zio D68 / PF15 / I2C_B_SDA
 
 D3 / PE13: disconnected initially
 D4 / PE14: disconnected initially
-jumper E: keep ready for the later D4 <-> D3 transition
+jumper E: keep ready for later D4 <-> D3 transition
 B1 USER: released
 
 Ethernet:
 JP6 fitted
 JP7 fitted
-board RJ45 CN14  <->  host PC Ethernet port
+board RJ45 CN14 <-> host PC Ethernet port
 host interface defaults to enp0s31f6
-leave the Ethernet cable connected for the entire campaign
+keep the cable connected initially; the Ethernet qualifier will prompt for one unplug/replug cycle
 ```
 
-The Ethernet case uses raw Layer-2 frames. It does not require IPv4/IPv6 configuration, DHCP or a network stack.
+The Ethernet case uses raw Layer-2 frames and needs no IPv4/IPv6 address, DHCP or other network stack.
 
-Leave SPI D13/SCK/PA5 and D10/CS/PD14 otherwise unconnected. Never connect the loopback signal pins to 3V3, 5V or GND.
+Leave SPI D13/SCK/PA5 and D10/CS/PD14 otherwise unconnected. Never connect loopback signal pins to 3V3, 5V or GND.
 
-After the D3-free pull tests, the campaign asks once for the final fixture transition:
+After the D3-free pull tests, the campaign asks once for:
 
 ```text
-CN10 D4 / PE14  <->  CN10 D3 / PE13
+CN10 D4 / PE14 <-> CN10 D3 / PE13
 ```
 
-That jumper then remains connected for GPIO loopback/open-drain/EXTI and timer/PWM qualification on both cores.
+That jumper remains connected for GPIO loopback/open-drain/EXTI and timer/PWM tests on both cores.
 
-## Host/static acceptance points
+## Acceptance scope
 
-The first three cases do not require the board:
+### Static/linker
 
 ```text
 STM32H755 CM7 memory layout
@@ -128,135 +126,117 @@ STM32H755 CM4 memory layout
 Custom linker override
 ```
 
-Default layout expectations are:
+Expected defaults:
 
 ```text
 CM7 vector      0x08000000
 CM7 runtime RAM AXI SRAM, stack top 0x24080000
-
 CM4 vector      0x08100000
 CM4 runtime RAM D2 SRAM1, stack top 0x30020000
-
 custom CM7      vector at 0x08020000
 ```
 
-## Physical qualification scope
-
 ### Core/startup and time
 
-OpenOCD exposes:
-
-```text
-:3333 -> CM7 / CPU1, CPUID part 0xC27
-:3334 -> CM4 / CPU2, CPUID part 0xC24
-```
-
-Both cores qualify their image/startup path and monotonic-time behavior. Time qualification covers missing-source handling, application-source injection, wrap-safe interval/deadline logic, SysTick initialization from the live core clock and a DWT-measured 100 ms delay within 5%.
+OpenOCD exposes CM7 on GDB port 3333 and CM4 on 3334. Both cores qualify their image/startup path and monotonic-time behavior. Time checks include source injection, wrap-safe helpers, SysTick setup from the live clock and measured delay behavior.
 
 ### Clock/power
 
-CM7 qualifies the stock-board 64/200/300/400 MHz profiles, rejection of 480 MHz, direct-SMPS/VOS readiness and final live-clock readback at 400 MHz CM7, 200 MHz HCLK/CM4 and 100 MHz APB1..4.
+CM7 qualifies the supported 64/200/300/400 MHz board profiles, rejection of unsupported 480 MHz, regulator/voltage readiness and final live clock-tree readback.
 
 ### Board button and GPIO/IRQ
 
-B1 USER qualifies polling plus press/release EXTI through the semantic board API. CM7 and CM4 qualify GPIO pull-up/down, physical D4-to-D3 low/high loopback, open-drain behavior and rising/falling EXTI. The EXTI path also checks generic `das_irq_t` enable, priority and pending behavior.
+B1 USER qualifies polling plus EXTI. CM7 and CM4 qualify pull-up/down, physical D4-to-D3 low/high loopback, open-drain behavior and rising/falling EXTI, including generic IRQ enable/priority/pending behavior.
 
-The CM7 visual LED checks remain:
-
-```text
-all LEDs off
-green only
-yellow only
-red only
-all three blinking
-```
+CM7 additionally performs the manual visual LED sequence: all off, green only, yellow only, red only, then all blinking.
 
 ### UART
 
 Fixture:
 
 ```text
-Arduino D1 / TX / PB6  <->  Arduino D0 / RX / PB7
+D1 / PB6 TX <-> D0 / PB7 RX
 ```
 
-Both cores qualify finite receive timeout, semantic route setup, live baud generation, 115200 8N1, 57600 8E2, 38400 7O1 and exact equality across 34 deterministic bytes.
+Both cores qualify finite timeout, semantic routing, live baud generation, 115200 8N1, 57600 8E2, 38400 7O1 and exact deterministic loopback data.
 
 ### SPI
 
 Fixture:
 
 ```text
-Arduino D11 / MOSI / PB5  <->  Arduino D12 / MISO / PA6
+D11 / PB5 MOSI <-> D12 / PA6 MISO
 ```
 
-Both cores qualify modes 0..3, MSB/LSB first, 1/2/4/8 MHz requested SCK, lengths 1/7/31/64, receive-only fill, transmit-only discard, explicit active-low chip select and 111 deterministic looped-back bytes.
+Both cores qualify modes 0..3, both bit orders, multiple requested SCK rates and deterministic polling loopback data.
 
 ### DMA/cache
 
-The DMA case reuses the SPI fixture. Both cores qualify generic DMA allocation/configuration/release, IRQ resolution, 256-byte memory-to-memory integrity, completion/error state and a 192-byte full-duplex SPI1 DMA transfer at 4 MHz.
+The DMA case reuses the SPI fixture. Both cores qualify generic DMA allocation/configuration/release, IRQ resolution, memory-to-memory integrity and a full-duplex SPI DMA transfer. CM7 additionally qualifies the explicit D-cache maintenance contract; CM4 qualifies the same public API with expected no-D-cache behavior.
 
-CM7 additionally qualifies D-cache availability/enabled state, 32-byte line size and explicit clean/invalidate ownership. CM4 qualifies the same public maintenance API with expected no-D-cache behavior.
-
-The generic `das_dma_t` backend uses DMA1/DMAMUX1. Ethernet uses the Ethernet peripheral's own descriptor-based DMA engine; it is not routed through `das_dma_t`.
+Generic `das_dma_t` uses DMA1/DMAMUX1. Ethernet uses the Ethernet peripheral's independent descriptor-based DMA engine.
 
 ### I2C
-
-The test uses I2C1 as the DAS controller and I2C4 as a test-only target:
-
-```text
-D15 / PB8 / I2C1_SCL  <->  D69 / PF14 / I2C4_SCL
-D14 / PB9 / I2C1_SDA  <->  D68 / PF15 / I2C4_SDA
-                                  target 0x52
-```
-
-Each core qualifies 100/400 kHz timing, expected probe/NACK behavior, physical write/read, repeated-START write/read, 70 deterministic bytes and zero target-side bus/arbitration/overrun errors.
-
-### Timer/PWM
-
-With D4 connected to D3, both cores qualify a 1 kHz periodic timer, start/stop/counter behavior, TIM2 update IRQ delivery, 100 measured intervals within 5%, and a 1 kHz PWM output observed physically at 25/50/75% duty.
-
-### Ethernet Layer 2
-
-The current Ethernet ownership model is CM7-only. The full campaign ends the long-lived dual-core OpenOCD session and invokes the self-contained Ethernet qualifier.
 
 Fixture:
 
 ```text
-NUCLEO-H755ZI-Q CN14 RJ45  <->  host PC Ethernet port
+D15 / PB8 / I2C1_SCL <-> D69 / PF14 / I2C4_SCL
+D14 / PB9 / I2C1_SDA <-> D68 / PF15 / I2C4_SDA
+                                target 0x52
+```
+
+Each core qualifies 100/400 kHz timing, probe/NACK behavior, physical write/read, repeated-START operation and deterministic payload integrity.
+
+### Timer/PWM
+
+With D4 connected to D3, both cores qualify a 1 kHz periodic timer, start/stop/counter behavior, TIM2 update delivery and physical 1 kHz PWM at 25/50/75% duty.
+
+### Ethernet Layer 2
+
+Ethernet runtime ownership is CM7-only. The full campaign ends its long-lived dual-core OpenOCD session and invokes the standalone Ethernet qualifier.
+
+Fixture:
+
+```text
+NUCLEO-H755ZI-Q CN14 RJ45 <-> host PC Ethernet port
 JP6 fitted
 JP7 fitted
 ```
 
-The accepted campaign run recorded:
+The qualified sequence is:
 
 ```text
-host interface:                  enp0s31f6
-host carrier:                    PASS
-PHY link:                        100 Mbps / full duplex
-STM32 -> host validation:        5/5 frames
-TX interval:                     0.995806 .. 0.995980 s
-host -> STM32 injection:         64 frames
-firmware RX integrity count:     64
-firmware RX integrity errors:    0
-last test sequence:              64
-DAS final result:                DAS_OK
+initial carrier + STM32 link up
+        -> unplug cable
+host carrier down + STM32 link down
+        -> reconnect cable
+host carrier up + STM32 negotiated recovery
+        -> post-recovery raw TX/RX integrity traffic
 ```
 
-STM32-to-host qualification uses broadcast EtherType `0x88B5` frames from MAC `02:00:00:00:00:01` with payload `DAS ETH L2 test`. Host-to-STM32 qualification uses EtherType `0x88B6`, monotonic sequence numbers and deterministic payload data validated by firmware.
-
-The GDB evidence for the accepted run reported:
+The 2026-09-13 recovery run proved:
 
 ```text
-ETH_LINK up=1 speed_mbps=100 duplex=2
-ETH_TX count=8
-ETH_RX count=66 bytes=4229 test_count=64 test_errors=0 last_sequence=64
-ETH_RESULT last_result=0
-RESULT: PASS
+initial STM32 link:              up, 100 Mbps, full duplex
+host carrier after unplug:      down
+STM32 after unplug:             up=0, speed=0, duplex=UNKNOWN, DAS_OK
+host carrier after replug:      up
+STM32 after replug:             up=1, 100 Mbps, full duplex, DAS_OK
+Ethernet reinitialization:      none
+STM32 -> host after recovery:   5/5 valid frames
+host -> STM32 after recovery:   64/64 integrity frames
+RX integrity errors:            0
+last sequence:                  64
+final TX count:                 17
+final RX count / bytes:         79 / 6354
+final DAS result:               DAS_OK
+final GDB result:               PASS
 ```
 
-This qualifies RMII routing, LAN8742A/MDIO link management, MAC configuration, TX/RX descriptor recycling, raw frame transfer and CM7 D-cache coherency for the polling Layer-2 baseline. It does **not** qualify lwIP, ARP, IP, UDP/TCP, Ethernet IRQ-driven operation or shared CM7/CM4 Ethernet ownership.
+STM32-to-host uses broadcast EtherType `0x88B5` frames from MAC `02:00:00:00:00:01`. Host-to-STM32 qualification uses EtherType `0x88B6`, sequence numbers and deterministic payload data validated by firmware.
 
-An explicit cable-disconnected/down-link transition is not part of the recorded 39-case campaign and remains a narrower follow-up validation item.
+This qualifies RMII routing, LAN8742A/MDIO link management, MAC configuration, link-loss reporting, renegotiated recovery without Ethernet reinitialization, TX/RX descriptor recycling, post-recovery raw frame transfer and CM7 D-cache coherency.
 
 ## 39-case acceptance summary
 
@@ -302,19 +282,19 @@ CM4 timer/PWM                      PASS
 CM7 Ethernet Layer-2               PASS
 ```
 
+The Ethernet acceptance point now includes the qualified unplug/replug/recovery checks internally; the campaign count remains 39.
+
 ## Evidence bundle
 
-The campaign archive contains summary/metadata, build logs, OpenOCD logs, per-case GDB evidence, ELF/map files, symbol/size dumps, linker scripts and nested Ethernet build/traffic/debug evidence.
+Campaign archives contain summary/metadata, build logs, OpenOCD logs, per-case GDB evidence, ELF/map files, symbol/size dumps, linker scripts and nested Ethernet evidence. The current Ethernet qualifier additionally records initial/down/recovered link-state GDB logs plus host traffic and final state logs.
 
-The accepted archive is:
+The accepted full-campaign archive remains:
 
 ```text
 das-stm32h755-campaign-20260913T152845Z.tar.gz
 ```
 
-The OpenOCD dual-core log contains repeated `Failed to read memory` diagnostics while OpenOCD probes STM32H7 flash/system regions during debugger connections. They did not correspond to failed acceptance cases: all 39 GDB/static cases passed, both core images executed, and the campaign exited 0. Treat these diagnostics as tooling noise unless they are accompanied by an acceptance failure or target bring-up failure.
-
-The Ethernet flash log also reports OpenOCD adapter-speed fallback and an aligned extra erase range; programming and verification completed successfully.
+The OpenOCD log in that archive contains repeated `Failed to read memory` diagnostics while probing STM32H7 flash/system regions. They were tooling noise in that run: all 39 acceptance cases passed, both core images executed and the campaign exited 0.
 
 ## Recovery
 
@@ -328,6 +308,6 @@ The normal campaign never performs an implicit mass erase.
 
 ## Qualification boundary
 
-The 39/39 baseline supports claims for the current linker/startup/vector model, clock/power, monotonic time, semantic board resources, GPIO/IRQ, polling UART, SPI, I2C, generic DMA/cache coherency, periodic timer/PWM on both cores where applicable, and CM7 polling Layer-2 Ethernet MAC/DMA/RMII/LAN8742A operation.
+The qualified baseline covers the current linker/startup/vector model, clock/power, monotonic time, semantic board resources, GPIO/IRQ, polling UART, SPI, I2C, generic DMA/cache coherency, periodic timer/PWM on both cores where applicable, and CM7 polling Layer-2 Ethernet including link loss/recovery and post-recovery traffic.
 
-It does not imply production dual-core lifecycle/HSEM/shared-memory coordination, Ethernet IRQ operation, IP networking, timer input capture, ADC, watchdog or internal-flash/reset-cause services.
+It does not imply production dual-core lifecycle/HSEM/shared-memory coordination, Ethernet IRQ-driven operation, IP networking, timer input capture, ADC, watchdog or internal-flash/reset-cause services.

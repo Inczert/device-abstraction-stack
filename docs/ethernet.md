@@ -144,21 +144,26 @@ Override with `--iface <linux-interface>` or `DAS_ETH_IFACE=<linux-interface>` w
 
 No IP address, DHCP or higher network stack is required. The host uses Linux raw Layer-2 sockets.
 
-The qualifier checks:
+The qualifier now checks the complete connected/disconnected/recovered path:
 
-- physical carrier;
-- PHY link state, speed and duplex;
-- five valid STM32-to-host EtherType `0x88B5` frames;
-- 64 host-to-STM32 EtherType `0x88B6` integrity frames;
+- initial physical carrier and STM32-reported PHY link state;
+- operator cable unplug, host carrier loss and STM32-reported link-down (`up == false`, zero speed, unknown duplex);
+- operator cable replug, carrier recovery and STM32-reported negotiated link-up **without reinitializing the Ethernet instance**;
+- five valid STM32-to-host EtherType `0x88B5` frames after recovery;
+- 64 host-to-STM32 EtherType `0x88B6` integrity frames after recovery;
 - monotonic RX sequence tracking and deterministic payload validation;
 - zero firmware integrity errors;
 - repeated TX/RX descriptor recycling;
 - CM7 D-cache coherency;
 - installed-package consumption through `examples/eth_raw`.
 
+The script waits up to 60 seconds for each physical unplug/replug transition by default. Set `DAS_ETH_LINK_TRANSITION_TIMEOUT=<seconds>` to override that operator timeout.
+
+The link transition is checked from both sides: Linux `/sys/class/net/<iface>/carrier` proves the physical carrier transition, while batch GDB reads the continuously updated DAS example state to prove the STM32 observed down and later recovered negotiated link state. GDB halts/resumes the already-running image for observation; it does not reset or reinitialize Ethernet between the two states.
+
 ## Qualified result
 
-Ethernet is part of the standing **39/39 PASS** STM32H755 campaign at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc`, run on 2026-09-13.
+The latest completed standing campaign is **39/39 PASS** at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc`, run on 2026-09-13.
 
 The recorded Ethernet evidence was:
 
@@ -178,13 +183,13 @@ RESULT: PASS
 
 The firmware had transmitted eight frames by the debugger snapshot and had received 66 total Ethernet frames / 4229 bytes, of which all 64 dedicated integrity frames were accepted without error.
 
-The full campaign uses the same focused qualifier as acceptance point 39 and archives its build/flash, host-traffic, OpenOCD, GDB and ELF/symbol evidence.
+That recorded run predates the newly added explicit cable unplug/replug phase. It remains the qualified connected raw-TX/RX baseline. The extended qualifier must pass once on hardware before link-loss/recovery itself is added to the qualified claim.
 
-An explicit cable-disconnected/down-link transition was not exercised in the recorded campaign. That remains a narrower follow-up validation item and does not change the qualified connected raw-TX/RX baseline.
+The full campaign invokes the same focused qualifier as acceptance point 39 and archives its build/flash, host-traffic, link-transition GDB, final GDB and ELF/symbol evidence. Adding the link transition strengthens the Ethernet case; it does not create a 40th campaign acceptance point.
 
 ## Current boundary
 
-Qualified:
+Qualified from the recorded 2026-09-13 campaign:
 
 - STM32H755 ETH MAC and dedicated DMA;
 - RMII routing;
@@ -194,6 +199,12 @@ Qualified:
 - repeated descriptor recycling;
 - CM7 D-cache coherency;
 - installed-package consumer integration.
+
+Implemented in the qualifier and pending one physical rerun:
+
+- cable disconnect -> host carrier down -> STM32 link-down;
+- cable reconnect -> negotiated STM32 link recovery without Ethernet reinitialization;
+- successful raw TX/RX after that recovery.
 
 Not part of this baseline:
 

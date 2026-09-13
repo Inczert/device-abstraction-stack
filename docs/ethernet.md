@@ -133,13 +133,13 @@ The expected source is `02:00:00:00:00:01` and the destination is broadcast. The
 
 ## Automated physical qualification
 
-The focused qualifier is:
+The focused qualifier defaults to host interface `enp0s31f6`:
 
 ```bash
-./scripts/stm32h755_eth_test.sh \
-  /path/to/STM32CubeH7 \
-  --iface enp0s31f6
+./scripts/stm32h755_eth_test.sh /path/to/STM32CubeH7
 ```
+
+Override it only when necessary with `--iface <linux-interface>` or `DAS_ETH_IFACE=<linux-interface>`.
 
 Physical setup:
 
@@ -157,14 +157,15 @@ The focused qualifier passed on commit `beecbeadc36b06992cbb8d3f91add466bf7ee701
 
 ## Standing campaign
 
-Ethernet is now promoted into `scripts/stm32h755_test_campaign.sh` as the 39th acceptance point. The full campaign requires the Linux host interface explicitly:
+Ethernet is now promoted into `scripts/stm32h755_test_campaign.sh` as the 39th acceptance point. The campaign also defaults to host interface `enp0s31f6`:
 
 ```bash
 ./scripts/stm32h755_test_campaign.sh \
   /path/to/STM32CubeH7 \
-  --eth-iface enp0s31f6 \
   --clean
 ```
+
+Use `--eth-iface <linux-interface>` or `DAS_ETH_IFACE=<linux-interface>` only when the host interface differs from the default.
 
 The campaign setup instructs the operator to connect CN14 directly to the selected host Ethernet port and keep that cable connected for the whole run. After the existing dual-core timer/PWM cases, the campaign stops its long-lived OpenOCD session and launches the self-contained Ethernet qualifier. Its build/flash log, host traffic log, OpenOCD log, GDB evidence, metadata and raw-Ethernet ELF/symbol information are copied into the normal timestamped campaign archive.
 

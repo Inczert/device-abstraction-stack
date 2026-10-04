@@ -6,6 +6,8 @@
 
 /* Cortex-M System Control Block VTOR register, architecturally defined. */
 #define DAS_CORTEX_M_VTOR_ADDRESS UINT32_C(0xE000ED08)
+#define DAS_CORTEX_M_CPACR_ADDRESS UINT32_C(0xE000ED88)
+#define DAS_CORTEX_M_CP10_CP11_FULL_ACCESS (UINT32_C(0xF) << 20u)
 
 extern uint32_t __data_load__;
 extern uint32_t __data_start__;
@@ -35,6 +37,16 @@ static inline void cortex_m_nop(void) {
     __asm volatile("nop");
 }
 
+static void enable_fpu_if_used(void) {
+#if defined(__ARM_FP) && (__ARM_FP != 0)
+    volatile uint32_t* const cpacr =
+        (volatile uint32_t*)(uintptr_t)DAS_CORTEX_M_CPACR_ADDRESS;
+    *cpacr |= DAS_CORTEX_M_CP10_CP11_FULL_ACCESS;
+    cortex_m_dsb();
+    cortex_m_isb();
+#endif
+}
+
 static void initialize_c_runtime(void) {
     uint32_t* source = &__data_load__;
     uint32_t* destination = &__data_start__;
@@ -50,6 +62,7 @@ static void initialize_c_runtime(void) {
 }
 
 __attribute__((weak, noreturn)) void Reset_Handler(void) {
+    enable_fpu_if_used();
     initialize_c_runtime();
 
     *(volatile uint32_t*)(uintptr_t)DAS_CORTEX_M_VTOR_ADDRESS =

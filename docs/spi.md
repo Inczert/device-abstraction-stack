@@ -89,4 +89,4 @@ Polling qualification covers modes 0..3, both bit orders, 1/2/4/8 MHz requested 
 
 SPI-DMA qualification covers a 192-byte full-duplex physical transfer at 4 MHz on each core, with explicit CM7 cache maintenance.
 
-Both polling and DMA SPI paths are part of the standing **39/39 PASS** STM32H755 regression baseline at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc`.
+Both polling and DMA SPI paths are part of the standing **40/40 PASS** STM32H755 regression baseline at DAS commit `737863075dfed78f73f99ae58f6e0ca52ffea93e`.

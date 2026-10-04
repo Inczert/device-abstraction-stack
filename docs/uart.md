@@ -79,4 +79,4 @@ Arduino D1 / TX / PB6 <-> Arduino D0 / RX / PB7
 
 Both CM7 and CM4 verify timeout behavior, semantic route setup, live baud generation, all three advertised framing combinations, exact deterministic byte equality and continued execution.
 
-UART is part of the standing **39/39 PASS** STM32H755 regression baseline at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc`.
+UART is part of the standing **40/40 PASS** STM32H755 regression baseline at DAS commit `737863075dfed78f73f99ae58f6e0ca52ffea93e`.

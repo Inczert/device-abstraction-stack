@@ -128,7 +128,7 @@ Add a semantic resource when the board gives the signal a function, a normal rou
 
 ## Hardware qualification
 
-The current **39/39 PASS** campaign physically qualifies:
+The current **40/40 PASS** campaign physically qualifies:
 
 - LED behavior;
 - B1 polling and press/release EXTI;
@@ -139,7 +139,7 @@ The current **39/39 PASS** campaign physically qualifies:
 - D3/D4 GPIO loopback/open-drain/EXTI;
 - CN14 Ethernet physical carrier and CM7 bidirectional raw Layer-2 traffic through LAN8742A/RMII/MAC/DMA with D-cache enabled.
 
-The accepted campaign is DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc`, run on 2026-09-13.
+The accepted campaign is DAS commit `737863075dfed78f73f99ae58f6e0ca52ffea93e`, run on 2026-10-04.
 
 The stock solder-bridge/jumper assumptions documented here are the qualified board profile. Modified board routing requires an explicit board configuration rather than guesswork.
 

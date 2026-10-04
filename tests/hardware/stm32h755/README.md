@@ -18,7 +18,8 @@ Each hardware-test image provides:
 - the STM32H755 external-IRQ vector layout needed by the test;
 - test application logic and GDB evidence;
 - physical GPIO qualification behavior;
-- startup `.data`/`.bss` probes.
+- startup `.data`/`.bss` probes;
+- dedicated hard-float startup execution evidence on both cores.
 
 It consumes:
 
@@ -77,6 +78,7 @@ The complete campaign checks:
 - CM7 and CM4 OpenOCD/CPUID attachment before flashing;
 - ELF programming and `compare-sections` for both core images;
 - reusable Cortex-M reset/runtime initialization on both cores;
+- CP10/CP11 enablement plus real VFP arithmetic on both cores;
 - `.data` restoration and `.bss` clearing on both cores;
 - VTOR/vector placement on both cores;
 - GPIO clock/mode configuration from both cores;
@@ -86,9 +88,19 @@ The complete campaign checks:
 - rising/falling EXTI delivery through CPU1 and CPU2 views;
 - green/yellow/red LED states and synchronized blinking on CM7.
 
-A complete expanded run contains **24 acceptance points**.
+The repository-wide standing campaign now contains **40 acceptance points**; the hard-float qualifier contributes one combined CM7+CM4 acceptance point.
 
 The CM4 execution here is debugger-driven. It proves that CPU2 can run the current DAS startup/GPIO/EXTI code, but it does not yet prove production CM7-to-CM4 boot/release, HSEM or shared-memory coordination.
+
+## Hard-float focused qualifier
+
+No signal wiring is required beyond ST-LINK USB:
+
+```bash
+./scripts/stm32h755_fpu_test.sh /path/to/STM32CubeH7
+```
+
+The script builds CM7 and CM4 images, rejects an ELF that lacks real VFP single-precision arithmetic, then flashes and checks each physical core through GDB. It requires CP10/CP11 full access, exact result bits for 3.875, no NOCP evidence and a live post-calculation heartbeat.
 
 ## Wiring
 

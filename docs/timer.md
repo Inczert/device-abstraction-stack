@@ -71,4 +71,4 @@ Each core verifies a 1 kHz periodic timer, start/stop/counter behavior, TIM2 upd
 
 Timer input capture is intentionally outside the current baseline.
 
-Timer/PWM is part of the standing **39/39 PASS** STM32H755 regression baseline at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc`.
+Timer/PWM is part of the standing **40/40 PASS** STM32H755 regression baseline at DAS commit `737863075dfed78f73f99ae58f6e0ca52ffea93e`.

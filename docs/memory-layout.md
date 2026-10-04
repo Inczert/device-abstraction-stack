@@ -160,6 +160,6 @@ CM4 default layout      static + physical execution
 CM7 custom override     static linker-selection test
 ```
 
-The current full hardware baseline is **39/39 PASS** at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc` (2026-09-13). Physical CM4 execution proves the bank-2/D2-SRAM default image boots under debugger control and reconstructs the C runtime. CM7 Ethernet qualification additionally exercises Ethernet-DMA-visible storage under the default AXI-SRAM policy.
+The current full hardware baseline is **40/40 PASS** at DAS commit `737863075dfed78f73f99ae58f6e0ca52ffea93e` (2026-10-04). Physical CM4 execution proves the bank-2/D2-SRAM default image boots under debugger control and reconstructs the C runtime. CM7 Ethernet qualification additionally exercises Ethernet-DMA-visible storage under the default AXI-SRAM policy.
 
 This still does not qualify production CM7-to-CM4 release sequencing, HSEM or shared-memory ownership; those are system-lifecycle concerns rather than linker behavior.

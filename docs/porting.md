@@ -196,4 +196,4 @@ Recommended order:
 7. update API/integration documentation;
 8. replicate the backend on other devices.
 
-The current NUCLEO-H755ZI-Q reference campaign is **39/39 PASS** at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc`; it is an example of the evidence standard, not a promise that future ports inherit qualification by resemblance.
+The current NUCLEO-H755ZI-Q reference campaign is **40/40 PASS** at DAS commit `737863075dfed78f73f99ae58f6e0ca52ffea93e`; it is an example of the evidence standard, not a promise that future ports inherit qualification by resemblance.

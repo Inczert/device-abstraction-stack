@@ -129,4 +129,4 @@ Each core qualifies:
 - physical MOSI-to-MISO equality;
 - cache behavior appropriate to that core.
 
-The standing **39/39 PASS** STM32H755 campaign at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc` includes both generic DMA/cache cases and the separate CM7 Ethernet DMA/cache data path.
+The standing **40/40 PASS** STM32H755 campaign at DAS commit `737863075dfed78f73f99ae58f6e0ca52ffea93e` includes both generic DMA/cache cases and the separate CM7 Ethernet DMA/cache data path.

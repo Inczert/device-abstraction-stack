@@ -104,6 +104,6 @@ The STM32H755 vector implementation follows the CMSIS/ST device IRQ layout inter
 
 ## Qualification
 
-The current STM32H755 campaign is **39/39 PASS** at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc` (2026-09-13).
+The current STM32H755 campaign is **40/40 PASS** at DAS commit `737863075dfed78f73f99ae58f6e0ca52ffea93e` (2026-10-04).
 
 It exercises the canonical vector model on real CM7 and CM4 hardware through GPIO/EXTI, B1 button interrupts and TIM2 delivery, plus generic DMA IRQ resolution. CI additionally enforces one DAS vector table per regular hardware-test ELF, validates whole-table replacement separately, and verifies the HardRT strong `HardFault_Handler`, `PendSV_Handler` and `SysTick_Handler` coexist with the DAS-owned table.

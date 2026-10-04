@@ -229,4 +229,4 @@ Ethernet is currently a CM7-only runtime resource.
 
 ## Qualified baseline
 
-The standing hardware campaign is **39/39 PASS** at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc`, qualified on 2026-09-13. See [Hardware qualification](testing.md).
+The standing hardware campaign is **40/40 PASS** at DAS commit `737863075dfed78f73f99ae58f6e0ca52ffea93e`, qualified on 2026-10-04. See [Hardware qualification](testing.md).

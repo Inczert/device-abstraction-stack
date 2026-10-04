@@ -251,6 +251,6 @@ Ethernet is explicitly CM7-owned in the current baseline.
 
 ## Qualification
 
-The standing STM32H755 campaign is **39/39 PASS** at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc`, qualified on 2026-09-13 against STM32CubeH7 `f5c0b7a2b1f6eb26fde150f72edb2d7deb647066`.
+The standing STM32H755 campaign is **40/40 PASS** at DAS commit `737863075dfed78f73f99ae58f6e0ca52ffea93e`, qualified on 2026-10-04 against STM32CubeH7 `f5c0b7a2b1f6eb26fde150f72edb2d7deb647066`.
 
-It includes static linker checks and physical qualification of startup/vector ownership, clock/power, time, board resources/button, GPIO/EXTI/IRQ, UART, SPI, I2C, generic DMA/cache and timer/PWM on both cores where applicable, plus CM7 polling Layer-2 Ethernet MAC/DMA/RMII/LAN8742A raw TX/RX.
+It includes static linker checks and physical qualification of startup/vector ownership, hard-float CP10/CP11 enablement plus real VFP execution on both cores, clock/power, time, board resources/button, GPIO/EXTI/IRQ, UART, SPI, I2C, generic DMA/cache and timer/PWM on both cores where applicable, plus CM7 polling Layer-2 Ethernet MAC/DMA/RMII/LAN8742A raw TX/RX.

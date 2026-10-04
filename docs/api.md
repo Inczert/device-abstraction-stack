@@ -209,4 +209,4 @@ DAS abstracts functionality when it provides a stable application contract or hi
 
 ## Qualification
 
-The standing NUCLEO-H755ZI-Q hardware regression is **39/39 PASS** at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc` (2026-09-13), including the CM7 polling Layer-2 Ethernet path.
+The standing NUCLEO-H755ZI-Q hardware regression is **40/40 PASS** at DAS commit `737863075dfed78f73f99ae58f6e0ca52ffea93e` (2026-10-04), including CM7/CM4 hard-float startup qualification and the CM7 polling Layer-2 Ethernet path.

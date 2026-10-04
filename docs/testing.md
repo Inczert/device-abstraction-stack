@@ -30,6 +30,8 @@ Evidence archive: das-stm32h755-campaign-20260913T152845Z.tar.gz
 
 That campaign covers linker/layout, startup/vector ownership, time, clock/power, semantic board resources, GPIO/EXTI/IRQ, UART, SPI, I2C, generic DMA/cache, timer/PWM and CM7 Layer-2 Ethernet.
 
+The current campaign definition adds a dedicated CM7+CM4 hard-float startup qualification and therefore contains **40 acceptance points**. The historical 39/39 archive above remains the latest completed full-campaign baseline until the expanded campaign is physically rerun.
+
 After that full campaign, the Ethernet acceptance path was strengthened with an explicit cable unplug/replug phase. The focused Ethernet qualifier was physically rerun successfully on 2026-09-13 with recovery-test implementation commit `9a8b628dcea8ad724282103659a721066efcd9dd`. Link-loss/recovery is therefore also qualified; it remains part of Ethernet acceptance point 39 rather than creating a 40th case.
 
 ## Testing model
@@ -47,6 +49,7 @@ Focused scripts include:
 ./scripts/stm32h755_spi_test.sh   /path/to/STM32CubeH7
 ./scripts/stm32h755_i2c_test.sh   /path/to/STM32CubeH7
 ./scripts/stm32h755_dma_test.sh   /path/to/STM32CubeH7
+./scripts/stm32h755_fpu_test.sh   /path/to/STM32CubeH7
 ./scripts/stm32h755_eth_test.sh   /path/to/STM32CubeH7
 ```
 
@@ -136,9 +139,15 @@ CM4 runtime RAM D2 SRAM1, stack top 0x30020000
 custom CM7      vector at 0x08020000
 ```
 
-### Core/startup and time
+### Core/startup, hard-float and time
 
-OpenOCD exposes CM7 on GDB port 3333 and CM4 on 3334. Both cores qualify their image/startup path and monotonic-time behavior. Time checks include source injection, wrap-safe helpers, SysTick setup from the live clock and measured delay behavior.
+OpenOCD exposes CM7 on GDB port 3333 and CM4 on 3334. Both cores qualify their image/startup path and monotonic-time behavior.
+
+The focused hard-float qualifier builds a dedicated image for each core, verifies the ELF contains a real single-precision VFP arithmetic instruction, then checks on silicon that startup granted full CP10/CP11 access before that instruction executes. The firmware computes `1.5f * 2.25f + 0.5f`, requires the exact IEEE-754 result bits `0x40780000` (3.875), and rejects any NOCP UsageFault evidence. CM7 uses `fpv5-d16`; CM4 uses `fpv4-sp-d16`.
+
+No external signal wiring is needed for this case beyond the ST-LINK USB connection.
+
+Time checks include source injection, wrap-safe helpers, SysTick setup from the live clock and measured delay behavior.
 
 ### Clock/power
 
@@ -238,12 +247,15 @@ STM32-to-host uses broadcast EtherType `0x88B5` frames from MAC `02:00:00:00:00:
 
 This qualifies RMII routing, LAN8742A/MDIO link management, MAC configuration, link-loss reporting, renegotiated recovery without Ethernet reinitialization, TX/RX descriptor recycling, post-recovery raw frame transfer and CM7 D-cache coherency.
 
-## 39-case acceptance summary
+## 40-case acceptance summary
+
+The list below is the current campaign definition. The new hard-float point is pending the next full physical rerun; the other 39 points retain their previously qualified baseline.
 
 ```text
 STM32H755 CM7 memory layout        PASS
 STM32H755 CM4 memory layout        PASS
 Custom linker override             PASS
+Cortex-M hard-float startup        PENDING
 CM7 OpenOCD probe                  PASS
 CM4 OpenOCD probe                  PASS
 CM7 monotonic timebase             PASS
@@ -282,11 +294,11 @@ CM4 timer/PWM                      PASS
 CM7 Ethernet Layer-2               PASS
 ```
 
-The Ethernet acceptance point now includes the qualified unplug/replug/recovery checks internally; the campaign count remains 39.
+The Ethernet acceptance point includes the qualified unplug/replug/recovery checks internally. The hard-float startup qualifier is the new 40th campaign acceptance point and covers both CM7 and CM4 in one focused case.
 
 ## Evidence bundle
 
-Campaign archives contain summary/metadata, build logs, OpenOCD logs, per-case GDB evidence, ELF/map files, symbol/size dumps, linker scripts and nested Ethernet evidence. The current Ethernet qualifier additionally records initial/down/recovered link-state GDB logs plus host traffic and final state logs.
+Campaign archives contain summary/metadata, build logs, OpenOCD logs, per-case GDB evidence, ELF/map files, symbol/size dumps, linker scripts, nested hard-float evidence and nested Ethernet evidence. The current Ethernet qualifier additionally records initial/down/recovered link-state GDB logs plus host traffic and final state logs.
 
 The accepted full-campaign archive remains:
 

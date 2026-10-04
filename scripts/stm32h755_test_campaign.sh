@@ -38,7 +38,7 @@ Options:
   --debug-timeout SEC     GDB timeout per case (default: 30).
   --clean                 Clean before building.
   --no-build              Reuse existing CM7/CM4 hardware, time, clock, button,
-                          UART, SPI, I2C, DMA/cache, timer/PWM, and custom-link ELFs.
+                          UART, SPI, I2C, DMA/cache, timer/PWM, FPU, and custom-link ELFs.
                           The Ethernet installed-package qualifier is still rebuilt.
   -h, --help              Show help.
 
@@ -193,6 +193,8 @@ trap 'exit 143' TERM
     sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_dma_case.gdb" 2>/dev/null || true
     sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_timer_case.gdb" 2>/dev/null || true
     sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_eth_state.gdb" 2>/dev/null || true
+    sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_fpu_case.gdb" 2>/dev/null || true
+    sha256sum "$ROOT_DIR/scripts/stm32h755_fpu_test.sh" 2>/dev/null || true
     sha256sum "$ROOT_DIR/scripts/host/stm32h755_eth_traffic.py" 2>/dev/null || true
     sha256sum "$ROOT_DIR/scripts/stm32h755_eth_test.sh" 2>/dev/null || true
   fi
@@ -257,6 +259,8 @@ CM7_I2C_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_i2c_test.elf"
 CM7_I2C_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_i2c_test.map"
 CM7_DMA_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_dma_test.elf"
 CM7_DMA_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_dma_test.map"
+CM7_FPU_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_fpu_test.elf"
+CM7_FPU_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_fpu_test.map"
 CM7_TIMER_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_timer_test.elf"
 CM7_TIMER_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_timer_test.map"
 CLOCK_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_clock_test.elf"
@@ -275,6 +279,8 @@ CM4_I2C_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_i2c_test.elf"
 CM4_I2C_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_i2c_test.map"
 CM4_DMA_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_dma_test.elf"
 CM4_DMA_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_dma_test.map"
+CM4_FPU_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_fpu_test.elf"
+CM4_FPU_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_fpu_test.map"
 CM4_TIMER_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_timer_test.elf"
 CM4_TIMER_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_timer_test.map"
 CUSTOM_ELF="$CUSTOM_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.elf"
@@ -284,12 +290,12 @@ ARTIFACTS=(
   "$CM7_ELF" "$CM7_MAP" "$CM7_TIME_ELF" "$CM7_TIME_MAP"
   "$CM7_UART_ELF" "$CM7_UART_MAP" "$CM7_SPI_ELF" "$CM7_SPI_MAP"
   "$CM7_I2C_ELF" "$CM7_I2C_MAP" "$CM7_DMA_ELF" "$CM7_DMA_MAP"
-  "$CM7_TIMER_ELF" "$CM7_TIMER_MAP"
+  "$CM7_FPU_ELF" "$CM7_FPU_MAP" "$CM7_TIMER_ELF" "$CM7_TIMER_MAP"
   "$CLOCK_ELF" "$CLOCK_MAP" "$BUTTON_ELF" "$BUTTON_MAP"
   "$CM4_ELF" "$CM4_MAP" "$CM4_TIME_ELF" "$CM4_TIME_MAP"
   "$CM4_UART_ELF" "$CM4_UART_MAP" "$CM4_SPI_ELF" "$CM4_SPI_MAP"
   "$CM4_I2C_ELF" "$CM4_I2C_MAP" "$CM4_DMA_ELF" "$CM4_DMA_MAP"
-  "$CM4_TIMER_ELF" "$CM4_TIMER_MAP"
+  "$CM4_FPU_ELF" "$CM4_FPU_MAP" "$CM4_TIMER_ELF" "$CM4_TIMER_MAP"
   "$CUSTOM_ELF" "$CUSTOM_MAP"
 )
 for path in "${ARTIFACTS[@]}"; do
@@ -312,6 +318,7 @@ copy_pair "$CM7_UART_ELF" "$CM7_UART_MAP" das_stm32h755_cm7_uart_test
 copy_pair "$CM7_SPI_ELF" "$CM7_SPI_MAP" das_stm32h755_cm7_spi_test
 copy_pair "$CM7_I2C_ELF" "$CM7_I2C_MAP" das_stm32h755_cm7_i2c_test
 copy_pair "$CM7_DMA_ELF" "$CM7_DMA_MAP" das_stm32h755_cm7_dma_test
+copy_pair "$CM7_FPU_ELF" "$CM7_FPU_MAP" das_stm32h755_cm7_fpu_test
 copy_pair "$CM7_TIMER_ELF" "$CM7_TIMER_MAP" das_stm32h755_cm7_timer_test
 copy_pair "$CLOCK_ELF" "$CLOCK_MAP" das_stm32h755_cm7_clock_test
 copy_pair "$BUTTON_ELF" "$BUTTON_MAP" das_stm32h755_cm7_button_test
@@ -321,6 +328,7 @@ copy_pair "$CM4_UART_ELF" "$CM4_UART_MAP" das_stm32h755_cm4_uart_test
 copy_pair "$CM4_SPI_ELF" "$CM4_SPI_MAP" das_stm32h755_cm4_spi_test
 copy_pair "$CM4_I2C_ELF" "$CM4_I2C_MAP" das_stm32h755_cm4_i2c_test
 copy_pair "$CM4_DMA_ELF" "$CM4_DMA_MAP" das_stm32h755_cm4_dma_test
+copy_pair "$CM4_FPU_ELF" "$CM4_FPU_MAP" das_stm32h755_cm4_fpu_test
 copy_pair "$CM4_TIMER_ELF" "$CM4_TIMER_MAP" das_stm32h755_cm4_timer_test
 copy_pair "$CUSTOM_ELF" "$CUSTOM_MAP" das_stm32h755_custom_link_test
 cp "$ROOT_DIR/cmake/targets/stm32h755_cm7.ld" "$LOG_DIR/"
@@ -549,6 +557,32 @@ visual_case() {
   fi
 }
 
+run_fpu_case() {
+  local label="Cortex-M hard-float startup"
+  local log="$LOG_DIR/Cortex-M_hard-float_startup.log"
+  local evidence_dir="$LOG_DIR/fpu"
+  local rc
+
+  cleanup_openocd
+  mkdir -p "$evidence_dir"
+
+  set +e
+  "$ROOT_DIR/scripts/stm32h755_fpu_test.sh"     "$STM32_CUBE_H7_DIR"     --no-build     --cm7-build-dir "$BUILD_DIR"     --cm4-build-dir "$CM4_BUILD_DIR"     --log-dir "$evidence_dir"     --openocd-scripts "$OPENOCD_SCRIPTS"     --debug-timeout "$DEBUG_TIMEOUT" 2>&1 | tee "$log"
+  local pipe_status=("${PIPESTATUS[@]}")
+  rc=${pipe_status[0]}
+  local tee_rc=${pipe_status[1]}
+  set -e
+
+  if (( rc == 0 && tee_rc == 0 )) &&
+     grep -q '^STM32H755 HARD-FLOAT STARTUP QUALIFICATION: PASS$' "$log"; then
+    record "$label" PASS
+    return 0
+  fi
+
+  record "$label" FAIL
+  return 1
+}
+
 run_ethernet_case() {
   local label="CM7 Ethernet Layer-2"
   local log="$LOG_DIR/CM7_Ethernet_Layer-2.log"
@@ -604,6 +638,11 @@ check_layout "Custom linker override" "$LOG_DIR/custom_memory_layout.log" \
 # One physical setup prompt covers every persistent serial fixture, Ethernet, and
 # leaves D3/D4 free until the single later transition.
 initial_hardware_setup
+
+# Qualify shared Cortex-M hard-float startup on both physical cores before the
+# campaign opens its long-lived debug session. All existing peripheral cases
+# still run afterwards and must pass independently.
+run_fpu_case || exit 1
 
 echo "Starting dual-core OpenOCD..."
 openocd -s "$OPENOCD_SCRIPTS" \

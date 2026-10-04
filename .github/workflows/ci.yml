@@ -22,6 +22,7 @@ jobs:
       - name: Syntax-check hardware qualification scripts
         run: |
           bash -n scripts/stm32h755_test_campaign.sh
+          bash -n scripts/stm32h755_fpu_test.sh
           bash -n scripts/stm32h755_eth_test.sh
           bash -n scripts/build_and_flash_eth_raw.sh
           python3 -m py_compile scripts/host/stm32h755_eth_traffic.py
@@ -89,6 +90,13 @@ jobs:
             --build-dir "$GITHUB_WORKSPACE/build/ci-${{ matrix.core }}" \
             --core "${{ matrix.core }}" \
             --clean
+      - name: Validate hard-float test contains real VFP arithmetic
+        run: |
+          elf="$GITHUB_WORKSPACE/build/ci-${{ matrix.core }}/tests/hardware/stm32h755/das_stm32h755_fpu_test.elf"
+          test -s "$elf"
+          arm-none-eabi-objdump -d "$elf" > /tmp/das-fpu-${{ matrix.core }}.dis
+          grep -Eq '[[:space:]]v(mul|add|mla|fma)\.f32[[:space:]]' /tmp/das-fpu-${{ matrix.core }}.dis
+
       - name: Validate one vector table per hardware-test ELF
         run: |
           while IFS= read -r elf; do

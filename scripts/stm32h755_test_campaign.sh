@@ -567,7 +567,14 @@ run_fpu_case() {
   mkdir -p "$evidence_dir"
 
   set +e
-  "$ROOT_DIR/scripts/stm32h755_fpu_test.sh"     "$STM32_CUBE_H7_DIR"     --no-build     --cm7-build-dir "$BUILD_DIR"     --cm4-build-dir "$CM4_BUILD_DIR"     --log-dir "$evidence_dir"     --openocd-scripts "$OPENOCD_SCRIPTS"     --debug-timeout "$DEBUG_TIMEOUT" 2>&1 | tee "$log"
+  "$ROOT_DIR/scripts/stm32h755_fpu_test.sh" \
+    "$STM32_CUBE_H7_DIR" \
+    --no-build \
+    --cm7-build-dir "$BUILD_DIR" \
+    --cm4-build-dir "$CM4_BUILD_DIR" \
+    --log-dir "$evidence_dir" \
+    --openocd-scripts "$OPENOCD_SCRIPTS" \
+    --debug-timeout "$DEBUG_TIMEOUT" 2>&1 | tee "$log"
   local pipe_status=("${PIPESTATUS[@]}")
   rc=${pipe_status[0]}
   local tee_rc=${pipe_status[1]}

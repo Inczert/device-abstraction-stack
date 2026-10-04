@@ -105,7 +105,13 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 mkdir -p "$LOG_DIR"
-rm -f "$LOG_DIR"/cm7.gdb.log "$LOG_DIR"/cm4.gdb.log       "$LOG_DIR"/cm7.disassembly.txt "$LOG_DIR"/cm4.disassembly.txt       "$LOG_DIR"/openocd.log "$LOG_DIR"/metadata.txt
+rm -f \
+  "$LOG_DIR"/cm7.gdb.log \
+  "$LOG_DIR"/cm4.gdb.log \
+  "$LOG_DIR"/cm7.disassembly.txt \
+  "$LOG_DIR"/cm4.disassembly.txt \
+  "$LOG_DIR"/openocd.log \
+  "$LOG_DIR"/metadata.txt
 
 {
   echo "DAS STM32H755 hard-float startup qualification"
@@ -124,9 +130,15 @@ rm -f "$LOG_DIR"/cm7.gdb.log "$LOG_DIR"/cm4.gdb.log       "$LOG_DIR"/cm7.disasse
 } >"$LOG_DIR/metadata.txt"
 
 if (( NO_BUILD == 0 )); then
-  "$ROOT_DIR/scripts/build_stm32h755.sh"     --stm32h7-root "$STM32_CUBE_H7_DIR"     --build-dir "$CM7_BUILD_DIR"     --core cm7
+  "$ROOT_DIR/scripts/build_stm32h755.sh" \
+    --stm32h7-root "$STM32_CUBE_H7_DIR" \
+    --build-dir "$CM7_BUILD_DIR" \
+    --core cm7
 
-  "$ROOT_DIR/scripts/build_stm32h755.sh"     --stm32h7-root "$STM32_CUBE_H7_DIR"     --build-dir "$CM4_BUILD_DIR"     --core cm4
+  "$ROOT_DIR/scripts/build_stm32h755.sh" \
+    --stm32h7-root "$STM32_CUBE_H7_DIR" \
+    --build-dir "$CM4_BUILD_DIR" \
+    --core cm4
 fi
 
 CM7_ELF="$CM7_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_fpu_test.elf"
@@ -157,7 +169,9 @@ verify_vfp_image CM7 "$CM7_ELF" "$LOG_DIR/cm7.disassembly.txt"
 verify_vfp_image CM4 "$CM4_ELF" "$LOG_DIR/cm4.disassembly.txt"
 
 echo "Starting dual-core OpenOCD..."
-openocd -s "$OPENOCD_SCRIPTS"   -f "$ROOT_DIR/scripts/openocd_h755_dual_core.cfg"   -c "init; reset halt" >"$LOG_DIR/openocd.log" 2>&1 &
+openocd -s "$OPENOCD_SCRIPTS" \
+  -f "$ROOT_DIR/scripts/openocd_h755_dual_core.cfg" \
+  -c "init; reset halt" >"$LOG_DIR/openocd.log" 2>&1 &
 OPENOCD_PID=$!
 
 for ((attempt = 0; attempt < 150; ++attempt)); do
@@ -187,7 +201,9 @@ run_core() {
   local log="$4"
 
   set +e
-  timeout "${DEBUG_TIMEOUT}s" "$GDB_BIN" -q "$elf" -batch     -ex "target extended-remote :$port"     -x "$ROOT_DIR/scripts/gdb/stm32h755_fpu_case.gdb" 2>&1 | tee "$log"
+  timeout "${DEBUG_TIMEOUT}s" "$GDB_BIN" -q "$elf" -batch \
+    -ex "target extended-remote :$port" \
+    -x "$ROOT_DIR/scripts/gdb/stm32h755_fpu_case.gdb" 2>&1 | tee "$log"
   local pipe_status=("${PIPESTATUS[@]}")
   local gdb_rc=${pipe_status[0]}
   local tee_rc=${pipe_status[1]}

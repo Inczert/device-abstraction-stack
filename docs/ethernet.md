@@ -150,16 +150,16 @@ After recovery the qualifier requires:
 
 ## Qualified results
 
-The standing full STM32H755 campaign passed **39/39** on 2026-09-13 at DAS commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc` using STM32CubeH7 `f5c0b7a2b1f6eb26fde150f72edb2d7deb647066`.
+The standing full STM32H755 campaign passed **40/40** on 2026-10-04 at DAS commit `737863075dfed78f73f99ae58f6e0ca52ffea93e` using STM32CubeH7 `f5c0b7a2b1f6eb26fde150f72edb2d7deb647066`.
 
 ```text
-PASS: 39
+PASS: 40
 FAIL: 0
 Exit code: 0
-Evidence archive: das-stm32h755-campaign-20260913T152845Z.tar.gz
+Evidence archive: das-stm32h755-campaign-20261004T134217Z.tar.gz
 ```
 
-That full-campaign archive established the connected Ethernet baseline.
+That full-campaign archive revalidated the complete Ethernet acceptance path, including cable unplug/link-down reporting, reconnect/renegotiation without Ethernet reinitialization, bidirectional raw traffic and CM7 DMA/cache coherency.
 
 The extended unplug/replug qualifier was subsequently physically confirmed on 2026-09-13 with recovery-test implementation commit `9a8b628dcea8ad724282103659a721066efcd9dd`:
 
@@ -182,7 +182,7 @@ final GDB result:               PASS
 
 This qualifies link-down reporting, negotiated link recovery on the same initialized Ethernet instance, and resumed bidirectional raw traffic after recovery.
 
-The full campaign invokes this focused qualifier as acceptance point 39. Strengthening the internal Ethernet checks does not create an artificial 40th campaign case.
+The full campaign invokes this focused qualifier as one Ethernet acceptance case. The separate hard-float startup qualifier is the additional case that expanded the standing campaign from 39 to 40 points.
 
 ## Qualified boundary
 

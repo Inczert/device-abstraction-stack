@@ -16,23 +16,23 @@ Debugger-driven CM4 execution proves the CM4 image and supported device paths on
 
 ## Standing regression baseline
 
-The latest completed full campaign is **39/39 PASS**:
+The latest completed full campaign is **40/40 PASS**:
 
 ```text
-DAS commit:       f6b65672d9ae69cf28cd574d0dbba01cf875d8dc
-UTC start:        2026-09-13T15:28:45Z
+DAS commit:       737863075dfed78f73f99ae58f6e0ca52ffea93e
+UTC start:        2026-10-04T13:42:17Z
 STM32CubeH7:      f5c0b7a2b1f6eb26fde150f72edb2d7deb647066
-PASS:             39
+PASS:             40
 FAIL:             0
 Exit code:        0
-Evidence archive: das-stm32h755-campaign-20260913T152845Z.tar.gz
+Evidence archive: das-stm32h755-campaign-20261004T134217Z.tar.gz
 ```
 
-That campaign covers linker/layout, startup/vector ownership, time, clock/power, semantic board resources, GPIO/EXTI/IRQ, UART, SPI, I2C, generic DMA/cache, timer/PWM and CM7 Layer-2 Ethernet.
+That campaign covers linker/layout, startup/vector ownership, CM7+CM4 hard-float startup with real VFP arithmetic, time, clock/power, semantic board resources, GPIO/EXTI/IRQ, UART, SPI, I2C, generic DMA/cache, timer/PWM and CM7 Layer-2 Ethernet.
 
-The current campaign definition adds a dedicated CM7+CM4 hard-float startup qualification and therefore contains **40 acceptance points**. The historical 39/39 archive above remains the latest completed full-campaign baseline until the expanded campaign is physically rerun.
+The dedicated hard-float case verified real VFP arithmetic is present in both ELFs, CP10/CP11 are fully enabled before application execution, CFSR reports no NOCP fault, and `1.5f * 2.25f + 0.5f` produces exact result bits `0x40780000` on both physical cores.
 
-After that full campaign, the Ethernet acceptance path was strengthened with an explicit cable unplug/replug phase. The focused Ethernet qualifier was physically rerun successfully on 2026-09-13 with recovery-test implementation commit `9a8b628dcea8ad724282103659a721066efcd9dd`. Link-loss/recovery is therefore also qualified; it remains part of Ethernet acceptance point 39 rather than creating a 40th case.
+The same 2026-10-04 run also revalidated the complete Ethernet unplug/replug path and post-recovery bidirectional traffic.
 
 ## Testing model
 
@@ -249,13 +249,13 @@ This qualifies RMII routing, LAN8742A/MDIO link management, MAC configuration, l
 
 ## 40-case acceptance summary
 
-The list below is the current campaign definition. The new hard-float point is pending the next full physical rerun; the other 39 points retain their previously qualified baseline.
+The list below is the physically completed 2026-10-04 campaign.
 
 ```text
 STM32H755 CM7 memory layout        PASS
 STM32H755 CM4 memory layout        PASS
 Custom linker override             PASS
-Cortex-M hard-float startup        PENDING
+Cortex-M hard-float startup        PASS
 CM7 OpenOCD probe                  PASS
 CM4 OpenOCD probe                  PASS
 CM7 monotonic timebase             PASS
@@ -294,19 +294,19 @@ CM4 timer/PWM                      PASS
 CM7 Ethernet Layer-2               PASS
 ```
 
-The Ethernet acceptance point includes the qualified unplug/replug/recovery checks internally. The hard-float startup qualifier is the new 40th campaign acceptance point and covers both CM7 and CM4 in one focused case.
+The Ethernet acceptance case includes the qualified unplug/replug/recovery checks internally. The hard-float startup qualifier covers both CM7 and CM4 in one focused acceptance case.
 
 ## Evidence bundle
 
 Campaign archives contain summary/metadata, build logs, OpenOCD logs, per-case GDB evidence, ELF/map files, symbol/size dumps, linker scripts, nested hard-float evidence and nested Ethernet evidence. The current Ethernet qualifier additionally records initial/down/recovered link-state GDB logs plus host traffic and final state logs.
 
-The accepted full-campaign archive remains:
+The accepted full-campaign archive is:
 
 ```text
-das-stm32h755-campaign-20260913T152845Z.tar.gz
+das-stm32h755-campaign-20261004T134217Z.tar.gz
 ```
 
-The OpenOCD log in that archive contains repeated `Failed to read memory` diagnostics while probing STM32H7 flash/system regions. They were tooling noise in that run: all 39 acceptance cases passed, both core images executed and the campaign exited 0.
+The archive contains the full 40-case evidence bundle, including nested hard-float and Ethernet qualification logs, and exited with zero failures.
 
 ## Recovery
 
@@ -320,6 +320,6 @@ The normal campaign never performs an implicit mass erase.
 
 ## Qualification boundary
 
-The qualified baseline covers the current linker/startup/vector model, clock/power, monotonic time, semantic board resources, GPIO/IRQ, polling UART, SPI, I2C, generic DMA/cache coherency, periodic timer/PWM on both cores where applicable, and CM7 polling Layer-2 Ethernet including link loss/recovery and post-recovery traffic.
+The qualified baseline covers the current linker/startup/vector model, hard-float CP10/CP11 enablement and real VFP execution on both cores, clock/power, monotonic time, semantic board resources, GPIO/IRQ, polling UART, SPI, I2C, generic DMA/cache coherency, periodic timer/PWM on both cores where applicable, and CM7 polling Layer-2 Ethernet including link loss/recovery and post-recovery traffic.
 
 It does not imply production dual-core lifecycle/HSEM/shared-memory coordination, Ethernet IRQ-driven operation, IP networking, timer input capture, ADC, watchdog or internal-flash/reset-cause services.

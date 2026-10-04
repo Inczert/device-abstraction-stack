@@ -102,7 +102,7 @@ The default operator timeout for each unplug/replug transition is 60 seconds. Ov
 
 ## Qualified result
 
-The connected Ethernet case is acceptance point 39 in the standing **39/39 PASS** STM32H755 campaign from 2026-09-13.
+Ethernet remains one acceptance case in the standing **40/40 PASS** STM32H755 campaign from 2026-10-04. That run revalidated the complete unplug/replug/recovery and post-recovery traffic path.
 
 The extended unplug/replug qualifier was then physically confirmed on the same day with recovery-test implementation commit `9a8b628dcea8ad724282103659a721066efcd9dd`:
 

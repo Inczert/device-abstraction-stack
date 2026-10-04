@@ -28,7 +28,7 @@ The current STM32 path uses **CMSIS definitions directly**. It does not require 
 | Ethernet | CM7 polling Layer-2 MAC/DMA/RMII backend with LAN8742A PHY and raw frame TX/RX; CM4 runtime ownership intentionally unsupported |
 | Board API | LEDs, B1, ST-LINK VCP, Arduino UART/I2C/SPI/PWM, D3/D4 and RJ45 Ethernet resources |
 | Packaging | static `libdas.a`, install/export, relocatable `find_package(DAS CONFIG REQUIRED)` package |
-| Qualification | STM32H755 physical regression **39/39 PASS** including CM7 Ethernet Layer 2 |
+| Qualification | STM32H755 physical regression **40/40 PASS** including CM7/CM4 hard-float startup and CM7 Ethernet Layer 2 |
 
 DAS is still early development. The project version is currently `0.1.0`.
 
@@ -136,9 +136,9 @@ See [Interrupt model](docs/interrupts.md) and [Building and integration](docs/in
 
 ## Hardware qualification
 
-The standing NUCLEO-H755ZI-Q campaign is **39/39 PASS** at commit `f6b65672d9ae69cf28cd574d0dbba01cf875d8dc`, qualified on 2026-09-13 against STM32CubeH7 commit `f5c0b7a2b1f6eb26fde150f72edb2d7deb647066`.
+The standing NUCLEO-H755ZI-Q campaign is **40/40 PASS** at commit `737863075dfed78f73f99ae58f6e0ca52ffea93e`, qualified on 2026-10-04 against STM32CubeH7 commit `f5c0b7a2b1f6eb26fde150f72edb2d7deb647066`.
 
-The campaign covers linker/layout, startup, clock/time, GPIO/EXTI/IRQ, board resources/button, UART, SPI, I2C, DMA/cache and timer/PWM on both cores where applicable, plus the CM7 Layer-2 Ethernet MAC/DMA/RMII/LAN8742A path.
+The campaign covers linker/layout, startup including hardware-FPU enablement and real VFP arithmetic on both cores, clock/time, GPIO/EXTI/IRQ, board resources/button, UART, SPI, I2C, DMA/cache and timer/PWM on both cores where applicable, plus the CM7 Layer-2 Ethernet MAC/DMA/RMII/LAN8742A path.
 
 Ethernet qualification requires JP6 and JP7 fitted and board RJ45 CN14 connected directly to a Linux host Ethernet port. The scripts default to host interface `enp0s31f6`:
 

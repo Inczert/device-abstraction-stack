@@ -30,7 +30,7 @@ The current STM32 path uses **CMSIS definitions directly**. It does not require 
 | Packaging | static `libdas.a`, install/export, relocatable `find_package(DAS 0.1 CONFIG REQUIRED)` package |
 | Qualification | STM32H755 physical regression **40/40 PASS** including CM7/CM4 hard-float startup and CM7 Ethernet Layer 2 |
 
-DAS is still early development. The project version is currently `0.1.0`.
+DAS is preparing its first tagged release, `v0.1.0`. Release publication requires both CI and the complete physical STM32H755 campaign to pass on the exact tagged commit.
 
 ## Architecture
 
@@ -155,3 +155,8 @@ Override only when necessary with `--eth-iface <linux-interface>` or `DAS_ETH_IF
 The qualified Ethernet run negotiated 100 Mbps/full duplex, validated 5/5 STM32-to-host frames and 64/64 host-to-STM32 integrity frames, with zero integrity errors and `DAS_OK` at completion.
 
 See [Hardware qualification](docs/testing.md) and [Ethernet](docs/ethernet.md).
+
+
+## Release policy
+
+DAS releases are gated by both GitHub CI and the physical NUCLEO-H755ZI-Q campaign. For v0.1.0, the release candidate must produce exactly 40 PASS / 0 FAIL / exit 0 on the same commit that is tagged. See [release/README.md](release/README.md).

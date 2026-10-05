@@ -16,6 +16,7 @@ OPENOCD_PID=""
 GDB_BIN=""
 PASS_COUNT=0
 FAIL_COUNT=0
+EXPECTED_PASS_COUNT=40
 STAMP=""
 CAMPAIGN_ROOT=""
 LOG_DIR=""
@@ -145,6 +146,9 @@ finalize() {
     tar_rc=$?
     if (( tar_rc == 0 )); then
       echo "Evidence archive: $ARCHIVE"
+      if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$ARCHIVE" | tee "$ARCHIVE.sha256"
+      fi
     else
       echo "Failed to create evidence archive: $ARCHIVE" >&2
       (( rc != 0 )) || rc=$tar_rc
@@ -159,6 +163,7 @@ trap 'exit 143' TERM
 
 {
   echo "DAS STM32H755 dual-core hardware campaign"
+  echo "Expected acceptance passes: $EXPECTED_PASS_COUNT"
   echo "UTC start: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
   echo "Repository: $ROOT_DIR"
   if command -v git >/dev/null 2>&1; then
@@ -751,4 +756,8 @@ run_simple_case "CM4 timer/PWM" "$CM4_TIMER_ELF" 3334 \
 # initial fixture setup and stays connected; no mid-campaign network choreography.
 run_ethernet_case || exit 1
 
+if (( PASS_COUNT != EXPECTED_PASS_COUNT )); then
+  echo "Expected $EXPECTED_PASS_COUNT acceptance passes, recorded $PASS_COUNT" >&2
+  exit 1
+fi
 (( FAIL_COUNT == 0 )) || exit 1

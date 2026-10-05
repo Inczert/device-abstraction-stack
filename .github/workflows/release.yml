@@ -1,0 +1,294 @@
+name: Release DAS
+
+on:
+  workflow_dispatch:
+    inputs:
+      qualified_commit:
+        description: "Exact main/develop commit that passed the physical campaign"
+        required: true
+        type: string
+      campaign_archive:
+        description: "Evidence archive filename, e.g. das-stm32h755-campaign-YYYYMMDDTHHMMSSZ.tar.gz"
+        required: true
+        type: string
+      campaign_sha256:
+        description: "SHA-256 of the physical campaign archive"
+        required: true
+        type: string
+      campaign_pass_count:
+        description: "PASS count from campaign summary"
+        required: true
+        default: "40"
+        type: string
+      campaign_fail_count:
+        description: "FAIL count from campaign summary"
+        required: true
+        default: "0"
+        type: string
+      campaign_exit_code:
+        description: "Exit code from campaign summary"
+        required: true
+        default: "0"
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  RELEASE_POLICY: release/v0.1.0.env
+
+jobs:
+  validate:
+    name: Validate release gate
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.policy.outputs.version }}
+      tag: ${{ steps.policy.outputs.tag }}
+      qualified_commit: ${{ steps.gate.outputs.qualified_commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read release policy
+        id: policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$RELEASE_POLICY"
+          echo "version=$DAS_RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$DAS_RELEASE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce exact physical qualification gate
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUALIFIED_COMMIT: ${{ inputs.qualified_commit }}
+          CAMPAIGN_ARCHIVE: ${{ inputs.campaign_archive }}
+          CAMPAIGN_SHA256: ${{ inputs.campaign_sha256 }}
+          CAMPAIGN_PASS: ${{ inputs.campaign_pass_count }}
+          CAMPAIGN_FAIL: ${{ inputs.campaign_fail_count }}
+          CAMPAIGN_EXIT: ${{ inputs.campaign_exit_code }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$RELEASE_POLICY"
+
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || {
+            echo "Release workflow must be dispatched from main, got $GITHUB_REF" >&2
+            exit 1
+          }
+
+          git fetch origin main --tags
+          head_sha="$(git rev-parse HEAD)"
+          remote_main="$(git rev-parse origin/main)"
+          [[ "$head_sha" == "$remote_main" ]] || {
+            echo "Checked-out commit is not current origin/main" >&2
+            exit 1
+          }
+          [[ "$QUALIFIED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "qualified_commit must be a full 40-character SHA" >&2
+            exit 1
+          }
+          [[ "$head_sha" == "$QUALIFIED_COMMIT" ]] || {
+            echo "Release commit $head_sha does not match physically qualified commit $QUALIFIED_COMMIT" >&2
+            exit 1
+          }
+
+          project_version="$(sed -n 's/^project(das VERSION \([^ ]*\) LANGUAGES.*/\1/p' CMakeLists.txt)"
+          [[ "$project_version" == "$DAS_RELEASE_VERSION" ]] || {
+            echo "CMake project version $project_version does not match release policy $DAS_RELEASE_VERSION" >&2
+            exit 1
+          }
+
+          [[ "$CAMPAIGN_PASS" == "$DAS_RELEASE_EXPECTED_HIL_PASS" ]] || {
+            echo "Expected $DAS_RELEASE_EXPECTED_HIL_PASS campaign passes, got $CAMPAIGN_PASS" >&2
+            exit 1
+          }
+          [[ "$CAMPAIGN_FAIL" == "$DAS_RELEASE_EXPECTED_HIL_FAIL" ]] || {
+            echo "Campaign has failures: $CAMPAIGN_FAIL" >&2
+            exit 1
+          }
+          [[ "$CAMPAIGN_EXIT" == "$DAS_RELEASE_EXPECTED_HIL_EXIT" ]] || {
+            echo "Campaign exit code is $CAMPAIGN_EXIT" >&2
+            exit 1
+          }
+          [[ "$CAMPAIGN_ARCHIVE" =~ ^das-stm32h755-campaign-[0-9]{8}T[0-9]{6}Z\.tar\.gz$ ]] || {
+            echo "Unexpected campaign archive name: $CAMPAIGN_ARCHIVE" >&2
+            exit 1
+          }
+          [[ "$CAMPAIGN_SHA256" =~ ^[0-9a-fA-F]{64}$ ]] || {
+            echo "campaign_sha256 is not a SHA-256 digest" >&2
+            exit 1
+          }
+
+          ci_success="$(gh api             -H "Accept: application/vnd.github+json"             "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$QUALIFIED_COMMIT&status=completed&per_page=100"             --jq '[.workflow_runs[] | select(.conclusion == "success")] | length')"
+          (( ci_success > 0 )) || {
+            echo "No successful CI workflow found for $QUALIFIED_COMMIT" >&2
+            exit 1
+          }
+
+          if git ls-remote --exit-code --tags origin "refs/tags/$DAS_RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag $DAS_RELEASE_TAG already exists" >&2
+            exit 1
+          fi
+
+          echo "qualified_commit=$QUALIFIED_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "Release gate PASS for $DAS_RELEASE_TAG at $QUALIFIED_COMMIT"
+
+  build-package:
+    name: Build package (${{ matrix.core }})
+    needs: validate
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        core: [cm7, cm4]
+    env:
+      STM32_CUBE_H7_REF: f5c0b7a2b1f6eb26fde150f72edb2d7deb647066
+      STM32_CMSIS_H7_REF: e8d40ae6e2fa06afe5b46d24756f141b363342a7
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.qualified_commit }}
+
+      - name: Checkout qualified CMSIS-Core headers
+        uses: actions/checkout@v4
+        with:
+          repository: STMicroelectronics/STM32CubeH7
+          ref: ${{ env.STM32_CUBE_H7_REF }}
+          path: .ci/STM32CubeH7
+          fetch-depth: 1
+          sparse-checkout: |
+            Drivers/CMSIS/Core/Include
+            Drivers/CMSIS/Include
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout qualified STM32H7 CMSIS device headers
+        uses: actions/checkout@v4
+        with:
+          repository: STMicroelectronics/cmsis-device-h7
+          ref: ${{ env.STM32_CMSIS_H7_REF }}
+          path: .ci/cmsis-device-h7
+          fetch-depth: 1
+
+      - name: Assemble CMSIS include layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .ci/STM32CubeH7/Drivers/CMSIS/Device/ST/STM32H7xx
+          ln -s "$GITHUB_WORKSPACE/.ci/cmsis-device-h7/Include"             .ci/STM32CubeH7/Drivers/CMSIS/Device/ST/STM32H7xx/Include
+
+      - name: Install ARM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi ninja-build
+
+      - name: Build and validate installed Release package
+        env:
+          CORE: ${{ matrix.core }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          QUALIFIED_COMMIT: ${{ needs.validate.outputs.qualified_commit }}
+          CAMPAIGN_ARCHIVE: ${{ inputs.campaign_archive }}
+          CAMPAIGN_SHA256: ${{ inputs.campaign_sha256 }}
+          CAMPAIGN_PASS: ${{ inputs.campaign_pass_count }}
+          CAMPAIGN_FAIL: ${{ inputs.campaign_fail_count }}
+          CAMPAIGN_EXIT: ${{ inputs.campaign_exit_code }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          build="$GITHUB_WORKSPACE/build/release-$CORE"
+          package_name="das-$VERSION-stm32h755-$CORE"
+          prefix="$GITHUB_WORKSPACE/package/$package_name"
+
+          cmake -S . -B "$build" -G Ninja             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/cmake/toolchains/arm-none-eabi.cmake"             -DCMAKE_BUILD_TYPE=Release             -DDAS_DEVICE=nucleo_h755zi_q             -DDAS_CORE="$CORE"             -DSTM32_CUBE_H7_DIR="$GITHUB_WORKSPACE/.ci/STM32CubeH7"
+          cmake --build "$build" --parallel
+          cmake --install "$build" --prefix "$prefix"
+
+          cmake -S tests/consumer/package_contract             -B "$GITHUB_WORKSPACE/build/release-contract-$CORE" -G Ninja             -DDAS_DIR="$prefix/lib/cmake/DAS"             -DDAS_CORE="$CORE"             -DDAS_EXPECTED_CORE="$CORE"             -DDAS_REQUIRED_VERSION=0.1             -DDAS_EXPECTED_VERSION="$VERSION"
+
+          cat > "$prefix/RELEASE-METADATA.txt" <<EOF
+          DAS version: $VERSION
+          DAS commit: $QUALIFIED_COMMIT
+          Device: nucleo_h755zi_q
+          MCU: STM32H755
+          Core: $CORE
+          STM32CubeH7 ref: $STM32_CUBE_H7_REF
+          cmsis-device-h7 ref: $STM32_CMSIS_H7_REF
+          Physical campaign archive: $CAMPAIGN_ARCHIVE
+          Physical campaign SHA256: $CAMPAIGN_SHA256
+          Physical campaign PASS: $CAMPAIGN_PASS
+          Physical campaign FAIL: $CAMPAIGN_FAIL
+          Physical campaign exit code: $CAMPAIGN_EXIT
+          EOF
+
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          tar -C "$GITHUB_WORKSPACE/package" -czf             "$GITHUB_WORKSPACE/dist/$package_name.tar.gz" "$package_name"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: das-${{ needs.validate.outputs.version }}-stm32h755-${{ matrix.core }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Tag and publish
+    needs: [validate, build-package]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.qualified_commit }}
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: das-${{ needs.validate.outputs.version }}-stm32h755-*
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums and release notes
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          QUALIFIED_COMMIT: ${{ needs.validate.outputs.qualified_commit }}
+          CAMPAIGN_ARCHIVE: ${{ inputs.campaign_archive }}
+          CAMPAIGN_SHA256: ${{ inputs.campaign_sha256 }}
+          CAMPAIGN_PASS: ${{ inputs.campaign_pass_count }}
+          CAMPAIGN_FAIL: ${{ inputs.campaign_fail_count }}
+          CAMPAIGN_EXIT: ${{ inputs.campaign_exit_code }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum *.tar.gz > SHA256SUMS
+          cd ..
+
+          cp "release/v$VERSION.md" release-notes.md
+          cat >> release-notes.md <<EOF
+
+          ## Physical release qualification
+
+          - qualified commit: `$QUALIFIED_COMMIT`
+          - campaign archive: `$CAMPAIGN_ARCHIVE`
+          - campaign SHA-256: `$CAMPAIGN_SHA256`
+          - campaign result: **$CAMPAIGN_PASS PASS / $CAMPAIGN_FAIL FAIL / exit $CAMPAIGN_EXIT**
+
+          The tag and binary packages were produced only after the complete hardware campaign and normal GitHub CI both passed for the exact tagged commit.
+          EOF
+
+      - name: Create annotated tag and GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate.outputs.tag }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          QUALIFIED_COMMIT: ${{ needs.validate.outputs.qualified_commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" "$QUALIFIED_COMMIT" -m "DAS $TAG"
+          git push origin "$TAG"
+
+          gh release create "$TAG"             dist/*.tar.gz dist/SHA256SUMS             --verify-tag             --title "DAS $TAG"             --notes-file release-notes.md

@@ -323,3 +323,10 @@ The normal campaign never performs an implicit mass erase.
 The qualified baseline covers the current linker/startup/vector model, hard-float CP10/CP11 enablement and real VFP execution on both cores, clock/power, monotonic time, semantic board resources, GPIO/IRQ, polling UART, SPI, I2C, generic DMA/cache coherency, periodic timer/PWM on both cores where applicable, and CM7 polling Layer-2 Ethernet including link loss/recovery and post-recovery traffic.
 
 It does not imply production dual-core lifecycle/HSEM/shared-memory coordination, Ethernet IRQ-driven operation, IP networking, timer input capture, ADC, watchdog or internal-flash/reset-cause services.
+
+
+## Release qualification gate
+
+A normal development campaign is also the hardware authority for a DAS release. Before v0.1.0 is tagged, the complete campaign must run on the exact release-candidate commit and finish with exactly 40 passes, zero failures and exit code zero. The campaign writes a SHA-256 alongside its evidence archive; that archive name and digest are required inputs to the release workflow.
+
+No commit may be introduced between the successful release-candidate campaign and the tag. If the release candidate changes for any reason, rerun the full campaign.

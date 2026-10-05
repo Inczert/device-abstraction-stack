@@ -42,7 +42,7 @@ A DAS release is permitted only when CI and the physical STM32H755 campaign both
    - the SHA-256 is syntactically valid;
    - normal CI has a successful run for the same commit;
    - the tag does not already exist.
-10. Actions builds target-specific Release packages for CM7 and CM4 from that exact commit, validates the installed package contract, adds release provenance, generates `SHA256SUMS`, creates the annotated tag and publishes the GitHub Release.
+10. Actions builds target-specific Release packages for CM7 and CM4 from that exact commit, validates the installed package contract, publishes both complete install tarballs and explicitly named core-specific `.a` files, adds release provenance, generates `SHA256SUMS`, creates the annotated tag and publishes the GitHub Release.
 
 ## Why the release Action does not run HIL
 

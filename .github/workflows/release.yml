@@ -75,59 +75,65 @@ jobs:
           set -euo pipefail
           source "$RELEASE_POLICY"
 
-          [[ "$GITHUB_REF" == "refs/heads/main" ]] || {
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
             echo "Release workflow must be dispatched from main, got $GITHUB_REF" >&2
             exit 1
-          }
+          fi
 
-          git fetch origin main --tags
+          git fetch origin main develop --tags
           head_sha="$(git rev-parse HEAD)"
           remote_main="$(git rev-parse origin/main)"
-          [[ "$head_sha" == "$remote_main" ]] || {
+          remote_develop="$(git rev-parse origin/develop)"
+
+          if [[ "$head_sha" != "$remote_main" ]]; then
             echo "Checked-out commit is not current origin/main" >&2
             exit 1
-          }
-          [[ "$QUALIFIED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+          fi
+          if [[ "$remote_main" != "$remote_develop" ]]; then
+            echo "main ($remote_main) and develop ($remote_develop) are not aligned" >&2
+            exit 1
+          fi
+          if [[ ! "$QUALIFIED_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
             echo "qualified_commit must be a full 40-character SHA" >&2
             exit 1
-          }
-          [[ "$head_sha" == "$QUALIFIED_COMMIT" ]] || {
+          fi
+          if [[ "$head_sha" != "$QUALIFIED_COMMIT" ]]; then
             echo "Release commit $head_sha does not match physically qualified commit $QUALIFIED_COMMIT" >&2
             exit 1
-          }
+          fi
 
           project_version="$(sed -n 's/^project(das VERSION \([^ ]*\) LANGUAGES.*/\1/p' CMakeLists.txt)"
-          [[ "$project_version" == "$DAS_RELEASE_VERSION" ]] || {
+          if [[ "$project_version" != "$DAS_RELEASE_VERSION" ]]; then
             echo "CMake project version $project_version does not match release policy $DAS_RELEASE_VERSION" >&2
             exit 1
-          }
+          fi
 
-          [[ "$CAMPAIGN_PASS" == "$DAS_RELEASE_EXPECTED_HIL_PASS" ]] || {
+          if [[ "$CAMPAIGN_PASS" != "$DAS_RELEASE_EXPECTED_HIL_PASS" ]]; then
             echo "Expected $DAS_RELEASE_EXPECTED_HIL_PASS campaign passes, got $CAMPAIGN_PASS" >&2
             exit 1
-          }
-          [[ "$CAMPAIGN_FAIL" == "$DAS_RELEASE_EXPECTED_HIL_FAIL" ]] || {
+          fi
+          if [[ "$CAMPAIGN_FAIL" != "$DAS_RELEASE_EXPECTED_HIL_FAIL" ]]; then
             echo "Campaign has failures: $CAMPAIGN_FAIL" >&2
             exit 1
-          }
-          [[ "$CAMPAIGN_EXIT" == "$DAS_RELEASE_EXPECTED_HIL_EXIT" ]] || {
+          fi
+          if [[ "$CAMPAIGN_EXIT" != "$DAS_RELEASE_EXPECTED_HIL_EXIT" ]]; then
             echo "Campaign exit code is $CAMPAIGN_EXIT" >&2
             exit 1
-          }
-          [[ "$CAMPAIGN_ARCHIVE" =~ ^das-stm32h755-campaign-[0-9]{8}T[0-9]{6}Z\.tar\.gz$ ]] || {
+          fi
+          if [[ ! "$CAMPAIGN_ARCHIVE" =~ ^das-stm32h755-campaign-[0-9]{8}T[0-9]{6}Z\.tar\.gz$ ]]; then
             echo "Unexpected campaign archive name: $CAMPAIGN_ARCHIVE" >&2
             exit 1
-          }
-          [[ "$CAMPAIGN_SHA256" =~ ^[0-9a-fA-F]{64}$ ]] || {
+          fi
+          if [[ ! "$CAMPAIGN_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]; then
             echo "campaign_sha256 is not a SHA-256 digest" >&2
             exit 1
-          }
+          fi
 
-          ci_success="$(gh api             -H "Accept: application/vnd.github+json"             "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$QUALIFIED_COMMIT&status=completed&per_page=100"             --jq '[.workflow_runs[] | select(.conclusion == "success")] | length')"
-          (( ci_success > 0 )) || {
+          ci_success="$(gh api -H "Accept: application/vnd.github+json" "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$QUALIFIED_COMMIT&status=completed&per_page=100" --jq '[.workflow_runs[] | select(.conclusion == "success")] | length')"
+          if (( ci_success == 0 )); then
             echo "No successful CI workflow found for $QUALIFIED_COMMIT" >&2
             exit 1
-          }
+          fi
 
           if git ls-remote --exit-code --tags origin "refs/tags/$DAS_RELEASE_TAG" >/dev/null 2>&1; then
             echo "Tag $DAS_RELEASE_TAG already exists" >&2
@@ -178,7 +184,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .ci/STM32CubeH7/Drivers/CMSIS/Device/ST/STM32H7xx
-          ln -s "$GITHUB_WORKSPACE/.ci/cmsis-device-h7/Include"             .ci/STM32CubeH7/Drivers/CMSIS/Device/ST/STM32H7xx/Include
+          ln -s "$GITHUB_WORKSPACE/.ci/cmsis-device-h7/Include" .ci/STM32CubeH7/Drivers/CMSIS/Device/ST/STM32H7xx/Include
 
       - name: Install ARM toolchain
         run: |
@@ -202,34 +208,37 @@ jobs:
           package_name="das-$VERSION-stm32h755-$CORE"
           prefix="$GITHUB_WORKSPACE/package/$package_name"
 
-          cmake -S . -B "$build" -G Ninja             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/cmake/toolchains/arm-none-eabi.cmake"             -DCMAKE_BUILD_TYPE=Release             -DDAS_DEVICE=nucleo_h755zi_q             -DDAS_CORE="$CORE"             -DSTM32_CUBE_H7_DIR="$GITHUB_WORKSPACE/.ci/STM32CubeH7"
+          cmake -S . -B "$build" -G Ninja -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/cmake/toolchains/arm-none-eabi.cmake" -DCMAKE_BUILD_TYPE=Release -DDAS_DEVICE=nucleo_h755zi_q -DDAS_CORE="$CORE" -DSTM32_CUBE_H7_DIR="$GITHUB_WORKSPACE/.ci/STM32CubeH7"
           cmake --build "$build" --parallel
           cmake --install "$build" --prefix "$prefix"
 
-          cmake -S tests/consumer/package_contract             -B "$GITHUB_WORKSPACE/build/release-contract-$CORE" -G Ninja             -DDAS_DIR="$prefix/lib/cmake/DAS"             -DDAS_CORE="$CORE"             -DDAS_EXPECTED_CORE="$CORE"             -DDAS_REQUIRED_VERSION=0.1             -DDAS_EXPECTED_VERSION="$VERSION"
+          cmake -S tests/consumer/package_contract -B "$GITHUB_WORKSPACE/build/release-contract-$CORE" -G Ninja -DDAS_DIR="$prefix/lib/cmake/DAS" -DDAS_CORE="$CORE" -DDAS_EXPECTED_CORE="$CORE" -DDAS_REQUIRED_VERSION=0.1 -DDAS_EXPECTED_VERSION="$VERSION"
 
-          cat > "$prefix/RELEASE-METADATA.txt" <<EOF
-          DAS version: $VERSION
-          DAS commit: $QUALIFIED_COMMIT
-          Device: nucleo_h755zi_q
-          MCU: STM32H755
-          Core: $CORE
-          STM32CubeH7 ref: $STM32_CUBE_H7_REF
-          cmsis-device-h7 ref: $STM32_CMSIS_H7_REF
-          Physical campaign archive: $CAMPAIGN_ARCHIVE
-          Physical campaign SHA256: $CAMPAIGN_SHA256
-          Physical campaign PASS: $CAMPAIGN_PASS
-          Physical campaign FAIL: $CAMPAIGN_FAIL
-          Physical campaign exit code: $CAMPAIGN_EXIT
-          EOF
+          {
+            echo "DAS version: $VERSION"
+            echo "DAS commit: $QUALIFIED_COMMIT"
+            echo "Device: nucleo_h755zi_q"
+            echo "MCU: STM32H755"
+            echo "Core: $CORE"
+            echo "STM32CubeH7 ref: $STM32_CUBE_H7_REF"
+            echo "cmsis-device-h7 ref: $STM32_CMSIS_H7_REF"
+            echo "Physical campaign archive: $CAMPAIGN_ARCHIVE"
+            echo "Physical campaign SHA256: $CAMPAIGN_SHA256"
+            echo "Physical campaign PASS: $CAMPAIGN_PASS"
+            echo "Physical campaign FAIL: $CAMPAIGN_FAIL"
+            echo "Physical campaign exit code: $CAMPAIGN_EXIT"
+          } > "$prefix/RELEASE-METADATA.txt"
 
           mkdir -p "$GITHUB_WORKSPACE/dist"
-          tar -C "$GITHUB_WORKSPACE/package" -czf             "$GITHUB_WORKSPACE/dist/$package_name.tar.gz" "$package_name"
+          tar -C "$GITHUB_WORKSPACE/package" -czf "$GITHUB_WORKSPACE/dist/$package_name.tar.gz" "$package_name"
+          cp "$prefix/lib/libdas.a" "$GITHUB_WORKSPACE/dist/libdas-$VERSION-stm32h755-$CORE.a"
 
       - uses: actions/upload-artifact@v4
         with:
           name: das-${{ needs.validate.outputs.version }}-stm32h755-${{ matrix.core }}
-          path: dist/*.tar.gz
+          path: |
+            dist/*.tar.gz
+            dist/*.a
           if-no-files-found: error
 
   publish:
@@ -261,27 +270,26 @@ jobs:
         run: |
           set -euo pipefail
           cd dist
-          sha256sum *.tar.gz > SHA256SUMS
+          sha256sum *.tar.gz *.a > SHA256SUMS
           cd ..
 
           cp "release/v$VERSION.md" release-notes.md
-          cat >> release-notes.md <<EOF
-
-          ## Physical release qualification
-
-          - qualified commit: `$QUALIFIED_COMMIT`
-          - campaign archive: `$CAMPAIGN_ARCHIVE`
-          - campaign SHA-256: `$CAMPAIGN_SHA256`
-          - campaign result: **$CAMPAIGN_PASS PASS / $CAMPAIGN_FAIL FAIL / exit $CAMPAIGN_EXIT**
-
-          The tag and binary packages were produced only after the complete hardware campaign and normal GitHub CI both passed for the exact tagged commit.
-          EOF
+          {
+            echo
+            echo "## Physical release qualification"
+            echo
+            echo "- qualified commit: `$QUALIFIED_COMMIT`"
+            echo "- campaign archive: `$CAMPAIGN_ARCHIVE`"
+            echo "- campaign SHA-256: `$CAMPAIGN_SHA256`"
+            echo "- campaign result: **$CAMPAIGN_PASS PASS / $CAMPAIGN_FAIL FAIL / exit $CAMPAIGN_EXIT**"
+            echo
+            echo "The tag and binary packages were produced only after the complete hardware campaign and normal GitHub CI both passed for the exact tagged commit."
+          } >> release-notes.md
 
       - name: Create annotated tag and GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.validate.outputs.tag }}
-          VERSION: ${{ needs.validate.outputs.version }}
           QUALIFIED_COMMIT: ${{ needs.validate.outputs.qualified_commit }}
         shell: bash
         run: |
@@ -290,5 +298,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$TAG" "$QUALIFIED_COMMIT" -m "DAS $TAG"
           git push origin "$TAG"
-
-          gh release create "$TAG"             dist/*.tar.gz dist/SHA256SUMS             --verify-tag             --title "DAS $TAG"             --notes-file release-notes.md
+          gh release create "$TAG" dist/*.tar.gz dist/*.a dist/SHA256SUMS --verify-tag --title "DAS $TAG" --notes-file release-notes.md

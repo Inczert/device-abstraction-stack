@@ -1,13 +1,19 @@
 cmake_minimum_required(VERSION 3.20)
 project(das_package_contract LANGUAGES NONE)
 
-set(DAS_REQUIRED_VERSION "0.1" CACHE STRING "DAS version requested by this contract test")
-set(DAS_EXPECTED_VERSION "0.1.0" CACHE STRING "Expected installed DAS package version")
+set(DAS_REQUIRED_VERSION "" CACHE STRING "DAS version requested by this contract test")
+set(DAS_EXPECTED_VERSION "" CACHE STRING "Expected installed DAS package version")
 set(DAS_EXPECTED_DEVICE "nucleo_h755zi_q" CACHE STRING "Expected installed DAS device")
 set(DAS_EXPECTED_CORE "" CACHE STRING "Expected installed DAS core")
 
 if(NOT DAS_EXPECTED_CORE)
     message(FATAL_ERROR "DAS_EXPECTED_CORE must be set")
+endif()
+if(NOT DAS_REQUIRED_VERSION)
+    message(FATAL_ERROR "DAS_REQUIRED_VERSION must be set")
+endif()
+if(NOT DAS_EXPECTED_VERSION)
+    message(FATAL_ERROR "DAS_EXPECTED_VERSION must be set")
 endif()
 
 find_package(DAS ${DAS_REQUIRED_VERSION} CONFIG REQUIRED)

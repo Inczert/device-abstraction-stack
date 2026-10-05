@@ -1,11 +1,20 @@
 cmake_minimum_required(VERSION 3.20)
 
+# VERSION is the single source of truth for project/package/release versioning.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" DAS_PROJECT_VERSION LIMIT_COUNT 1)
+string(STRIP "${DAS_PROJECT_VERSION}" DAS_PROJECT_VERSION)
+if(NOT DAS_PROJECT_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR
+        "Invalid DAS VERSION '${DAS_PROJECT_VERSION}'; expected MAJOR.MINOR.PATCH")
+endif()
+
 # DAS_CORE must be known before project() so the toolchain can select the
 # correct CPU/FPU flags while the compiler is initialized.
 set(DAS_CORE "cm7" CACHE STRING "CPU core selected for a multi-core DAS device")
 set_property(CACHE DAS_CORE PROPERTY STRINGS cm7 cm4)
 
-project(das VERSION 0.1.0 LANGUAGES C ASM)
+project(das VERSION "${DAS_PROJECT_VERSION}" LANGUAGES C ASM)
+unset(DAS_PROJECT_VERSION)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)

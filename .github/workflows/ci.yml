@@ -19,6 +19,15 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Validate release/version metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < VERSION)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          grep -Fx "## $version" CHANGELOG.md
+          test -f "release/v$version.md"
+
       - name: Syntax-check hardware qualification scripts
         run: |
           bash -n scripts/stm32h755_test_campaign.sh
@@ -115,26 +124,36 @@ jobs:
           cmake --install "$GITHUB_WORKSPACE/build/ci-${{ matrix.core }}" \
             --prefix "$GITHUB_WORKSPACE/build/install-${{ matrix.core }}"
       - name: Validate installed DAS package contract
+        shell: bash
         run: |
+          set -euo pipefail
           prefix="$GITHUB_WORKSPACE/build/install-${{ matrix.core }}"
           das_dir="$prefix/lib/cmake/DAS"
+          version="$(tr -d '[:space:]' < VERSION)"
+          IFS=. read -r major minor patch <<< "$version"
+          required="$major.$minor"
+          if (( major == 0 )); then
+            incompatible="$major.$((minor + 1))"
+          else
+            incompatible="$((major + 1)).0"
+          fi
 
           cmake -S tests/consumer/package_contract \
             -B "build/package-contract-${{ matrix.core }}" -G Ninja \
             -DDAS_DIR="$das_dir" \
             -DDAS_CORE="${{ matrix.core }}" \
             -DDAS_EXPECTED_CORE="${{ matrix.core }}" \
-            -DDAS_REQUIRED_VERSION=0.1 \
-            -DDAS_EXPECTED_VERSION=0.1.0
+            -DDAS_REQUIRED_VERSION="$required" \
+            -DDAS_EXPECTED_VERSION="$version"
 
           if cmake -S tests/consumer/package_contract \
               -B "build/package-contract-incompatible-${{ matrix.core }}" -G Ninja \
               -DDAS_DIR="$das_dir" \
               -DDAS_CORE="${{ matrix.core }}" \
               -DDAS_EXPECTED_CORE="${{ matrix.core }}" \
-              -DDAS_REQUIRED_VERSION=0.2 \
-              -DDAS_EXPECTED_VERSION=0.1.0; then
-            echo "DAS 0.1 package incorrectly satisfied a 0.2 request" >&2
+              -DDAS_REQUIRED_VERSION="$incompatible" \
+              -DDAS_EXPECTED_VERSION="$version"; then
+            echo "DAS $version incorrectly satisfied incompatible request $incompatible" >&2
             exit 1
           fi
 
@@ -148,8 +167,8 @@ jobs:
               -DDAS_DIR="$das_dir" \
               -DDAS_CORE="$wrong_core" \
               -DDAS_EXPECTED_CORE="$wrong_core" \
-              -DDAS_REQUIRED_VERSION=0.1 \
-              -DDAS_EXPECTED_VERSION=0.1.0; then
+              -DDAS_REQUIRED_VERSION="$required" \
+              -DDAS_EXPECTED_VERSION="$version"; then
             echo "DAS package incorrectly accepted mismatched core $wrong_core" >&2
             exit 1
           fi

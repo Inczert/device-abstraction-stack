@@ -30,7 +30,7 @@ The current STM32 path uses **CMSIS definitions directly**. It does not require 
 | Packaging | static `libdas.a`, install/export, relocatable `find_package(DAS 0.1 CONFIG REQUIRED)` package |
 | Qualification | STM32H755 physical regression **40/40 PASS** including CM7/CM4 hard-float startup and CM7 Ethernet Layer 2 |
 
-DAS is preparing its first tagged release, `v0.1.0`. Release publication requires both CI and the complete physical STM32H755 campaign to pass on the exact tagged commit.
+The repository version is defined once in the root `VERSION` file; the current release candidate is `v0.1.0`. Development on `develop` never creates tags. A release tag is created automatically only after the candidate has been manually hardware-qualified, merged/pushed to `main`, and the normal `main` CI run succeeds.
 
 ## Architecture
 
@@ -94,8 +94,10 @@ lib/libdas.a
 include/das/...
 lib/cmake/DAS/DASConfig.cmake
 lib/cmake/DAS/DASConfigVersion.cmake
+lib/cmake/DAS/DASBuildInfo.cmake
 lib/cmake/DAS/DASTargets.cmake
 share/das/<selected-linker-script>.ld
+share/licenses/DAS/LICENSE
 ```
 
 A separate firmware project consumes it with:
@@ -159,4 +161,18 @@ See [Hardware qualification](docs/testing.md) and [Ethernet](docs/ethernet.md).
 
 ## Release policy
 
-DAS releases are gated by both GitHub CI and the physical NUCLEO-H755ZI-Q campaign. For v0.1.0, the release candidate must produce exactly 40 PASS / 0 FAIL / exit 0 on the same commit that is tagged. See [release/README.md](release/README.md).
+Release work is deliberately split at the hardware boundary.
+
+Manual work:
+- prepare the candidate and version on `develop`;
+- require `develop` CI to pass;
+- run the complete NUCLEO-H755ZI-Q campaign and require exactly **40 PASS / 0 FAIL / exit 0**;
+- merge/push the qualified candidate to `main` without changing the tested source content.
+
+Automatic work:
+- normal `main` CI runs;
+- after successful `main` CI, the tag workflow reads `VERSION`;
+- if `v<VERSION>` does not exist, it creates and pushes the annotated tag;
+- the packaging workflow builds CM7/CM4 Release packages, standalone `.a` libraries and checksums, then publishes the GitHub Release.
+
+A `develop` push never creates a tag. Later `main` pushes with an already-released `VERSION` also do not create another tag. See [release/README.md](release/README.md).

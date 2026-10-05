@@ -32,7 +32,7 @@ First tagged DAS baseline for NUCLEO-H755ZI-Q / STM32H755.
 
 The pre-release implementation baseline completed a 40/40 physical campaign on NUCLEO-H755ZI-Q, including both cores, real VFP execution, serial/peripheral loopbacks, timer/PWM, and Ethernet link-loss/recovery plus post-recovery traffic.
 
-The final v0.1.0 tag is required to point at an exact commit that has subsequently passed the same complete campaign. Release publication is blocked unless that evidence is supplied to the release workflow.
+Before v0.1.0 is promoted to `main`, the final release-candidate content must pass the same complete campaign with exactly 40 passes, zero failures and exit code zero. Hardware qualification is intentionally manual; merging the qualified candidate to `main` is the release authorization. Successful `main` CI then creates the tag and launches packaging automatically.
 
 ### Known boundaries
 
@@ -45,4 +45,4 @@ The final v0.1.0 tag is required to point at an exact commit that has subsequent
 
 ### Packaging/versioning
 
-DAS 0.x CMake packages use same-minor compatibility. A 0.1.x package may satisfy a 0.1 request but does not automatically satisfy a 0.2 request. Revisit this policy at v1.0 under issue #29.
+The root `VERSION` file is the single source of truth used by CMake and release automation. DAS 0.x CMake packages use same-minor compatibility. A 0.1.x package may satisfy a 0.1 request but does not automatically satisfy a 0.2 request. Revisit this policy at v1.0 under issue #29.

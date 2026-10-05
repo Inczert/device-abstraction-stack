@@ -2,6 +2,10 @@
 
 This document describes target composition, source-tree integration, installed static-library consumption, startup/vector ownership and the current STM32H755 build/debug workflow.
 
+## Version source
+
+The root `VERSION` file is the single project/package/release version source. Top-level CMake reads it before `project()`, so generated `DASConfigVersion.cmake` and installed package metadata cannot drift from release tagging. Release automation derives `v<VERSION>` from the same file.
+
 ## Requirements
 
 For the current STM32H755 target:

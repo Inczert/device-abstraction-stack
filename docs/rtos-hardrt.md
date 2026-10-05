@@ -104,7 +104,7 @@ Both libraries are consumed as installed packages:
 
 ```cmake
 set(DAS_USE_DEFAULT_VECTOR_TABLE ON)
-find_package(DAS CONFIG REQUIRED)
+find_package(DAS 0.1 CONFIG REQUIRED)
 find_package(HardRT 0.5.1 CONFIG REQUIRED)
 
 target_link_libraries(app PRIVATE HardRT::hardrt das::das)

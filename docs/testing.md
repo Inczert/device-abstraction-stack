@@ -327,6 +327,8 @@ It does not imply production dual-core lifecycle/HSEM/shared-memory coordination
 
 ## Release qualification gate
 
-A normal development campaign is also the hardware authority for a DAS release. Before v0.1.0 is tagged, the complete campaign must run on the exact release-candidate commit and finish with exactly 40 passes, zero failures and exit code zero. The campaign writes a SHA-256 alongside its evidence archive; that archive name and digest are required inputs to the release workflow.
+The full hardware campaign is the manual release authority. Before a release candidate is promoted from `develop` to `main`, it must finish with exactly 40 passes, zero failures and exit code zero. The campaign writes a SHA-256 alongside its evidence archive; preserve both as release evidence.
 
-No commit may be introduced between the successful release-candidate campaign and the tag. If the release candidate changes for any reason, rerun the full campaign.
+Release automation begins only after promotion. Successful `main` CI reads the root `VERSION` file, creates `v<VERSION>` when that tag does not already exist, and launches packaging automatically.
+
+The release workflow intentionally does not try to infer whether local hardware testing happened. If source content changes after the successful campaign, rerun the complete campaign before merging/pushing to `main`.

@@ -31,6 +31,28 @@ endif()
 if(NOT EXISTS "${DAS_PACKAGE_LINKER_SCRIPT}")
     message(FATAL_ERROR "Installed DAS linker script is missing: ${DAS_PACKAGE_LINKER_SCRIPT}")
 endif()
+if(NOT EXISTS "${DAS_PACKAGE_LICENSE_FILE}")
+    message(FATAL_ERROR "Installed DAS license is missing: ${DAS_PACKAGE_LICENSE_FILE}")
+endif()
+if(NOT DAS_PACKAGE_FLOAT_ABI STREQUAL "hard")
+    message(FATAL_ERROR "Unexpected DAS floating-point ABI '${DAS_PACKAGE_FLOAT_ABI}'")
+endif()
+if(NOT DAS_PACKAGE_C_COMPILER_ID STREQUAL "GNU")
+    message(FATAL_ERROR "Unexpected DAS compiler id '${DAS_PACKAGE_C_COMPILER_ID}'")
+endif()
+if(DAS_EXPECTED_CORE STREQUAL "cm7")
+    if(NOT DAS_PACKAGE_CPU_ARCH STREQUAL "cortex-m7" OR
+       NOT DAS_PACKAGE_FPU STREQUAL "fpv5-d16")
+        message(FATAL_ERROR
+            "Unexpected CM7 ABI metadata: cpu=${DAS_PACKAGE_CPU_ARCH}, fpu=${DAS_PACKAGE_FPU}")
+    endif()
+elseif(DAS_EXPECTED_CORE STREQUAL "cm4")
+    if(NOT DAS_PACKAGE_CPU_ARCH STREQUAL "cortex-m4" OR
+       NOT DAS_PACKAGE_FPU STREQUAL "fpv4-sp-d16")
+        message(FATAL_ERROR
+            "Unexpected CM4 ABI metadata: cpu=${DAS_PACKAGE_CPU_ARCH}, fpu=${DAS_PACKAGE_FPU}")
+    endif()
+endif()
 
 get_target_property(_das_link_options das::das INTERFACE_LINK_OPTIONS)
 get_target_property(_das_link_depends das::das INTERFACE_LINK_DEPENDS)
@@ -71,4 +93,6 @@ endif()
 
 message(STATUS
     "DAS package contract PASS: version=${DAS_VERSION}, device=${DAS_PACKAGE_DEVICE}, "
-    "core=${DAS_PACKAGE_CORE}, linker=${DAS_PACKAGE_LINKER_SCRIPT}")
+    "core=${DAS_PACKAGE_CORE}, cpu=${DAS_PACKAGE_CPU_ARCH}, fpu=${DAS_PACKAGE_FPU}, "
+    "float_abi=${DAS_PACKAGE_FLOAT_ABI}, compiler=${DAS_PACKAGE_C_COMPILER_ID} "
+    "${DAS_PACKAGE_C_COMPILER_VERSION}, linker=${DAS_PACKAGE_LINKER_SCRIPT}")

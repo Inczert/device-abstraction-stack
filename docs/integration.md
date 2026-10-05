@@ -56,8 +56,10 @@ lib/libdas.a
 include/das/...
 lib/cmake/DAS/DASConfig.cmake
 lib/cmake/DAS/DASConfigVersion.cmake
+lib/cmake/DAS/DASBuildInfo.cmake
 lib/cmake/DAS/DASTargets.cmake
 share/das/<selected-linker-script>.ld
+share/licenses/DAS/LICENSE
 ```
 
 A consumer uses:
@@ -76,7 +78,7 @@ Configure the application with the ARM toolchain for the same core and point `CM
 
 The imported target exposes the installed public include path and carries the installed linker script to the final ELF. STM32CubeH7 itself is not bundled into the package.
 
-The installed config exports `DAS_VERSION` / `DAS_PACKAGE_VERSION`, `DAS_PACKAGE_DEVICE`, `DAS_PACKAGE_CORE`, and `DAS_PACKAGE_LINKER_SCRIPT`. DAS is pre-1.0, so generated package-version compatibility is limited to the same minor line. A `0.1.x` package can satisfy `find_package(DAS 0.1 CONFIG REQUIRED)` but must not automatically satisfy `DAS 0.2`.
+The installed config exports `DAS_VERSION` / `DAS_PACKAGE_VERSION`, `DAS_PACKAGE_DEVICE`, `DAS_PACKAGE_CORE`, `DAS_PACKAGE_LINKER_SCRIPT`, and `DAS_PACKAGE_LICENSE_FILE`. `DASBuildInfo.cmake` additionally records the CPU architecture, FPU, floating-point ABI, compiler ID and compiler version used to build the static archive. DAS is pre-1.0, so generated package-version compatibility is limited to the same minor line. A `0.1.x` package can satisfy `find_package(DAS 0.1 CONFIG REQUIRED)` but must not automatically satisfy `DAS 0.2`.
 
 The package config is idempotent across repeated `find_package(DAS ...)` calls and rejects conflicting core/device or vector-table policy requests.
 

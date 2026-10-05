@@ -9,6 +9,8 @@ set(DAS_PACKAGE_VERSION "${DAS_VERSION}")
 set(DAS_PACKAGE_DEVICE "@DAS_DEVICE@")
 set(DAS_PACKAGE_CORE "@DAS_CORE@")
 
+include("${CMAKE_CURRENT_LIST_DIR}/DASBuildInfo.cmake")
+
 if(DEFINED DAS_DEVICE AND NOT "${DAS_DEVICE}" STREQUAL "${DAS_PACKAGE_DEVICE}")
     set(DAS_FOUND FALSE)
     set(DAS_NOT_FOUND_MESSAGE
@@ -34,6 +36,9 @@ include("${CMAKE_CURRENT_LIST_DIR}/DASTargets.cmake")
 set_and_check(
     DAS_PACKAGE_LINKER_SCRIPT
     "@PACKAGE_DAS_INSTALL_LINKER_DIR@/@DAS_LINKER_SCRIPT_BASENAME@")
+set_and_check(
+    DAS_PACKAGE_LICENSE_FILE
+    "@PACKAGE_DAS_INSTALL_LICENSE_DIR@/LICENSE")
 
 # find_package() may legitimately be called by more than one dependency in the
 # same configure. Apply target policy exactly once so link options do not grow

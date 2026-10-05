@@ -1,0 +1,8 @@
+# Generated DAS package build/ABI metadata.
+# This file is informational for consumers and release provenance.
+
+set(DAS_PACKAGE_CPU_ARCH "@DAS_CPU_ARCH@")
+set(DAS_PACKAGE_FPU "@DAS_FPU@")
+set(DAS_PACKAGE_FLOAT_ABI "@DAS_FLOAT_ABI@")
+set(DAS_PACKAGE_C_COMPILER_ID "@CMAKE_C_COMPILER_ID@")
+set(DAS_PACKAGE_C_COMPILER_VERSION "@CMAKE_C_COMPILER_VERSION@")

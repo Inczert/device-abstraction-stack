@@ -1,18 +1,24 @@
 @PACKAGE_INIT@
 
+set(DAS_VERSION "@PROJECT_VERSION@")
+set(DAS_VERSION_MAJOR "@PROJECT_VERSION_MAJOR@")
+set(DAS_VERSION_MINOR "@PROJECT_VERSION_MINOR@")
+set(DAS_VERSION_PATCH "@PROJECT_VERSION_PATCH@")
+
+set(DAS_PACKAGE_VERSION "${DAS_VERSION}")
 set(DAS_PACKAGE_DEVICE "@DAS_DEVICE@")
 set(DAS_PACKAGE_CORE "@DAS_CORE@")
 
 if(DEFINED DAS_DEVICE AND NOT "${DAS_DEVICE}" STREQUAL "${DAS_PACKAGE_DEVICE}")
     set(DAS_FOUND FALSE)
     set(DAS_NOT_FOUND_MESSAGE
-        "Installed DAS package targets '${DAS_PACKAGE_DEVICE}', requested '${DAS_DEVICE}'")
+        "Installed DAS ${DAS_VERSION} package targets '${DAS_PACKAGE_DEVICE}', requested '${DAS_DEVICE}'")
     return()
 endif()
 if(DEFINED DAS_CORE AND NOT "${DAS_CORE}" STREQUAL "${DAS_PACKAGE_CORE}")
     set(DAS_FOUND FALSE)
     set(DAS_NOT_FOUND_MESSAGE
-        "Installed DAS package targets core '${DAS_PACKAGE_CORE}', requested '${DAS_CORE}'")
+        "Installed DAS ${DAS_VERSION} package targets core '${DAS_PACKAGE_CORE}', requested '${DAS_CORE}'")
     return()
 endif()
 
@@ -25,26 +31,42 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/DASTargets.cmake")
 
-set(_DAS_LINKER_SCRIPT "@PACKAGE_DAS_INSTALL_LINKER_DIR@/@DAS_LINKER_SCRIPT_BASENAME@")
-if(NOT EXISTS "${_DAS_LINKER_SCRIPT}")
-    set(DAS_FOUND FALSE)
-    set(DAS_NOT_FOUND_MESSAGE
-        "Installed DAS linker script not found: ${_DAS_LINKER_SCRIPT}")
-    return()
-endif()
+set_and_check(
+    DAS_PACKAGE_LINKER_SCRIPT
+    "@PACKAGE_DAS_INSTALL_LINKER_DIR@/@DAS_LINKER_SCRIPT_BASENAME@")
 
-set_property(TARGET das::das APPEND PROPERTY
-    INTERFACE_LINK_OPTIONS "-T${_DAS_LINKER_SCRIPT}")
-set_property(TARGET das::das APPEND PROPERTY
-    INTERFACE_LINK_DEPENDS "${_DAS_LINKER_SCRIPT}")
-
-if(DAS_USE_DEFAULT_VECTOR_TABLE)
-    # libdas.a contains the weak default table, but static archives only extract
-    # referenced members. Force the canonical symbol into the final link. A
-    # strong application definition with the same name overrides the default.
+# find_package() may legitimately be called by more than one dependency in the
+# same configure. Apply target policy exactly once so link options do not grow
+# duplicate -T / -u entries.
+get_property(_DAS_POLICY_APPLIED TARGET das::das PROPERTY DAS_PACKAGE_POLICY_APPLIED)
+if(NOT _DAS_POLICY_APPLIED)
     set_property(TARGET das::das APPEND PROPERTY
-        INTERFACE_LINK_OPTIONS "-Wl,-u,g_das_vector_table")
+        INTERFACE_LINK_OPTIONS "-T${DAS_PACKAGE_LINKER_SCRIPT}")
+    set_property(TARGET das::das APPEND PROPERTY
+        INTERFACE_LINK_DEPENDS "${DAS_PACKAGE_LINKER_SCRIPT}")
+
+    if(DAS_USE_DEFAULT_VECTOR_TABLE)
+        # libdas.a contains the weak default table, but static archives only
+        # extract referenced members. Force the canonical symbol into the
+        # final link. A strong application definition still overrides it.
+        set_property(TARGET das::das APPEND PROPERTY
+            INTERFACE_LINK_OPTIONS "-Wl,-u,g_das_vector_table")
+    endif()
+
+    set_property(TARGET das::das PROPERTY DAS_PACKAGE_POLICY_APPLIED TRUE)
+    set_property(TARGET das::das PROPERTY
+        DAS_PACKAGE_VECTOR_TABLE_ENABLED "${DAS_USE_DEFAULT_VECTOR_TABLE}")
+else()
+    get_property(_DAS_VECTOR_TABLE_ENABLED TARGET das::das
+        PROPERTY DAS_PACKAGE_VECTOR_TABLE_ENABLED)
+    if(NOT "${_DAS_VECTOR_TABLE_ENABLED}" STREQUAL "${DAS_USE_DEFAULT_VECTOR_TABLE}")
+        message(FATAL_ERROR
+            "DAS_USE_DEFAULT_VECTOR_TABLE changed after DAS package policy was already applied; "
+            "set it consistently before the first find_package(DAS ...) call")
+    endif()
 endif()
 
-unset(_DAS_LINKER_SCRIPT)
+unset(_DAS_POLICY_APPLIED)
+unset(_DAS_VECTOR_TABLE_ENABLED)
+
 check_required_components(DAS)

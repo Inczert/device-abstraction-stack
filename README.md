@@ -27,7 +27,7 @@ The current STM32 path uses **CMSIS definitions directly**. It does not require 
 | DMA/cache | generic DMA1/DMAMUX1 API plus explicit CM7 D-cache coherency |
 | Ethernet | CM7 polling Layer-2 MAC/DMA/RMII backend with LAN8742A PHY and raw frame TX/RX; CM4 runtime ownership intentionally unsupported |
 | Board API | LEDs, B1, ST-LINK VCP, Arduino UART/I2C/SPI/PWM, D3/D4 and RJ45 Ethernet resources |
-| Packaging | static `libdas.a`, install/export, relocatable `find_package(DAS CONFIG REQUIRED)` package |
+| Packaging | static `libdas.a`, install/export, relocatable `find_package(DAS 0.1 CONFIG REQUIRED)` package |
 | Qualification | STM32H755 physical regression **40/40 PASS** including CM7/CM4 hard-float startup and CM7 Ethernet Layer 2 |
 
 DAS is still early development. The project version is currently `0.1.0`.
@@ -101,7 +101,7 @@ share/das/<selected-linker-script>.ld
 A separate firmware project consumes it with:
 
 ```cmake
-find_package(DAS CONFIG REQUIRED)
+find_package(DAS 0.1 CONFIG REQUIRED)
 
 add_executable(my_firmware src/main.c)
 target_link_libraries(my_firmware PRIVATE das::das)
@@ -115,6 +115,8 @@ Application code can include individual public headers or use the convenience um
 
 Configure the application with the matching ARM core toolchain and install prefix in `CMAKE_PREFIX_PATH`. The imported `das::das` target carries the installed linker script to the final ELF.
 
+DAS is pre-1.0. Installed package compatibility is intentionally constrained to the same minor release line: a `0.1.x` package satisfies `find_package(DAS 0.1 ...)`, but does not silently satisfy a future `0.2` request.
+
 Source-tree `add_subdirectory()` and `FetchContent` integration remain supported as alternatives. See [Building and integration](docs/integration.md).
 
 ## Startup and vector-table ownership
@@ -127,7 +129,7 @@ Whole-table replacement is deliberately exceptional. Firmware with a custom boot
 
 ```cmake
 set(DAS_USE_DEFAULT_VECTOR_TABLE OFF)
-find_package(DAS CONFIG REQUIRED)
+find_package(DAS 0.1 CONFIG REQUIRED)
 ```
 
 or provide a strong `g_das_vector_table` definition. The default linker scripts still place `.isr_vector` at the correct core image base and provide the runtime symbols consumed by DAS startup.

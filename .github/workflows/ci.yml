@@ -114,6 +114,46 @@ jobs:
         run: |
           cmake --install "$GITHUB_WORKSPACE/build/ci-${{ matrix.core }}" \
             --prefix "$GITHUB_WORKSPACE/build/install-${{ matrix.core }}"
+      - name: Validate installed DAS package contract
+        run: |
+          prefix="$GITHUB_WORKSPACE/build/install-${{ matrix.core }}"
+          das_dir="$prefix/lib/cmake/DAS"
+
+          cmake -S tests/consumer/package_contract \
+            -B "build/package-contract-${{ matrix.core }}" -G Ninja \
+            -DDAS_DIR="$das_dir" \
+            -DDAS_CORE="${{ matrix.core }}" \
+            -DDAS_EXPECTED_CORE="${{ matrix.core }}" \
+            -DDAS_REQUIRED_VERSION=0.1 \
+            -DDAS_EXPECTED_VERSION=0.1.0
+
+          if cmake -S tests/consumer/package_contract \
+              -B "build/package-contract-incompatible-${{ matrix.core }}" -G Ninja \
+              -DDAS_DIR="$das_dir" \
+              -DDAS_CORE="${{ matrix.core }}" \
+              -DDAS_EXPECTED_CORE="${{ matrix.core }}" \
+              -DDAS_REQUIRED_VERSION=0.2 \
+              -DDAS_EXPECTED_VERSION=0.1.0; then
+            echo "DAS 0.1 package incorrectly satisfied a 0.2 request" >&2
+            exit 1
+          fi
+
+          if [[ "${{ matrix.core }}" == "cm7" ]]; then
+            wrong_core=cm4
+          else
+            wrong_core=cm7
+          fi
+          if cmake -S tests/consumer/package_contract \
+              -B "build/package-contract-wrong-core-${{ matrix.core }}" -G Ninja \
+              -DDAS_DIR="$das_dir" \
+              -DDAS_CORE="$wrong_core" \
+              -DDAS_EXPECTED_CORE="$wrong_core" \
+              -DDAS_REQUIRED_VERSION=0.1 \
+              -DDAS_EXPECTED_VERSION=0.1.0; then
+            echo "DAS package incorrectly accepted mismatched core $wrong_core" >&2
+            exit 1
+          fi
+
       - name: Build every standalone DAS example from installed package
         run: |
           ./scripts/ci/build_installed_examples.sh \

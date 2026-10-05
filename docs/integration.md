@@ -66,7 +66,7 @@ A consumer uses:
 cmake_minimum_required(VERSION 3.20)
 project(my_firmware LANGUAGES C)
 
-find_package(DAS CONFIG REQUIRED)
+find_package(DAS 0.1 CONFIG REQUIRED)
 
 add_executable(my_firmware src/main.c)
 target_link_libraries(my_firmware PRIVATE das::das)
@@ -75,6 +75,10 @@ target_link_libraries(my_firmware PRIVATE das::das)
 Configure the application with the ARM toolchain for the same core and point `CMAKE_PREFIX_PATH` at the installation. The package records its selected DAS device/core and rejects an explicitly conflicting `DAS_DEVICE` or `DAS_CORE`.
 
 The imported target exposes the installed public include path and carries the installed linker script to the final ELF. STM32CubeH7 itself is not bundled into the package.
+
+The installed config exports `DAS_VERSION` / `DAS_PACKAGE_VERSION`, `DAS_PACKAGE_DEVICE`, `DAS_PACKAGE_CORE`, and `DAS_PACKAGE_LINKER_SCRIPT`. DAS is pre-1.0, so generated package-version compatibility is limited to the same minor line. A `0.1.x` package can satisfy `find_package(DAS 0.1 CONFIG REQUIRED)` but must not automatically satisfy `DAS 0.2`.
+
+The package config is idempotent across repeated `find_package(DAS ...)` calls and rejects conflicting core/device or vector-table policy requests.
 
 ## Source-tree integration
 
@@ -155,7 +159,7 @@ Option 1:
 
 ```cmake
 set(DAS_USE_DEFAULT_VECTOR_TABLE OFF)
-find_package(DAS CONFIG REQUIRED)
+find_package(DAS 0.1 CONFIG REQUIRED)
 ```
 
 Then provide the application's own `.isr_vector`.

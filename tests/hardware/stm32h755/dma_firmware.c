@@ -24,7 +24,8 @@
 #define DAS_DMA_FLAG_M2M         (UINT32_C(1) << 3u)
 #define DAS_DMA_FLAG_STATE       (UINT32_C(1) << 4u)
 #define DAS_DMA_FLAG_SPI         (UINT32_C(1) << 5u)
-#define DAS_DMA_REQUIRED_FLAGS UINT32_C(0x3f)
+#define DAS_DMA_FLAG_STALE       (UINT32_C(1) << 6u)
+#define DAS_DMA_REQUIRED_FLAGS UINT32_C(0x7f)
 
 #define DAS_DMA_M2M_SIZE 256u
 #define DAS_DMA_SPI_SIZE 192u
@@ -111,6 +112,39 @@ static void qualify_cache_api(void) {
 
     g_das_dma_test_evidence.cache_enabled = das_cache_data_is_enabled() ? 1u : 0u;
     g_das_dma_test_evidence.flags |= DAS_DMA_FLAG_CACHE_API;
+}
+
+static void qualify_stale_dma_handle(void) {
+    das_dma_t stale = DAS_DMA_INVALID;
+    das_dma_t current = DAS_DMA_INVALID;
+    das_result_t result = das_dma_acquire(&stale);
+    if (result != DAS_OK || !das_dma_is_valid(stale)) {
+        stop_with_error(UINT32_C(0x0d91));
+    }
+    result = das_dma_release(stale);
+    if (result != DAS_OK || das_dma_is_valid(stale)) {
+        stop_with_error(UINT32_C(0x0d92));
+    }
+
+    result = das_dma_acquire(&current);
+    if (result != DAS_OK || !das_dma_is_valid(current) ||
+        current.storage == stale.storage ||
+        das_dma_is_valid(stale)) {
+        stop_with_error(UINT32_C(0x0d93));
+    }
+
+    /* A released token must not abort or release the next allocation. */
+    if (das_dma_abort(stale) != DAS_ERROR_INVALID_ARGUMENT ||
+        das_dma_release(stale) != DAS_ERROR_INVALID_ARGUMENT ||
+        das_dma_is_valid(stale) ||
+        !das_dma_is_valid(current)) {
+        stop_with_error(UINT32_C(0x0d94));
+    }
+    result = das_dma_release(current);
+    if (result != DAS_OK || das_dma_is_valid(current)) {
+        stop_with_error(UINT32_C(0x0d95));
+    }
+    g_das_dma_test_evidence.flags |= DAS_DMA_FLAG_STALE;
 }
 
 static void qualify_memory_to_memory(void) {
@@ -252,6 +286,7 @@ int main(void) {
     }
 
     qualify_cache_api();
+    qualify_stale_dma_handle();
     qualify_memory_to_memory();
     qualify_spi_dma();
 

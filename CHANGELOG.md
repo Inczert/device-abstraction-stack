@@ -20,8 +20,8 @@ First tagged DAS baseline for NUCLEO-H755ZI-Q / STM32H755.
 - SPI modes 0..3, both bit orders, polling and full-duplex DMA;
 - I2C 7-bit controller at 100/400 kHz;
 - periodic timer and PWM control;
-- generic DMA1/DMAMUX1 plus explicit CM7 cache-coherency helpers;
-- CM7 polling Layer-2 Ethernet MAC/DMA/RMII support with LAN8742A link-state and raw TX/RX;
+- generic DMA1/DMAMUX1 plus explicit CM7 cache-coherency helpers and stale DMA-handle rejection using allocation generations;
+- CM7 polling Layer-2 Ethernet MAC/DMA/RMII support with LAN8742A link-state and raw TX/RX; fatal DMA/TX-timeout fail-closed state requiring explicit reinitialization;
 - semantic NUCLEO-H755ZI-Q board resources;
 - relocatable CMake install/export package with `das::das`;
 - target-specific CM7/CM4 installed-package metadata, license and build/ABI provenance;

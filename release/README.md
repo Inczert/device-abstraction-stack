@@ -48,7 +48,7 @@ git -C /path/to/STM32CubeH7 rev-parse HEAD
    ```
 
 6. keep the generated evidence archive and its `.sha256`;
-7. merge/push that qualified candidate to `main` without changing the tested source content. Check the resulting merge against the tested tree; a merge commit may have a different SHA if its source tree is unchanged.
+7. promote the qualified `develop` candidate through a **`develop -> main` pull request** using a normal merge commit, without changing the tested source content. Check the resulting merge against the tested tree; its SHA will differ from the tested `develop` SHA, but its source tree must not differ. Do not use a direct push or an unrelated branch as the release entry point.
 
 GitHub-hosted runners do not own the NUCLEO fixture, so automation cannot honestly perform or infer this HIL step. The human decision to promote the tested candidate to `main` is the explicit release authorization.
 
@@ -64,10 +64,11 @@ After that CI run succeeds, `.github/workflows/tag-release.yml`:
 2. reads `VERSION`;
 3. validates the matching changelog entry and `release/v<VERSION>.md`;
 4. derives the tag as `v<VERSION>`;
-5. creates and pushes the annotated tag only if that version has not already been tagged;
-6. invokes the reusable packaging workflow.
+5. for a **new** release, requires GitHub to identify exactly one merged `develop -> main` PR whose merge commit is the successful `main` CI commit;
+6. creates and pushes the annotated tag only if that version has not already been tagged;
+7. invokes the reusable packaging workflow.
 
-If the same `VERSION` is already tagged, later `main` CI runs do nothing. A new release therefore requires an intentional version change on `develop`.
+If the same `VERSION` is already tagged, later `main` CI runs do nothing. A new release therefore requires an intentional version change on `develop`. New-tag creation fails closed for a direct `main` push, missing PR association or an unrelated PR. The repository's `main` and `develop` branches still require branch protection in GitHub settings; workflow validation cannot prevent an invalid direct push from landing.
 
 ## Packaging flow
 

@@ -57,11 +57,20 @@ Ethernet defaults to Linux interface `enp0s31f6`. Use `--iface` for the focused 
 
 ## Running the full campaign
 
+Run the campaign from a clean checkout of the final `develop` release candidate. Check `git status --short` before running, and preserve the commit SHA printed in the resulting evidence archive. For the v0.1.0 baseline, use STM32CubeH7 commit `f5c0b7a2b1f6eb26fde150f72edb2d7deb647066`.
+
 ```bash
+git status --short
+git rev-parse HEAD
+git -C /home/dev/STM32Cube/Repository/STM32CubeH7/ rev-parse HEAD
+
 ./scripts/stm32h755_test_campaign.sh \
   /home/dev/STM32Cube/Repository/STM32CubeH7/ \
-  --clean
+  --clean \
+  --eth-iface <linux-interface>
 ```
+
+Select the Linux NIC physically wired to board CN14; the interface default `enp0s31f6` is only the previously qualified host's name. The script checks that the supplied NIC exists before starting the campaign.
 
 Evidence directories and archives are stored under:
 

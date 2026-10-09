@@ -62,6 +62,15 @@ The public API uses DAS and standard C types. STM32 register types, peripheral i
 
 See [Architecture](docs/architecture.md).
 
+## Documentation
+
+- **Architecture and public contract:** [architecture](docs/architecture.md), [API reference](docs/api.md), [porting guidance](docs/porting.md)
+- **Boot and target composition:** [build/integration](docs/integration.md), [linker/memory](docs/memory-layout.md), [interrupts/vectors](docs/interrupts.md), [clock/power](docs/clocks.md), [time](docs/time.md)
+- **Peripherals:** [board resources](docs/board.md), [UART](docs/uart.md), [SPI](docs/spi.md), [I2C](docs/i2c.md), [timers/PWM](docs/timer.md), [DMA/cache](docs/dma.md), [Ethernet Layer 2](docs/ethernet.md)
+- **Integration and acceptance:** [HardRT](docs/rtos-hardrt.md), [hardware/CI testing](docs/testing.md), [release procedure](release/README.md), [release notes](release/v0.1.0.md)
+
+These pages describe the **implemented** v0.1.0 scope. ADC, watchdog, internal flash/reset-cause, production CM7-to-CM4 lifecycle/HSEM/shared-memory coordination, asynchronous Ethernet and the optional C++ wrapper are tracked as later work, not implicitly included.
+
 ## Building DAS
 
 CM7 example:

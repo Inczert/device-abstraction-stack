@@ -12,7 +12,7 @@ linker/memory policy        HardFault diagnostics
 weak reset/core handlers    tasks/sleep/IPC
 ```
 
-The reference application is `examples/hardrt_uart`.
+The reference application is `examples/hardrt_uart`. CI checks out the immutable HardRT `0.5.1` tag rather than floating `main`, so the installed-package integration baseline cannot change independently of a DAS commit. The local build-and-flash helper accepts an existing HardRT checkout; select tag `0.5.1` in that checkout to reproduce the qualified integration version.
 
 ## Exception ownership
 

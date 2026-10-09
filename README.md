@@ -176,12 +176,12 @@ Manual work:
 - prepare the candidate and version on `develop`;
 - require `develop` CI to pass;
 - run the complete NUCLEO-H755ZI-Q campaign and require exactly **40 PASS / 0 FAIL / exit 0**;
-- merge/push the qualified candidate to `main` without changing the tested source content.
+- merge the qualified `develop -> main` release PR without changing the tested source content; direct pushes do not authorize a tag.
 
 Automatic work:
 - normal `main` CI runs;
 - after successful `main` CI, the tag workflow reads `VERSION`;
-- if `v<VERSION>` does not exist, it creates and pushes the annotated tag;
+- for a new release, verify the successful `main` commit belongs to the merged `develop -> main` PR; if `v<VERSION>` does not exist, create and push the annotated tag;
 - the packaging workflow builds CM7/CM4 Release packages, standalone `.a` libraries and checksums, then publishes the GitHub Release.
 
 A `develop` push never creates a tag. Later `main` pushes with an already-released `VERSION` also do not create another tag. See [release/README.md](release/README.md).

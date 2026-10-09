@@ -133,8 +133,19 @@ static void qualify_stale_dma_handle(void) {
         stop_with_error(UINT32_C(0x0d93));
     }
 
-    /* A released token must not abort or release the next allocation. */
-    if (das_dma_abort(stale) != DAS_ERROR_INVALID_ARGUMENT ||
+    /* A released token must not configure, inspect, abort or release
+       the newly allocated stream. Its new owner must remain valid. */
+    const das_dma_config_t config = {
+        .direction = DAS_DMA_MEMORY_TO_MEMORY,
+        .source_width = DAS_DMA_WIDTH_BYTE,
+        .destination_width = DAS_DMA_WIDTH_BYTE,
+        .source_increment = true,
+        .destination_increment = true,
+    };
+    das_dma_state_t stale_state = DAS_DMA_STATE_IDLE;
+    if (das_dma_configure(stale, &config) != DAS_ERROR_INVALID_ARGUMENT ||
+        das_dma_get_state(stale, &stale_state) != DAS_ERROR_INVALID_ARGUMENT ||
+        das_dma_abort(stale) != DAS_ERROR_INVALID_ARGUMENT ||
         das_dma_release(stale) != DAS_ERROR_INVALID_ARGUMENT ||
         das_dma_is_valid(stale) ||
         !das_dma_is_valid(current)) {

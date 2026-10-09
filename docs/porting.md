@@ -146,7 +146,7 @@ For multi-core devices distinguish:
 2. **physical core qualification**: real-core execution and interrupts;
 3. **dual-core system qualification**: lifecycle, shared memory, HSEM/inter-core signaling and coordinated ownership.
 
-Do not quietly upgrade level 2 evidence into level 3 claims. The debugger is talented, but not magical.
+Do not treat debugger-driven execution on each core as evidence of an autonomous, production dual-core boot and coordination sequence.
 
 For network devices, physical qualification should additionally cover link state and bidirectional traffic, plus cache/DMA ownership when relevant. Link-down/up transitions should be tested separately when they are part of the claimed behavior.
 

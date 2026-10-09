@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: read
 
 jobs:
   tag:
@@ -72,6 +73,19 @@ jobs:
               echo "publish=true" >> "$GITHUB_OUTPUT"
             fi
             exit 0
+          fi
+
+          # New releases must originate from a merged, approved develop -> main
+          # promotion. A successful main CI run alone is not release authorization:
+          # direct pushes can occur while branch protection is not configured.
+          prs="$(gh api -H 'Accept: application/vnd.github+json' \
+            "repos/${GITHUB_REPOSITORY}/commits/${CI_SHA}/pulls")"
+          matches="$(jq --arg sha "$CI_SHA" \
+            '[.[] | select(.base.ref == "main" and .head.ref == "develop" and .merged_at != null and .merge_commit_sha == $sha)] | length' \
+            <<< "$prs")"
+          if [[ "$matches" != "1" ]]; then
+            echo "New release $tag must come from exactly one merged develop -> main PR at $CI_SHA (found $matches)." >&2
+            exit 1
           fi
 
           git config user.name "github-actions[bot]"

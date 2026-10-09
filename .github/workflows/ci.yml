@@ -12,6 +12,7 @@ permissions:
 env:
   STM32_CUBE_H7_REF: f5c0b7a2b1f6eb26fde150f72edb2d7deb647066
   STM32_CMSIS_H7_REF: e8d40ae6e2fa06afe5b46d24756f141b363342a7
+  HARDRT_REF: 43dddffbfacdf2b1ed01b33940ac8f32a14d334d # HardRT 0.5.1
 
 jobs:
   host-contract:
@@ -244,7 +245,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ExoSpaceLabs/hardrt
-          ref: main
+          ref: ${{ env.HARDRT_REF }}
           path: .ci/hardrt
           fetch-depth: 1
       - name: Install ARM toolchain

@@ -15,7 +15,6 @@ Both images use the same test source and DAS public APIs. The different CMake bu
 
 Each hardware-test image provides:
 
-- the STM32H755 external-IRQ vector layout needed by the test;
 - test application logic and GDB evidence;
 - physical GPIO qualification behavior;
 - startup `.data`/`.bss` probes;
@@ -23,6 +22,7 @@ Each hardware-test image provides:
 
 It consumes:
 
+- the canonical STM32H755 vector table and weak default handlers supplied by DAS;
 - `das::das` for reusable Cortex-M startup and GPIO/board APIs;
 - the selected STM32H755 linker script propagated by `das::das`;
 - CMSIS device definitions for independent register evidence.
@@ -115,7 +115,7 @@ CN10 D4 / PE14 / pin 8   ---- jumper ----   CN10 D3 / PE13 / pin 10
 
 Do not connect either pin to 3V3, 5V or GND.
 
-The campaign intentionally asks you to disconnect/reconnect the fixture for the CM4 phase so both cores get the same physical evidence.
+The full campaign starts with D3 and D4 disconnected so **both** cores can complete their input pull tests. It then prompts **once** to connect D4 to D3. The jumper stays connected for the CM4 and CM7 loopback/open-drain/EXTI tests and the timer/PWM tests. No repeated disconnect/reconnect is required.
 
 Board LEDs:
 

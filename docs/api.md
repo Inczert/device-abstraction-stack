@@ -2,6 +2,8 @@
 
 DAS public headers live under `include/das/`. Application code should use these headers rather than implementation files under `src/`. Public APIs use DAS and standard C types; CMSIS and STM32 types remain backend details.
 
+This document describes the **supported API families and their contracts**. The public headers provide the authoritative function signatures, parameter constraints and return semantics; the linked per-feature documents provide setup and usage guidance. An API family listed here is not a guarantee that every possible STM32 peripheral instance or mode is implemented.
+
 ## Public headers
 
 ```text

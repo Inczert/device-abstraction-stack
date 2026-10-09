@@ -15,8 +15,8 @@ compare-sections
 break dma_pair_cleanup
 continue
 
-set $rx_index=(unsigned int)rx_dma.storage
-set $tx_index=(unsigned int)tx_dma.storage
+set $rx_index=((unsigned int)rx_dma.storage & 7)
+set $tx_index=((unsigned int)tx_dma.storage & 7)
 set $rx_stream=0x40020010 + ($rx_index * 0x18)
 set $tx_stream=0x40020010 + ($tx_index * 0x18)
 set $rx_mux=0x40020800 + ($rx_index * 4)
@@ -63,7 +63,7 @@ if $das_expected_cache == 1
   set $cache_line_expected=32
 end
 
-if $magic == 0x444d4139 && $booted == 1 && $error == 0 && $heartbeat > 0 && $clock == 0 && $core_clock == 0 && $time == 0 && $core_hz == $das_expected_core_hz && $flags == 0x3f && $cache_available == $das_expected_cache && $cache_enabled == $das_expected_cache && $cache_line == $cache_line_expected && $m2m == 256 && $spi == 192 && $spi_hz == 4000000 && $expected == 0 && $actual == 0
+if $magic == 0x444d4139 && $booted == 1 && $error == 0 && $heartbeat > 0 && $clock == 0 && $core_clock == 0 && $time == 0 && $core_hz == $das_expected_core_hz && $flags == 0x7f && $cache_available == $das_expected_cache && $cache_enabled == $das_expected_cache && $cache_line == $cache_line_expected && $m2m == 256 && $spi == 192 && $spi_hz == 4000000 && $expected == 0 && $actual == 0
   printf "RESULT: PASS\n"
 else
   printf "RESULT: FAIL\n"

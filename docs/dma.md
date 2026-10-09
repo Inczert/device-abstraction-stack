@@ -41,7 +41,9 @@ das_dma_release(dma);
 
 ## STM32H755 generic backend
 
-The generic backend owns DMA1 streams 0..7 and corresponding DMAMUX1 channels. Allocation is local to one executing core; it is not a production cross-core resource arbiter.
+The generic backend owns DMA1 streams 0..7 and corresponding DMAMUX1 channels. Handles contain a backend-private stream index and allocation generation. After release, a stale handle is invalid even when the same stream is immediately acquired again. A finite generation counter can eventually wrap after hundreds of millions of allocations; callers must not retain released tokens indefinitely.
+
+**Concurrency:** STM32H755 acquire/release bookkeeping is protected by a brief local-core interrupt-masked critical section that preserves the prior interrupt mask. Distinct tasks/interrupts can acquire *different free streams* without claiming the same stream. This is not an HSEM/multi-core arbiter: CM7 and CM4 must not independently claim shared DMA1 hardware without application-level ownership coordination. Operations on the **same live handle**, including release/abort versus a transfer, are not internally serialized. A HardRT application must designate one owner per DMA resource or use a mutex/central DMA worker and must not start a transfer while another task is releasing it.
 
 The SPI DMA path uses private SPI1 RX/TX DMAMUX requests and two implementation-selected streams. Application code remains:
 
@@ -121,7 +123,7 @@ Arduino D11 / PB5 / SPI1_MOSI  <->  Arduino D12 / PA6 / SPI1_MISO
 
 Each core qualifies:
 
-- generic DMA allocation/configuration/release;
+- generic DMA allocation/configuration/release, including release/reacquire generation checks and rejection of stale abort/release;
 - generic DMA IRQ resolution;
 - 256-byte memory-to-memory integrity;
 - completion/error state and zero remaining elements;

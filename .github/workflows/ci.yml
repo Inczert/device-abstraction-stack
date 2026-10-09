@@ -55,6 +55,14 @@ jobs:
             -o /tmp/das-time-test
           /tmp/das-time-test
 
+      - name: Run DMA handle lifetime regression
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -Iinclude -Isrc/device/stm32h755 \
+            tests/host/dma_handle_test.c \
+            -o /tmp/das-dma-handle-test
+          /tmp/das-dma-handle-test
+
   stm32-cross-build:
     name: STM32H755 ${{ matrix.core }}
     runs-on: ubuntu-24.04

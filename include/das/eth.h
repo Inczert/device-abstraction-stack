@@ -64,6 +64,13 @@ das_result_t das_eth_receive(das_eth_t eth,
                              size_t capacity,
                              size_t* received);
 
+/**
+ * A PHY cable disconnect is nonfatal and can recover without reinitializing.
+ * A fatal MAC/DMA bus fault or TX timeout ends the current initialization:
+ * further send/receive/link queries return DAS_ERROR_NOT_READY until an
+ * explicit das_eth_init() reinitializes the MAC, DMA and descriptor rings.
+ * Concurrent calls on the same Ethernet instance are not supported.
+ */
 /** Query the current PHY link state, negotiated speed and duplex mode. */
 das_result_t das_eth_link_state(das_eth_t eth, das_eth_link_state_t* state);
 

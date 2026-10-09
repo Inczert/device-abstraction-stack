@@ -190,7 +190,7 @@ Both cores qualify modes 0..3, both bit orders, multiple requested SCK rates and
 
 ### DMA/cache
 
-The DMA case reuses the SPI fixture. Both cores qualify generic DMA allocation/configuration/release, IRQ resolution, memory-to-memory integrity and a full-duplex SPI DMA transfer. CM7 additionally qualifies the explicit D-cache maintenance contract; CM4 qualifies the same public API with expected no-D-cache behavior.
+The DMA case reuses the SPI fixture. Both cores qualify generic DMA allocation/configuration/release, stale-handle invalidation after stream reacquisition, IRQ resolution, memory-to-memory integrity and a full-duplex SPI DMA transfer. CM7 additionally qualifies the explicit D-cache maintenance contract; CM4 qualifies the same public API with expected no-D-cache behavior.
 
 Generic `das_dma_t` uses DMA1/DMAMUX1. Ethernet uses the Ethernet peripheral's independent descriptor-based DMA engine.
 
@@ -254,7 +254,7 @@ final GDB result:               PASS
 
 STM32-to-host uses broadcast EtherType `0x88B5` frames from MAC `02:00:00:00:00:01`. Host-to-STM32 qualification uses EtherType `0x88B6`, sequence numbers and deterministic payload data validated by firmware.
 
-This qualifies RMII routing, LAN8742A/MDIO link management, MAC configuration, link-loss reporting, renegotiated recovery without Ethernet reinitialization, TX/RX descriptor recycling, post-recovery raw frame transfer and CM7 D-cache coherency.
+This qualifies RMII routing, LAN8742A/MDIO link management, MAC configuration, link-loss reporting, renegotiated recovery without Ethernet reinitialization, TX/RX descriptor recycling, post-recovery raw frame transfer and CM7 D-cache coherency. It does **not** inject an Ethernet DMA bus fault or force a TX timeout; those fatal conditions now have a fail-closed, explicit-reinitialization contract but require dedicated fault-injection evidence to claim hardware validation.
 
 ## 40-case acceptance summary
 

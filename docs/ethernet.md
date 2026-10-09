@@ -43,6 +43,14 @@ das_eth_link_state(eth, &state);
 
 `das_eth_link_state()` reports link up/down plus negotiated speed and duplex. A down link reports zero speed and `DAS_ETH_DUPLEX_UNKNOWN`.
 
+### Recovery and concurrency
+
+A normal PHY disconnect is a recoverable link event: `das_eth_send()` returns `DAS_ERROR_NOT_READY` while the cable is disconnected, but the initialized MAC/descriptor rings remain intact. After reconnection the polling link-state path restores negotiated MAC settings and traffic resumes **without** calling `das_eth_init()`.
+
+A **fatal DMA bus error** or **TX completion timeout** is different. The backend stops the MAC/DMA path, marks the instance uninitialized and reports `DAS_ERROR_IO` or `DAS_ERROR_TIMEOUT`. Subsequent send/receive/link-state calls return `DAS_ERROR_NOT_READY`. Recovery must be initiated explicitly by the application calling `das_eth_init(eth, &config)` (or the board initialization wrapper), which resets the MAC/DMA and recreates descriptors. Transmitted-frame completion cannot be assumed after a fatal fault; the caller owns any retry/duplicate-handling policy. A malformed RX frame, insufficient receive buffer or ordinary PHY link loss does **not** enter this fatal state.
+
+The polling instance does not serialize concurrent send/receive/init from multiple tasks or interrupts. Assign one application/RTOS owner or externally serialize access. A fatal fault-injection/reinitialization path is not part of the existing physical 40-case evidence; the campaign qualifies normal carrier unplug/replug, raw traffic and ring recycling.
+
 ## STM32H755 / NUCLEO-H755ZI-Q backend
 
 The current runtime backend is CM7-owned and polling-only. `DAS_BOARD_ETH_RJ45` configures the on-board RMII route to the LAN8742A using AF11:

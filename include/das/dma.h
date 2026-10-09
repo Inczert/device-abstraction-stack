@@ -10,7 +10,10 @@
 #include <das/irq.h>
 #include <das/result.h>
 
-/** Opaque DMA execution resource. */
+/** Opaque DMA execution resource, valid only for its current allocation.
+ * Released handles must not be reused; callers must serialize simultaneous
+ * operations on the same live resource. The STM32H755 backend protects
+ * same-core acquire/release bookkeeping, not per-transfer concurrency. */
 typedef struct das_dma {
     uint32_t storage;
 } das_dma_t;

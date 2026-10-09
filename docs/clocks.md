@@ -109,7 +109,7 @@ STM32H755 system clocks are shared silicon resources. The current policy is:
 - CM4 / CPU2 may query the effective tree but frequency changes return `DAS_ERROR_UNSUPPORTED`;
 - production CM7-to-CM4 lifecycle and shared-clock coordination remain part of #20.
 
-Two cores independently rewriting one PLL would be technically possible in the same sense that putting two steering wheels in a car is technically possible.
+Uncoordinated PLL changes from multiple cores would violate the current global clock-ownership contract.
 
 ## Device clock engine
 
@@ -173,7 +173,7 @@ APB4
 
 from the actual RCC source, PLL and prescaler registers.
 
-Peripheral kernel clocks are intentionally handled with the peripheral that owns them. UART, SPI and timers have dedicated muxes and special rules, so pretending every peripheral clock is merely its APB frequency would be a charming source of future bugs.
+Peripheral kernel clocks are intentionally handled with the peripheral that owns them. UART, SPI and timers have dedicated muxes and special rules, so peripheral drivers must resolve their actual selected kernel source rather than assuming that the APB frequency is always correct.
 
 ## Hardware qualification
 

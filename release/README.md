@@ -15,6 +15,19 @@ Changing `VERSION` on `develop` does **not** create a tag. Tagging automation ru
 
 Before a release candidate is merged or pushed to `main`:
 
+Verify that the **exact committed** `develop` candidate is checked out and clean:
+
+```bash
+git switch develop
+git pull --ff-only
+git status --short
+git rev-parse HEAD
+git -C /path/to/STM32CubeH7 rev-parse HEAD
+```
+
+`git status --short` must produce no output. For the v0.1.0 baseline, STM32CubeH7 must resolve to `f5c0b7a2b1f6eb26fde150f72edb2d7deb647066`. If you are working with a different checkout, select the qualified dependency revision first. The final accepted campaign archive must record the DAS candidate SHA and the dependency SHA.
+
+
 1. finish code, documentation, changelog and release notes on `develop`;
 2. set the intended release number in `VERSION`;
 3. require normal `develop` CI to pass;
@@ -35,7 +48,7 @@ Before a release candidate is merged or pushed to `main`:
    ```
 
 6. keep the generated evidence archive and its `.sha256`;
-7. merge/push that qualified candidate to `main` without changing the tested source content.
+7. merge/push that qualified candidate to `main` without changing the tested source content. Check the resulting merge against the tested tree; a merge commit may have a different SHA if its source tree is unchanged.
 
 GitHub-hosted runners do not own the NUCLEO fixture, so automation cannot honestly perform or infer this HIL step. The human decision to promote the tested candidate to `main` is the explicit release authorization.
 

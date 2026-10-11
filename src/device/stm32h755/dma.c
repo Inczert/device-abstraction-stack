@@ -4,6 +4,7 @@
 #include <das/time.h>
 
 #include "dma_internal.h"
+#include "dma_handle_internal.h"
 #include "stm32h755xx.h"
 
 #include <stdbool.h>
@@ -26,6 +27,7 @@
 #endif
 
 static bool g_dma_claimed[DAS_STM32H755_DMA_STREAM_COUNT];
+static uint32_t g_dma_generation[DAS_STM32H755_DMA_STREAM_COUNT];
 static bool g_dma_configured[DAS_STM32H755_DMA_STREAM_COUNT];
 static bool g_dma_active[DAS_STM32H755_DMA_STREAM_COUNT];
 static das_dma_config_t g_dma_config[DAS_STM32H755_DMA_STREAM_COUNT];
@@ -72,11 +74,13 @@ static IRQn_Type irq_from_index(uint32_t index) {
 }
 
 static bool handle_index(das_dma_t dma, uint32_t* index) {
-    if (dma.storage >= DAS_STM32H755_DMA_STREAM_COUNT ||
-        !g_dma_claimed[dma.storage]) {
+    const uint32_t stream_index = stm32h755_dma_handle_index(dma);
+    if (!stm32h755_dma_handle_matches(dma,
+                                       g_dma_generation[stream_index],
+                                       g_dma_claimed[stream_index])) {
         return false;
     }
-    if (index != 0) *index = dma.storage;
+    if (index != 0) *index = stream_index;
     return true;
 }
 
@@ -165,21 +169,30 @@ das_result_t stm32h755_dma_set_request(das_dma_t dma, uint32_t request) {
 
 das_result_t das_dma_acquire(das_dma_t* dma) {
     if (dma == 0) return DAS_ERROR_INVALID_ARGUMENT;
+    *dma = DAS_DMA_INVALID;
     enable_dma_clock();
 
+    /* Short per-core critical section: an ISR or another HardRT task cannot
+       claim the same stream while allocation bookkeeping is updated. Preserve
+       an already-disabled interrupt state. This is not a cross-core lock. */
+    const uint32_t previous_primask = __get_PRIMASK();
+    __disable_irq();
     for (uint32_t index = 0u; index < DAS_STM32H755_DMA_STREAM_COUNT; ++index) {
         if (!g_dma_claimed[index]) {
             g_dma_claimed[index] = true;
+            g_dma_generation[index] =
+                stm32h755_dma_next_generation(g_dma_generation[index]);
             g_dma_configured[index] = false;
             g_dma_active[index] = false;
-            *dma = (das_dma_t){.storage = index};
+            *dma = stm32h755_dma_make_handle(index, g_dma_generation[index]);
+            __set_PRIMASK(previous_primask);
+
             clear_stream_flags(index);
             dmamux_from_index(index)->CCR = 0u;
             return DAS_OK;
         }
     }
-
-    *dma = DAS_DMA_INVALID;
+    __set_PRIMASK(previous_primask);
     return DAS_ERROR_NOT_READY;
 }
 
@@ -191,9 +204,19 @@ das_result_t das_dma_release(das_dma_t dma) {
     if (result != DAS_OK) return result;
     clear_stream_flags(index);
     dmamux_from_index(index)->CCR = 0u;
+
+    /* Publish the stream as free atomically relative to local interrupts
+       and task switching; recheck ownership before touching its state. */
+    const uint32_t previous_primask = __get_PRIMASK();
+    __disable_irq();
+    if (!handle_index(dma, 0)) {
+        __set_PRIMASK(previous_primask);
+        return DAS_ERROR_INVALID_ARGUMENT;
+    }
     g_dma_active[index] = false;
     g_dma_configured[index] = false;
     g_dma_claimed[index] = false;
+    __set_PRIMASK(previous_primask);
     return DAS_OK;
 }
 

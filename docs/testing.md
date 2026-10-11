@@ -57,11 +57,20 @@ Ethernet defaults to Linux interface `enp0s31f6`. Use `--iface` for the focused 
 
 ## Running the full campaign
 
+Run the campaign from a clean checkout of the final `develop` release candidate. Check `git status --short` before running, and preserve the commit SHA printed in the resulting evidence archive. For the v0.1.0 baseline, use STM32CubeH7 commit `f5c0b7a2b1f6eb26fde150f72edb2d7deb647066`.
+
 ```bash
+git status --short
+git rev-parse HEAD
+git -C /home/dev/STM32Cube/Repository/STM32CubeH7/ rev-parse HEAD
+
 ./scripts/stm32h755_test_campaign.sh \
   /home/dev/STM32Cube/Repository/STM32CubeH7/ \
-  --clean
+  --clean \
+  --eth-iface <linux-interface>
 ```
+
+Select the Linux NIC physically wired to board CN14; the interface default `enp0s31f6` is only the previously qualified host's name. The script checks that the supplied NIC exists before starting the campaign.
 
 Evidence directories and archives are stored under:
 
@@ -181,7 +190,7 @@ Both cores qualify modes 0..3, both bit orders, multiple requested SCK rates and
 
 ### DMA/cache
 
-The DMA case reuses the SPI fixture. Both cores qualify generic DMA allocation/configuration/release, IRQ resolution, memory-to-memory integrity and a full-duplex SPI DMA transfer. CM7 additionally qualifies the explicit D-cache maintenance contract; CM4 qualifies the same public API with expected no-D-cache behavior.
+The DMA case reuses the SPI fixture. Both cores qualify generic DMA allocation/configuration/release, stale-handle invalidation after stream reacquisition, IRQ resolution, memory-to-memory integrity and a full-duplex SPI DMA transfer. CM7 additionally qualifies the explicit D-cache maintenance contract; CM4 qualifies the same public API with expected no-D-cache behavior.
 
 Generic `das_dma_t` uses DMA1/DMAMUX1. Ethernet uses the Ethernet peripheral's independent descriptor-based DMA engine.
 
@@ -245,7 +254,7 @@ final GDB result:               PASS
 
 STM32-to-host uses broadcast EtherType `0x88B5` frames from MAC `02:00:00:00:00:01`. Host-to-STM32 qualification uses EtherType `0x88B6`, sequence numbers and deterministic payload data validated by firmware.
 
-This qualifies RMII routing, LAN8742A/MDIO link management, MAC configuration, link-loss reporting, renegotiated recovery without Ethernet reinitialization, TX/RX descriptor recycling, post-recovery raw frame transfer and CM7 D-cache coherency.
+This qualifies RMII routing, LAN8742A/MDIO link management, MAC configuration, link-loss reporting, renegotiated recovery without Ethernet reinitialization, TX/RX descriptor recycling, post-recovery raw frame transfer and CM7 D-cache coherency. It does **not** inject an Ethernet DMA bus fault or force a TX timeout; those fatal conditions now have a fail-closed, explicit-reinitialization contract but require dedicated fault-injection evidence to claim hardware validation.
 
 ## 40-case acceptance summary
 
@@ -323,3 +332,12 @@ The normal campaign never performs an implicit mass erase.
 The qualified baseline covers the current linker/startup/vector model, hard-float CP10/CP11 enablement and real VFP execution on both cores, clock/power, monotonic time, semantic board resources, GPIO/IRQ, polling UART, SPI, I2C, generic DMA/cache coherency, periodic timer/PWM on both cores where applicable, and CM7 polling Layer-2 Ethernet including link loss/recovery and post-recovery traffic.
 
 It does not imply production dual-core lifecycle/HSEM/shared-memory coordination, Ethernet IRQ-driven operation, IP networking, timer input capture, ADC, watchdog or internal-flash/reset-cause services.
+
+
+## Release qualification gate
+
+The full hardware campaign is the manual release authority. Before a release candidate is promoted from `develop` to `main`, it must finish with exactly 40 passes, zero failures and exit code zero. The campaign writes a SHA-256 alongside its evidence archive; preserve both as release evidence.
+
+Release automation begins only after promotion. Successful `main` CI reads the root `VERSION` file, creates `v<VERSION>` when that tag does not already exist, and launches packaging automatically.
+
+The release workflow intentionally does not try to infer whether local hardware testing happened. If source content changes after the successful campaign, rerun the complete campaign before merging/pushing to `main`.

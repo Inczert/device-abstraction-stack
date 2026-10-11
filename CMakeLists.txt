@@ -1,11 +1,20 @@
 cmake_minimum_required(VERSION 3.20)
 
+# VERSION is the single source of truth for project/package/release versioning.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" DAS_PROJECT_VERSION LIMIT_COUNT 1)
+string(STRIP "${DAS_PROJECT_VERSION}" DAS_PROJECT_VERSION)
+if(NOT DAS_PROJECT_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR
+        "Invalid DAS VERSION '${DAS_PROJECT_VERSION}'; expected MAJOR.MINOR.PATCH")
+endif()
+
 # DAS_CORE must be known before project() so the toolchain can select the
 # correct CPU/FPU flags while the compiler is initialized.
 set(DAS_CORE "cm7" CACHE STRING "CPU core selected for a multi-core DAS device")
 set_property(CACHE DAS_CORE PROPERTY STRINGS cm7 cm4)
 
-project(das VERSION 0.1.0 LANGUAGES C ASM)
+project(das VERSION "${DAS_PROJECT_VERSION}" LANGUAGES C ASM)
+unset(DAS_PROJECT_VERSION)
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -29,11 +38,17 @@ if(DAS_DEVICE STREQUAL "nucleo_h755zi_q")
     if(DAS_CORE STREQUAL "cm7")
         set(DAS_CORE_HEADER "core_cm7.h")
         set(DAS_CORE_DEFINE "CORE_CM7")
+        set(DAS_CPU_ARCH "cortex-m7")
+        set(DAS_FPU "fpv5-d16")
+        set(DAS_FLOAT_ABI "hard")
         set(DAS_DEFAULT_LINKER_SCRIPT
             "${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/stm32h755_cm7.ld")
     elseif(DAS_CORE STREQUAL "cm4")
         set(DAS_CORE_HEADER "core_cm4.h")
         set(DAS_CORE_DEFINE "CORE_CM4")
+        set(DAS_CPU_ARCH "cortex-m4")
+        set(DAS_FPU "fpv4-sp-d16")
+        set(DAS_FLOAT_ABI "hard")
         set(DAS_DEFAULT_LINKER_SCRIPT
             "${CMAKE_CURRENT_SOURCE_DIR}/cmake/targets/stm32h755_cm4.ld")
     else()
@@ -155,6 +170,7 @@ set_property(TARGET das APPEND PROPERTY INTERFACE_LINK_DEPENDS
 
 set(DAS_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/DAS")
 set(DAS_INSTALL_LINKER_DIR "${CMAKE_INSTALL_DATADIR}/das")
+set(DAS_INSTALL_LICENSE_DIR "${CMAKE_INSTALL_DATADIR}/licenses/DAS")
 get_filename_component(DAS_LINKER_SCRIPT_BASENAME
     "${DAS_EFFECTIVE_LINKER_SCRIPT}" NAME)
 
@@ -162,11 +178,17 @@ configure_package_config_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/DASConfig.cmake.in"
     "${CMAKE_CURRENT_BINARY_DIR}/DASConfig.cmake"
     INSTALL_DESTINATION "${DAS_INSTALL_CMAKEDIR}"
-    PATH_VARS DAS_INSTALL_LINKER_DIR)
+    PATH_VARS DAS_INSTALL_LINKER_DIR DAS_INSTALL_LICENSE_DIR)
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/DASBuildInfo.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/DASBuildInfo.cmake"
+    @ONLY)
 write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/DASConfigVersion.cmake"
     VERSION "${PROJECT_VERSION}"
-    COMPATIBILITY SameMajorVersion)
+    # DAS is pre-1.0: 0.2 may intentionally evolve the API, so a 0.1
+    # consumer must not silently accept it merely because the major is zero.
+    COMPATIBILITY SameMinorVersion)
 
 install(TARGETS das
     EXPORT DASTargets
@@ -176,6 +198,8 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/das"
     FILES_MATCHING PATTERN "*.h")
 install(FILES "${DAS_EFFECTIVE_LINKER_SCRIPT}"
     DESTINATION "${DAS_INSTALL_LINKER_DIR}")
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+    DESTINATION "${DAS_INSTALL_LICENSE_DIR}")
 install(EXPORT DASTargets
     FILE DASTargets.cmake
     NAMESPACE das::
@@ -183,6 +207,7 @@ install(EXPORT DASTargets
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/DASConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/DASConfigVersion.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/DASBuildInfo.cmake"
     DESTINATION "${DAS_INSTALL_CMAKEDIR}")
 
 if(DAS_BUILD_LINK_TESTS)

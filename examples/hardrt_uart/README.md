@@ -5,7 +5,7 @@ This example demonstrates one ownership model for using [HardRT](https://github.
 Both dependencies are consumed as installed CMake packages:
 
 ```cmake
-find_package(DAS CONFIG REQUIRED)
+find_package(DAS 0.1 CONFIG REQUIRED)
 find_package(HardRT 0.5.1 CONFIG REQUIRED)
 target_link_libraries(das_hardrt_uart PRIVATE HardRT::hardrt das::das)
 ```

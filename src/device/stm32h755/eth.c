@@ -353,18 +353,38 @@ static void start_mac_dma(void) {
     __DSB();
 }
 
-static void recycle_rx_descriptor(uint32_t index) {
+/* Fatal DMA conditions may leave descriptors owned indefinitely. Stop further
+ * use and require das_eth_init() to reset MAC/DMA and reconstruct both rings.
+ * Ordinary PHY link-down is NOT fatal and must recover without reinitializing. */
+static das_result_t enter_dma_fault_state(das_result_t reason) {
+    g_initialized = false;
+    ETH->DMACTCR &= ~ETH_DMACTCR_ST;
+    ETH->DMACRCR &= ~ETH_DMACRCR_SR;
+    ETH->MACCR &= ~(ETH_MACCR_TE | ETH_MACCR_RE);
+    __DSB();
+    return reason;
+}
+
+static das_result_t recycle_rx_descriptor(uint32_t index) {
     stm32h755_eth_descriptor_t* const descriptor = &g_rx_desc[index];
 
-    (void)das_cache_data_invalidate(g_rx_buffers[index], STM32H755_ETH_BUFFER_SIZE);
+    const das_result_t buffer_result =
+        das_cache_data_invalidate(g_rx_buffers[index], STM32H755_ETH_BUFFER_SIZE);
+    if (buffer_result != DAS_OK) {
+        return enter_dma_fault_state(buffer_result);
+    }
     descriptor->desc0 = address32(g_rx_buffers[index]);
     descriptor->desc1 = 0u;
     descriptor->desc2 = 0u;
     descriptor->desc3 = STM32H755_ETH_RX_OWN | STM32H755_ETH_RX_BUF1V;
     __DMB();
-    (void)cache_clean_descriptor(descriptor);
+    const das_result_t descriptor_result = cache_clean_descriptor(descriptor);
+    if (descriptor_result != DAS_OK) {
+        return enter_dma_fault_state(descriptor_result);
+    }
     __DSB();
     ETH->DMACRDTPR = address32(descriptor);
+    return DAS_OK;
 }
 
 static das_result_t read_link_state(das_eth_link_state_t* state) {
@@ -495,6 +515,10 @@ das_result_t das_eth_send(das_eth_t eth, const uint8_t* frame, size_t length) {
         return DAS_ERROR_NOT_READY;
     }
 
+    if ((ETH->DMACSR & ETH_DMACSR_FBE) != 0u) {
+        return enter_dma_fault_state(DAS_ERROR_IO);
+    }
+
     stm32h755_eth_descriptor_t* const descriptor = &g_tx_desc[g_tx_index];
     result = cache_invalidate_descriptor(descriptor);
     if (result != DAS_OK) {
@@ -532,17 +556,19 @@ das_result_t das_eth_send(das_eth_t eth, const uint8_t* frame, size_t length) {
     for (uint32_t poll = 0u; poll < STM32H755_ETH_WAIT_LIMIT; ++poll) {
         result = cache_invalidate_descriptor(&g_tx_desc[current]);
         if (result != DAS_OK) {
-            return result;
+            return enter_dma_fault_state(result);
+        }
+        /* Check fatal DMA state *before* trusting ownership completion: a
+           bus fault can also clear OWN without a successful wire transfer. */
+        if ((ETH->DMACSR & ETH_DMACSR_FBE) != 0u) {
+            return enter_dma_fault_state(DAS_ERROR_IO);
         }
         if ((g_tx_desc[current].desc3 & STM32H755_ETH_TX_OWN) == 0u) {
             return DAS_OK;
         }
-        if ((ETH->DMACSR & ETH_DMACSR_FBE) != 0u) {
-            return DAS_ERROR_IO;
-        }
     }
 
-    return DAS_ERROR_TIMEOUT;
+    return enter_dma_fault_state(DAS_ERROR_TIMEOUT);
 #endif
 }
 
@@ -560,6 +586,9 @@ das_result_t das_eth_receive(das_eth_t eth,
 #else
     if (!g_initialized) {
         return DAS_ERROR_NOT_READY;
+    }
+    if ((ETH->DMACSR & ETH_DMACSR_FBE) != 0u) {
+        return enter_dma_fault_state(DAS_ERROR_IO);
     }
 
     const uint32_t index = g_rx_index;
@@ -582,15 +611,13 @@ das_result_t das_eth_receive(das_eth_t eth,
                        length >= STM32H755_ETH_MIN_FRAME_SIZE &&
                        length <= DAS_ETH_MAX_FRAME_SIZE;
 
-    if (!valid) {
-        recycle_rx_descriptor(index);
+    if (!valid || length > capacity) {
+        result = recycle_rx_descriptor(index);
+        if (result != DAS_OK) {
+            return result;
+        }
         g_rx_index = (index + 1u) % STM32H755_ETH_RX_DESC_COUNT;
-        return DAS_ERROR_IO;
-    }
-    if (length > capacity) {
-        recycle_rx_descriptor(index);
-        g_rx_index = (index + 1u) % STM32H755_ETH_RX_DESC_COUNT;
-        return DAS_ERROR_INVALID_ARGUMENT;
+        return valid ? DAS_ERROR_INVALID_ARGUMENT : DAS_ERROR_IO;
     }
 
     result = das_cache_data_invalidate(g_rx_buffers[index], length);
@@ -600,7 +627,11 @@ das_result_t das_eth_receive(das_eth_t eth,
     byte_copy(buffer, g_rx_buffers[index], length);
     *received = length;
 
-    recycle_rx_descriptor(index);
+    result = recycle_rx_descriptor(index);
+    if (result != DAS_OK) {
+        *received = 0u;
+        return result;
+    }
     g_rx_index = (index + 1u) % STM32H755_ETH_RX_DESC_COUNT;
     return DAS_OK;
 #endif

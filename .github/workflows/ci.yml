@@ -12,6 +12,7 @@ permissions:
 env:
   STM32_CUBE_H7_REF: f5c0b7a2b1f6eb26fde150f72edb2d7deb647066
   STM32_CMSIS_H7_REF: e8d40ae6e2fa06afe5b46d24756f141b363342a7
+  HARDRT_REF: 43dddffbfacdf2b1ed01b33940ac8f32a14d334d # HardRT 0.5.1
 
 jobs:
   host-contract:
@@ -19,6 +20,15 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Validate release/version metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < VERSION)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          grep -Fx "## $version" CHANGELOG.md
+          test -f "release/v$version.md"
+
       - name: Syntax-check hardware qualification scripts
         run: |
           bash -n scripts/stm32h755_test_campaign.sh
@@ -44,6 +54,14 @@ jobs:
             -Iinclude src/common/time.c tests/host/time_test.c \
             -o /tmp/das-time-test
           /tmp/das-time-test
+
+      - name: Run DMA handle lifetime regression
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -Iinclude -Isrc/device/stm32h755 \
+            tests/host/dma_handle_test.c \
+            -o /tmp/das-dma-handle-test
+          /tmp/das-dma-handle-test
 
   stm32-cross-build:
     name: STM32H755 ${{ matrix.core }}
@@ -114,6 +132,56 @@ jobs:
         run: |
           cmake --install "$GITHUB_WORKSPACE/build/ci-${{ matrix.core }}" \
             --prefix "$GITHUB_WORKSPACE/build/install-${{ matrix.core }}"
+      - name: Validate installed DAS package contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          prefix="$GITHUB_WORKSPACE/build/install-${{ matrix.core }}"
+          das_dir="$prefix/lib/cmake/DAS"
+          version="$(tr -d '[:space:]' < VERSION)"
+          IFS=. read -r major minor patch <<< "$version"
+          required="$major.$minor"
+          if (( major == 0 )); then
+            incompatible="$major.$((minor + 1))"
+          else
+            incompatible="$((major + 1)).0"
+          fi
+
+          cmake -S tests/consumer/package_contract \
+            -B "build/package-contract-${{ matrix.core }}" -G Ninja \
+            -DDAS_DIR="$das_dir" \
+            -DDAS_CORE="${{ matrix.core }}" \
+            -DDAS_EXPECTED_CORE="${{ matrix.core }}" \
+            -DDAS_REQUIRED_VERSION="$required" \
+            -DDAS_EXPECTED_VERSION="$version"
+
+          if cmake -S tests/consumer/package_contract \
+              -B "build/package-contract-incompatible-${{ matrix.core }}" -G Ninja \
+              -DDAS_DIR="$das_dir" \
+              -DDAS_CORE="${{ matrix.core }}" \
+              -DDAS_EXPECTED_CORE="${{ matrix.core }}" \
+              -DDAS_REQUIRED_VERSION="$incompatible" \
+              -DDAS_EXPECTED_VERSION="$version"; then
+            echo "DAS $version incorrectly satisfied incompatible request $incompatible" >&2
+            exit 1
+          fi
+
+          if [[ "${{ matrix.core }}" == "cm7" ]]; then
+            wrong_core=cm4
+          else
+            wrong_core=cm7
+          fi
+          if cmake -S tests/consumer/package_contract \
+              -B "build/package-contract-wrong-core-${{ matrix.core }}" -G Ninja \
+              -DDAS_DIR="$das_dir" \
+              -DDAS_CORE="$wrong_core" \
+              -DDAS_EXPECTED_CORE="$wrong_core" \
+              -DDAS_REQUIRED_VERSION="$required" \
+              -DDAS_EXPECTED_VERSION="$version"; then
+            echo "DAS package incorrectly accepted mismatched core $wrong_core" >&2
+            exit 1
+          fi
+
       - name: Build every standalone DAS example from installed package
         run: |
           ./scripts/ci/build_installed_examples.sh \
@@ -185,7 +253,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ExoSpaceLabs/hardrt
-          ref: main
+          ref: ${{ env.HARDRT_REF }}
           path: .ci/hardrt
           fetch-depth: 1
       - name: Install ARM toolchain

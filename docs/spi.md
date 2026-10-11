@@ -37,7 +37,7 @@ das_spi_transfer_dma_timeout(spi, tx, rx, size, timeout_ms);
 
 The current SPI DMA path requires both TX and RX buffers for non-zero transfers and uses implementation-selected DMA1/DMAMUX1 resources through the generic DMA backend.
 
-DMA does not make arbitrary caller-owned cacheable memory coherent automatically. On CM7, callers explicitly clean TX data and prepare/invalidate RX storage with `<das/cache.h>`. See [DMA and cache coherency](dma.md).
+DMA does not make arbitrary caller-owned cacheable memory coherent automatically. On CM7, callers explicitly clean TX data and prepare/invalidate RX storage with `<das/cache.h>`. A SPI controller and its DMA pair must have one active transfer owner; concurrent calls from different RTOS tasks are not internally serialized. See [DMA and cache coherency](dma.md).
 
 ## Chip select
 

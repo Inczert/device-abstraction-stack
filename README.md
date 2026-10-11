@@ -27,10 +27,10 @@ The current STM32 path uses **CMSIS definitions directly**. It does not require 
 | DMA/cache | generic DMA1/DMAMUX1 API plus explicit CM7 D-cache coherency |
 | Ethernet | CM7 polling Layer-2 MAC/DMA/RMII backend with LAN8742A PHY and raw frame TX/RX; CM4 runtime ownership intentionally unsupported |
 | Board API | LEDs, B1, ST-LINK VCP, Arduino UART/I2C/SPI/PWM, D3/D4 and RJ45 Ethernet resources |
-| Packaging | static `libdas.a`, install/export, relocatable `find_package(DAS CONFIG REQUIRED)` package |
+| Packaging | static `libdas.a`, install/export, relocatable `find_package(DAS 0.1 CONFIG REQUIRED)` package |
 | Qualification | STM32H755 physical regression **40/40 PASS** including CM7/CM4 hard-float startup and CM7 Ethernet Layer 2 |
 
-DAS is still early development. The project version is currently `0.1.0`.
+The repository version is defined once in the root `VERSION` file; the current release candidate is `v0.1.0`. Development on `develop` never creates tags. A release tag is created automatically only after the candidate has been manually hardware-qualified, merged/pushed to `main`, and the normal `main` CI run succeeds.
 
 ## Architecture
 
@@ -61,6 +61,15 @@ Public DAS API                include/das/
 The public API uses DAS and standard C types. STM32 register types, peripheral instance identifiers, RCC fields, alternate-function numbers and raw IRQ numbers stay below that boundary.
 
 See [Architecture](docs/architecture.md).
+
+## Documentation
+
+- **Architecture and public contract:** [architecture](docs/architecture.md), [API reference](docs/api.md), [porting guidance](docs/porting.md)
+- **Boot and target composition:** [build/integration](docs/integration.md), [linker/memory](docs/memory-layout.md), [interrupts/vectors](docs/interrupts.md), [clock/power](docs/clocks.md), [time](docs/time.md)
+- **Peripherals:** [board resources](docs/board.md), [UART](docs/uart.md), [SPI](docs/spi.md), [I2C](docs/i2c.md), [timers/PWM](docs/timer.md), [DMA/cache](docs/dma.md), [Ethernet Layer 2](docs/ethernet.md)
+- **Integration and acceptance:** [HardRT](docs/rtos-hardrt.md), [hardware/CI testing](docs/testing.md), [release procedure](release/README.md), [release notes](release/v0.1.0.md)
+
+These pages describe the **implemented** v0.1.0 scope. ADC, watchdog, internal flash/reset-cause, production CM7-to-CM4 lifecycle/HSEM/shared-memory coordination, asynchronous Ethernet and the optional C++ wrapper are tracked as later work, not implicitly included.
 
 ## Building DAS
 
@@ -94,14 +103,16 @@ lib/libdas.a
 include/das/...
 lib/cmake/DAS/DASConfig.cmake
 lib/cmake/DAS/DASConfigVersion.cmake
+lib/cmake/DAS/DASBuildInfo.cmake
 lib/cmake/DAS/DASTargets.cmake
 share/das/<selected-linker-script>.ld
+share/licenses/DAS/LICENSE
 ```
 
 A separate firmware project consumes it with:
 
 ```cmake
-find_package(DAS CONFIG REQUIRED)
+find_package(DAS 0.1 CONFIG REQUIRED)
 
 add_executable(my_firmware src/main.c)
 target_link_libraries(my_firmware PRIVATE das::das)
@@ -115,6 +126,8 @@ Application code can include individual public headers or use the convenience um
 
 Configure the application with the matching ARM core toolchain and install prefix in `CMAKE_PREFIX_PATH`. The imported `das::das` target carries the installed linker script to the final ELF.
 
+DAS is pre-1.0. Installed package compatibility is intentionally constrained to the same minor release line: a `0.1.x` package satisfies `find_package(DAS 0.1 ...)`, but does not silently satisfy a future `0.2` request.
+
 Source-tree `add_subdirectory()` and `FetchContent` integration remain supported as alternatives. See [Building and integration](docs/integration.md).
 
 ## Startup and vector-table ownership
@@ -127,7 +140,7 @@ Whole-table replacement is deliberately exceptional. Firmware with a custom boot
 
 ```cmake
 set(DAS_USE_DEFAULT_VECTOR_TABLE OFF)
-find_package(DAS CONFIG REQUIRED)
+find_package(DAS 0.1 CONFIG REQUIRED)
 ```
 
 or provide a strong `g_das_vector_table` definition. The default linker scripts still place `.isr_vector` at the correct core image base and provide the runtime symbols consumed by DAS startup.
@@ -153,3 +166,22 @@ Override only when necessary with `--eth-iface <linux-interface>` or `DAS_ETH_IF
 The qualified Ethernet run negotiated 100 Mbps/full duplex, validated 5/5 STM32-to-host frames and 64/64 host-to-STM32 integrity frames, with zero integrity errors and `DAS_OK` at completion.
 
 See [Hardware qualification](docs/testing.md) and [Ethernet](docs/ethernet.md).
+
+
+## Release policy
+
+Release work is deliberately split at the hardware boundary.
+
+Manual work:
+- prepare the candidate and version on `develop`;
+- require `develop` CI to pass;
+- run the complete NUCLEO-H755ZI-Q campaign and require exactly **40 PASS / 0 FAIL / exit 0**;
+- merge the qualified `develop -> main` release PR without changing the tested source content; direct pushes do not authorize a tag.
+
+Automatic work:
+- normal `main` CI runs;
+- after successful `main` CI, the tag workflow reads `VERSION`;
+- for a new release, verify the successful `main` commit belongs to the merged `develop -> main` PR; if `v<VERSION>` does not exist, create and push the annotated tag;
+- the packaging workflow builds CM7/CM4 Release packages, standalone `.a` libraries and checksums, then publishes the GitHub Release.
+
+A `develop` push never creates a tag. Later `main` pushes with an already-released `VERSION` also do not create another tag. See [release/README.md](release/README.md).

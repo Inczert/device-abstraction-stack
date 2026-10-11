@@ -1,0 +1,204 @@
+name: Package DAS Release
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag already created by the main-branch tagger"
+        required: true
+        type: string
+      release_sha:
+        description: "Commit referenced by the release tag"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  STM32_CUBE_H7_REF: f5c0b7a2b1f6eb26fde150f72edb2d7deb647066
+  STM32_CMSIS_H7_REF: e8d40ae6e2fa06afe5b46d24756f141b363342a7
+
+jobs:
+  validate:
+    name: Validate tagged source
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      required_version: ${{ steps.meta.outputs.required_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_sha }}
+          fetch-depth: 0
+
+      - name: Validate tag and release metadata
+        id: meta
+        env:
+          TAG: ${{ inputs.tag }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin --tags
+
+          version="$(tr -d '[:space:]' < VERSION)"
+          expected_tag="v$version"
+          if [[ "$TAG" != "$expected_tag" ]]; then
+            echo "Tag $TAG does not match VERSION $version" >&2
+            exit 1
+          fi
+
+          tagged_sha="$(git rev-list -n 1 "$TAG")"
+          if [[ "$tagged_sha" != "$RELEASE_SHA" ]]; then
+            echo "Tag $TAG points to $tagged_sha, expected $RELEASE_SHA" >&2
+            exit 1
+          fi
+
+          grep -Fx "## $version" CHANGELOG.md >/dev/null
+          test -f "release/$TAG.md"
+
+          IFS=. read -r major minor patch <<< "$version"
+          required="$major.$minor"
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "required_version=$required" >> "$GITHUB_OUTPUT"
+
+  build-package:
+    name: Build package (${{ matrix.core }})
+    needs: validate
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        core: [cm7, cm4]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_sha }}
+
+      - name: Checkout qualified CMSIS-Core headers
+        uses: actions/checkout@v4
+        with:
+          repository: STMicroelectronics/STM32CubeH7
+          ref: ${{ env.STM32_CUBE_H7_REF }}
+          path: .ci/STM32CubeH7
+          fetch-depth: 1
+          sparse-checkout: |
+            Drivers/CMSIS/Core/Include
+            Drivers/CMSIS/Include
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout qualified STM32H7 CMSIS device headers
+        uses: actions/checkout@v4
+        with:
+          repository: STMicroelectronics/cmsis-device-h7
+          ref: ${{ env.STM32_CMSIS_H7_REF }}
+          path: .ci/cmsis-device-h7
+          fetch-depth: 1
+
+      - name: Assemble CMSIS include layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .ci/STM32CubeH7/Drivers/CMSIS/Device/ST/STM32H7xx
+          ln -s "$GITHUB_WORKSPACE/.ci/cmsis-device-h7/Include" .ci/STM32CubeH7/Drivers/CMSIS/Device/ST/STM32H7xx/Include
+
+      - name: Install ARM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi ninja-build
+
+      - name: Build and validate installed Release package
+        env:
+          CORE: ${{ matrix.core }}
+          VERSION: ${{ needs.validate.outputs.version }}
+          REQUIRED_VERSION: ${{ needs.validate.outputs.required_version }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          build="$GITHUB_WORKSPACE/build/release-$CORE"
+          package_name="das-$VERSION-stm32h755-$CORE"
+          prefix="$GITHUB_WORKSPACE/package/$package_name"
+
+          cmake -S . -B "$build" -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/cmake/toolchains/arm-none-eabi.cmake" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DDAS_DEVICE=nucleo_h755zi_q \
+            -DDAS_CORE="$CORE" \
+            -DSTM32_CUBE_H7_DIR="$GITHUB_WORKSPACE/.ci/STM32CubeH7"
+          cmake --build "$build" --parallel
+          cmake --install "$build" --prefix "$prefix"
+
+          cmake -S tests/consumer/package_contract \
+            -B "$GITHUB_WORKSPACE/build/release-contract-$CORE" -G Ninja \
+            -DDAS_DIR="$prefix/lib/cmake/DAS" \
+            -DDAS_CORE="$CORE" \
+            -DDAS_EXPECTED_CORE="$CORE" \
+            -DDAS_REQUIRED_VERSION="$REQUIRED_VERSION" \
+            -DDAS_EXPECTED_VERSION="$VERSION"
+
+          {
+            echo "DAS version: $VERSION"
+            echo "DAS tag: ${{ inputs.tag }}"
+            echo "DAS commit: $RELEASE_SHA"
+            echo "Device: nucleo_h755zi_q"
+            echo "MCU: STM32H755"
+            echo "Core: $CORE"
+            echo "STM32CubeH7 ref: $STM32_CUBE_H7_REF"
+            echo "cmsis-device-h7 ref: $STM32_CMSIS_H7_REF"
+            arm-none-eabi-gcc --version | head -n 1
+          } > "$prefix/RELEASE-METADATA.txt"
+
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          tar -C "$GITHUB_WORKSPACE/package" -czf "$GITHUB_WORKSPACE/dist/$package_name.tar.gz" "$package_name"
+          cp "$prefix/lib/libdas.a" "$GITHUB_WORKSPACE/dist/libdas-$VERSION-stm32h755-$CORE.a"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: das-${{ needs.validate.outputs.version }}-stm32h755-${{ matrix.core }}
+          path: |
+            dist/*.tar.gz
+            dist/*.a
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: [validate, build-package]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_sha }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: das-${{ needs.validate.outputs.version }}-stm32h755-*
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum *.tar.gz *.a > SHA256SUMS
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; refusing to overwrite it." >&2
+            exit 1
+          fi
+
+          gh release create "$TAG" \
+            dist/*.tar.gz dist/*.a dist/SHA256SUMS \
+            --verify-tag \
+            --title "DAS $TAG" \
+            --notes-file "release/$TAG.md"

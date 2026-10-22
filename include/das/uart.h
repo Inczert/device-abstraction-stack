@@ -91,6 +91,42 @@ das_result_t das_uart_read_timeout(das_uart_t uart,
                                    size_t size,
                                    uint32_t timeout_ms);
 
+/**
+ * Accept immediately available transmit FIFO space without waiting.
+ *
+ * *written receives bytes accepted by the UART hardware, including zero if
+ * the peripheral is currently busy. This does NOT mean that bits have finished
+ * shifting onto the wire; use das_uart_flush() when transmission completion
+ * matters. The caller can reuse the accepted bytes after return.
+ *
+ * A zero-byte transfer is DAS_OK. A nonzero transfer requires an initialized
+ * UART, and a non-NULL data pointer. The count output is always required.
+ * No DAS time source, dynamic allocation, interrupt setup or OS is needed.
+ * The UART is single-owner: do not race concurrent writers or reinit.
+ */
+das_result_t das_uart_try_write(das_uart_t uart,
+                                const uint8_t* data,
+                                size_t size,
+                                size_t* written);
+
+/**
+ * Copy immediately available RX bytes without waiting for future data.
+ *
+ * *received is zero when no byte is ready and the call returns DAS_OK.
+ * A parity/framing/noise/overrun error is reported as DAS_ERROR_IO; any
+ * bytes already copied remain counted in *received. Malformed hardware
+ * receive data is discarded on error to avoid reusing it later.
+ *
+ * This is a direct-register polling operation, NOT an IRQ-backed RX queue.
+ * Scheduling the caller to check frequently is a client concern; this API
+ * alone cannot preserve high-rate bursts while an RTOS task is asleep.
+ * Do not call concurrently with another RX reader or UART reinit.
+ */
+das_result_t das_uart_try_read(das_uart_t uart,
+                               uint8_t* data,
+                               size_t size,
+                               size_t* received);
+
 /** Wait until the transmitter has completely shifted out the final frame. */
 das_result_t das_uart_flush(das_uart_t uart);
 

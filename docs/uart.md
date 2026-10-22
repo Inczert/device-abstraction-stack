@@ -57,7 +57,16 @@ Finite timeouts use the DAS monotonic source. `DAS_UART_WAIT_FOREVER` selects in
 
 Receive parity, framing, noise and overrun faults map to `DAS_ERROR_IO`.
 
-The current UART baseline is polling/blocking. A future asynchronous/interrupt-driven buffering/callback model should be designed explicitly rather than smuggled into these calls.
+For the **v0.2.0 development branch**, bounded **nonblocking, partial-transfer** primitives are also available:
+
+```c
+size_t received = 0;
+das_result_t result = das_uart_try_read(uart, rx, sizeof(rx), &received);
+```
+
+`das_uart_try_read` returns immediately with the number of bytes already waiting in the UART hardware (zero if none). `das_uart_try_write` immediately fills available transmit hardware space and reports bytes accepted; it does not wait for the last bit to shift out. An error in the receiver returns `DAS_ERROR_IO` with any earlier successful bytes counted. Both operations use the existing UART config and **do not depend on a monotonic time source**.
+
+**Important limitation:** these are still hardware-FIFO polling operations, **not asynchronous reception**. Polling on a sleeping HardRT task can still lose data between calls. Issue #38 remains open until there is an **IRQ-backed caller-owned bounded RX buffer**, overrun/backpressure/error accounting, explicit IRQ ownership and physical burst/load qualification. No HardRT or COBS handling belongs inside DAS.
 
 ## Clocking
 

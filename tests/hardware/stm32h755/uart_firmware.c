@@ -20,7 +20,8 @@
 #define DAS_UART_FLAG_8E2     (UINT32_C(1) << 2u)
 #define DAS_UART_FLAG_7O1     (UINT32_C(1) << 3u)
 #define DAS_UART_FLAG_HANDLE  (UINT32_C(1) << 4u)
-#define DAS_UART_REQUIRED_FLAGS UINT32_C(0x1f)
+#define DAS_UART_FLAG_TRY_IO  (UINT32_C(1) << 5u)
+#define DAS_UART_REQUIRED_FLAGS UINT32_C(0x3f)
 
 typedef struct das_uart_test_evidence {
     uint32_t magic;
@@ -198,6 +199,66 @@ int main(void) {
         for (;;) { __NOP(); }
     }
     g_das_uart_test_evidence.flags |= DAS_UART_FLAG_7O1;
+
+
+    /*
+     * Nonblocking primitives use the same physical D1->D0 loopback. They
+     * report partial progress and never wait for a hardware flag themselves.
+     * This checks register semantics, not interrupt buffering under load.
+     */
+    result = das_board_uart_init(DAS_BOARD_UART_ARDUINO, &config_8n1, &timeout_uart);
+    if (result != DAS_OK) {
+        g_das_uart_test_evidence.error = UINT32_C(0x0850);
+        for (;;) { __NOP(); }
+    }
+    size_t transferred = 99u;
+    uint8_t try_byte = 0u;
+    result = das_uart_try_read(timeout_uart, &try_byte, 1u, &transferred);
+    if (result != DAS_OK || transferred != 0u) {
+        g_das_uart_test_evidence.error = UINT32_C(0x0851);
+        for (;;) { __NOP(); }
+    }
+    static const uint8_t try_pattern[] = {0x00u, 0x5au, 0xa5u, 0xffu};
+    for (size_t index = 0u; index < sizeof(try_pattern); ++index) {
+        bool sent = false;
+        for (uint32_t attempt = 0u; attempt < UINT32_C(1000000); ++attempt) {
+            transferred = 99u;
+            result = das_uart_try_write(timeout_uart, &try_pattern[index], 1u, &transferred);
+            if (result != DAS_OK || transferred > 1u) {
+                g_das_uart_test_evidence.error = UINT32_C(0x0852);
+                for (;;) { __NOP(); }
+            }
+            if (transferred == 1u) {
+                sent = true;
+                break;
+            }
+        }
+        if (!sent) {
+            g_das_uart_test_evidence.error = UINT32_C(0x0853);
+            for (;;) { __NOP(); }
+        }
+        bool got = false;
+        for (uint32_t attempt = 0u; attempt < UINT32_C(1000000); ++attempt) {
+            transferred = 99u;
+            result = das_uart_try_read(timeout_uart, &try_byte, 1u, &transferred);
+            if (result != DAS_OK || transferred > 1u) {
+                g_das_uart_test_evidence.error = UINT32_C(0x0854);
+                for (;;) { __NOP(); }
+            }
+            if (transferred == 1u) {
+                got = true;
+                break;
+            }
+        }
+        if (!got || try_byte != try_pattern[index]) {
+            g_das_uart_test_evidence.error = UINT32_C(0x0855);
+            g_das_uart_test_evidence.mismatch_expected = try_pattern[index];
+            g_das_uart_test_evidence.mismatch_actual = try_byte;
+            for (;;) { __NOP(); }
+        }
+        ++g_das_uart_test_evidence.bytes_checked;
+    }
+    g_das_uart_test_evidence.flags |= DAS_UART_FLAG_TRY_IO;
 
     if (g_das_uart_test_evidence.flags != DAS_UART_REQUIRED_FLAGS) {
         g_das_uart_test_evidence.error = UINT32_C(0x0840);

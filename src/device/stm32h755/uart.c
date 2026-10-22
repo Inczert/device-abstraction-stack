@@ -314,6 +314,70 @@ das_result_t das_uart_get_baud_rate(das_uart_t uart, uint32_t* baud_rate) {
     return DAS_OK;
 }
 
+
+das_result_t das_uart_try_write(das_uart_t uart,
+                                const uint8_t* data,
+                                size_t size,
+                                size_t* written) {
+    stm32h755_uart_route_t route;
+    if (written == 0 || (size != 0u && data == 0) ||
+        resolve_uart(uart, &route) != DAS_OK) {
+        return DAS_ERROR_INVALID_ARGUMENT;
+    }
+    *written = 0u;
+    if (size == 0u) {
+        return DAS_OK;
+    }
+    USART_TypeDef* const registers = route.registers;
+    if ((registers->CR1 & USART_CR1_UE) == 0u) {
+        return DAS_ERROR_NOT_READY;
+    }
+
+    const uint32_t mask = application_data_mask(registers);
+    while (*written < size && (registers->ISR & USART_ISR_TXE_TXFNF) != 0u) {
+        registers->TDR = (uint32_t)data[*written] & mask;
+        ++*written;
+    }
+    return DAS_OK;
+}
+
+das_result_t das_uart_try_read(das_uart_t uart,
+                               uint8_t* data,
+                               size_t size,
+                               size_t* received) {
+    stm32h755_uart_route_t route;
+    if (received == 0 || (size != 0u && data == 0) ||
+        resolve_uart(uart, &route) != DAS_OK) {
+        return DAS_ERROR_INVALID_ARGUMENT;
+    }
+    *received = 0u;
+    if (size == 0u) {
+        return DAS_OK;
+    }
+    USART_TypeDef* const registers = route.registers;
+    if ((registers->CR1 & USART_CR1_UE) == 0u) {
+        return DAS_ERROR_NOT_READY;
+    }
+
+    const uint32_t mask = application_data_mask(registers);
+    while (*received < size) {
+        const uint32_t status = registers->ISR;
+        if ((status & DAS_STM32H755_UART_ERROR_FLAGS) != 0u) {
+            registers->ICR = DAS_STM32H755_UART_CLEAR_ERRORS;
+            if ((status & USART_ISR_RXNE_RXFNE) != 0u) {
+                registers->RQR = USART_RQR_RXFRQ;
+            }
+            return DAS_ERROR_IO;
+        }
+        if ((status & USART_ISR_RXNE_RXFNE) == 0u) {
+            break;
+        }
+        data[*received] = (uint8_t)(registers->RDR & mask);
+        ++*received;
+    }
+    return DAS_OK;
+}
+
 das_result_t das_uart_write_timeout(das_uart_t uart,
                                     const uint8_t* data,
                                     size_t size,

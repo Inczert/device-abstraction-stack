@@ -329,11 +329,26 @@ int main(void) {
         g_das_uart_test_evidence.error = UINT32_C(0x0867);
         for (;;) { __NOP(); }
     }
-    stats = (das_uart_rx_stats_t){0};
-    result = das_uart_rx_buffer_stats(timeout_uart, &stats);
-    if (result != DAS_OK || stats.bytes_stored != sizeof(irq_pattern) + sizeof(rx_storage) ||
-        stats.bytes_dropped != sizeof(overflow_pattern) - sizeof(rx_storage) ||
-        stats.hardware_errors != 0u || stats.bytes_available != sizeof(rx_storage)) {
+    /*
+     * The final RXNE interrupt can be pending when the TX shift register
+     * first asserts TC. Observe completion with a bounded poll of counters
+     * rather than interpreting interrupt scheduling latency as data loss.
+     */
+    bool overflow_accounted = false;
+    for (uint32_t attempt = 0u; attempt < UINT32_C(1000000); ++attempt) {
+        stats = (das_uart_rx_stats_t){0};
+        result = das_uart_rx_buffer_stats(timeout_uart, &stats);
+        if (result != DAS_OK || stats.hardware_errors != 0u) {
+            break;
+        }
+        if (stats.bytes_stored == sizeof(irq_pattern) + sizeof(rx_storage) &&
+            stats.bytes_dropped == sizeof(overflow_pattern) - sizeof(rx_storage) &&
+            stats.bytes_available == sizeof(rx_storage)) {
+            overflow_accounted = true;
+            break;
+        }
+    }
+    if (!overflow_accounted) {
         g_das_uart_test_evidence.error = UINT32_C(0x0868);
         for (;;) { __NOP(); }
     }

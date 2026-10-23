@@ -12,6 +12,7 @@ OPENOCD_SCRIPTS="${OPENOCD_SCRIPTS:-/usr/share/openocd/scripts}"
 DEBUG_TIMEOUT=30
 CLEAN=0
 SKIP_BUILD=0
+RELEASE_MODE=0
 OPENOCD_PID=""
 GDB_BIN=""
 PASS_COUNT=0
@@ -38,6 +39,9 @@ Options:
   --openocd-scripts DIR   OpenOCD scripts directory.
   --debug-timeout SEC     GDB timeout per case (default: 30).
   --clean                 Clean before building.
+  --release               Strict single-command release qualification: requires
+                          a clean source/dependency checkout and --clean;
+                          runs host contracts + the COMPLETE physical suite.
   --no-build              Reuse existing CM7/CM4 hardware, time, clock, button,
                           UART, SPI, I2C, DMA/cache, timer/PWM, FPU, and custom-link ELFs.
                           The Ethernet installed-package qualifier is still rebuilt.
@@ -57,6 +61,7 @@ while [[ $# -gt 0 ]]; do
     --openocd-scripts) OPENOCD_SCRIPTS="$2"; shift 2 ;;
     --debug-timeout) DEBUG_TIMEOUT="$2"; shift 2 ;;
     --clean) CLEAN=1; shift ;;
+    --release) RELEASE_MODE=1; shift ;;
     --no-build) SKIP_BUILD=1; shift ;;
     -h|--help) usage; exit 0 ;;
     --*) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -77,6 +82,15 @@ if (( CLEAN != 0 && SKIP_BUILD != 0 )); then
   echo "--clean and --no-build cannot be used together" >&2
   exit 2
 fi
+if (( RELEASE_MODE != 0 )); then
+  if (( CLEAN == 0 || SKIP_BUILD != 0 )); then
+    echo "Release qualification requires --clean and forbids --no-build" >&2
+    exit 2
+  fi
+  # The established 40 hardware acceptance points are retained. The release
+  # entry point additionally compiles/runs four host API/regression contracts.
+  EXPECTED_PASS_COUNT=44
+fi
 
 need() {
   command -v "$1" >/dev/null 2>&1 || { echo "Missing command: $1" >&2; exit 2; }
@@ -92,6 +106,27 @@ else
 fi
 
 [[ -n "$STM32_CUBE_H7_DIR" ]] || { usage >&2; exit 2; }
+
+if (( RELEASE_MODE != 0 )); then
+  need git
+  need cc
+  git -C "$ROOT_DIR" rev-parse --verify HEAD >/dev/null || {
+    echo "Release qualification requires a Git source checkout" >&2
+    exit 2
+  }
+  git -C "$STM32_CUBE_H7_DIR" rev-parse --verify HEAD >/dev/null || {
+    echo "Release qualification requires a versioned STM32CubeH7 Git checkout" >&2
+    exit 2
+  }
+  source_changes="$(git -C "$ROOT_DIR" status --porcelain --untracked-files=all)" || exit 2
+  dependency_changes="$(git -C "$STM32_CUBE_H7_DIR" status --porcelain --untracked-files=all)" || exit 2
+  if [[ -n "$source_changes" || -n "$dependency_changes" ]]; then
+    echo "Release qualification requires clean DAS and STM32CubeH7 checkouts" >&2
+    [[ -z "$source_changes" ]] || printf '%s\n' "$source_changes" >&2
+    [[ -z "$dependency_changes" ]] || printf '%s\n' "$dependency_changes" >&2
+    exit 2
+  fi
+fi
 [[ -d "/sys/class/net/$ETH_IFACE" ]] || {
   echo "Network interface not found: $ETH_IFACE" >&2
   echo "Use --eth-iface <linux-interface> or DAS_ETH_IFACE to override the default." >&2
@@ -129,15 +164,25 @@ cleanup_openocd() {
 finalize() {
   local rc=$?
   local tar_rc=0
+  local result="PASS"
   trap - EXIT INT TERM
   set +e
   cleanup_openocd
+
+  # A broken build, interrupted campaign or incomplete registration is a
+  # release failure even if no individual physical case recorded FAIL yet.
+  if (( rc != 0 || FAIL_COUNT != 0 || PASS_COUNT != EXPECTED_PASS_COUNT )); then
+    result="FAIL"
+    (( rc != 0 )) || rc=1
+  fi
 
   if [[ -n "${LOG_DIR:-}" && -d "$LOG_DIR" ]]; then
     {
       echo
       echo "PASS: $PASS_COUNT"
       echo "FAIL: $FAIL_COUNT"
+      echo "EXPECTED: $EXPECTED_PASS_COUNT"
+      echo "OVERALL: $result"
       echo "Exit code: $rc"
       echo "Logs: $LOG_DIR"
     } | tee -a "$SUMMARY"
@@ -164,6 +209,7 @@ trap 'exit 143' TERM
 {
   echo "DAS STM32H755 dual-core hardware campaign"
   echo "Expected acceptance passes: $EXPECTED_PASS_COUNT"
+  echo "Qualification mode: $([[ "$RELEASE_MODE" == 1 ]] && echo RELEASE || echo DEVELOPMENT)"
   echo "UTC start: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
   echo "Repository: $ROOT_DIR"
   if command -v git >/dev/null 2>&1; then
@@ -638,6 +684,70 @@ run_ethernet_case() {
   return 1
 }
 
+
+# Release mode runs all LOCAL host regressions and physical tests from this
+# ONE entry point. The four host cases are additional acceptance points; focused
+# scripts remain developer conveniences and must never be requested separately
+# as an independent release gate.
+release_host_preflight() {
+  local bin_dir="$LOG_DIR/host-binaries"
+  mkdir -p "$bin_dir"
+
+  if cc -std=c11 -Wall -Wextra -Werror -pedantic \
+      -I"$ROOT_DIR/include" -fsyntax-only "$ROOT_DIR/tests/compile/public_headers.c" \
+      >"$LOG_DIR/host-public-headers.log" 2>&1; then
+    record "Host public API headers" PASS
+  else
+    record "Host public API headers" FAIL
+    return 1
+  fi
+
+  if {
+    cc -std=c11 -Wall -Wextra -Werror -pedantic \
+      -I"$ROOT_DIR/include" \
+      "$ROOT_DIR/src/common/time.c" "$ROOT_DIR/tests/host/time_test.c" \
+      -o "$bin_dir/time_test" &&
+    "$bin_dir/time_test"
+  } >"$LOG_DIR/host-time.log" 2>&1; then
+    record "Host monotonic-time regression" PASS
+  else
+    record "Host monotonic-time regression" FAIL
+    return 1
+  fi
+
+  if {
+    cc -std=c11 -Wall -Wextra -Werror -pedantic \
+      -I"$ROOT_DIR/include" -I"$ROOT_DIR/src/device/stm32h755" \
+      "$ROOT_DIR/tests/host/dma_handle_test.c" \
+      -o "$bin_dir/dma_handle_test" &&
+    "$bin_dir/dma_handle_test"
+  } >"$LOG_DIR/host-dma-handle.log" 2>&1; then
+    record "Host DMA-handle regression" PASS
+  else
+    record "Host DMA-handle regression" FAIL
+    return 1
+  fi
+
+  if {
+    cc -std=c11 -Wall -Wextra -Werror -pedantic \
+      -I"$ROOT_DIR/src/device/stm32h755" \
+      "$ROOT_DIR/tests/host/uart_rx_ring_test.c" \
+      -o "$bin_dir/uart_rx_ring_test" &&
+    "$bin_dir/uart_rx_ring_test"
+  } >"$LOG_DIR/host-uart-rx-ring.log" 2>&1; then
+    record "Host UART RX-ring regression" PASS
+  else
+    record "Host UART RX-ring regression" FAIL
+    return 1
+  fi
+}
+
+# Release host contracts and then the complete host/static + hardware suite.
+# Focused UART/FPU/Ethernet helpers are internal pieces, not separate release commands.
+if (( RELEASE_MODE != 0 )); then
+  release_host_preflight || exit 1
+fi
+
 # Host/static qualification. These deliberately do not require the board.
 check_layout "STM32H755 CM7 memory layout" "$LOG_DIR/cm7_memory_layout.log" \
   --core cm7 "$CM7_ELF" "$CM7_MAP" || exit 1
@@ -691,6 +801,8 @@ run_simple_case "CM7 HSI/PLL 400MHz clock" "$CLOCK_ELF" 3333 \
 run_button_case || exit 1
 
 # Persistent serial fixtures were installed during initial setup and stay connected.
+# The canonical UART GDB case also asserts v0.2.0 try-I/O, IRQ-ring RX,
+# overflow accounting and ownership guards: NO separate UART release script.
 run_simple_case "CM7 UART loopback" "$CM7_UART_ELF" 3333 \
   "$ROOT_DIR/scripts/gdb/stm32h755_uart_case.gdb" || exit 1
 run_simple_case "CM4 UART loopback" "$CM4_UART_ELF" 3334 \

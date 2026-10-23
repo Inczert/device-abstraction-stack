@@ -38,6 +38,18 @@ typedef struct uart_wait {
     uint32_t timeout_ms;
 } uart_wait_t;
 
+/*
+ * Weak private hook preserves the polling-only archive/linker contract.
+ * Firmware referencing buffered-RX API links uart_rx_irq.o and this hook
+ * resolves; otherwise basic UART never extracts the optional ISR object.
+ */
+bool stm32h755_uart_rx_buffer_active(das_uart_t uart) __attribute__((weak));
+
+static bool buffered_rx_owned(das_uart_t uart) {
+    return stm32h755_uart_rx_buffer_active != 0 &&
+           stm32h755_uart_rx_buffer_active(uart);
+}
+
 static bool config_valid(const das_uart_config_t* config) {
     if (config == 0 || config->baud_rate == 0u) {
         return false;
@@ -232,6 +244,9 @@ das_result_t das_uart_init(das_uart_t uart, const das_uart_config_t* config) {
     if (resolve_uart(uart, &route) != DAS_OK || !config_valid(config)) {
         return DAS_ERROR_INVALID_ARGUMENT;
     }
+    if (buffered_rx_owned(uart)) {
+        return DAS_ERROR_NOT_READY;
+    }
 
     select_pclk_source(uart);
     enable_peripheral_clock(uart);
@@ -314,6 +329,73 @@ das_result_t das_uart_get_baud_rate(das_uart_t uart, uint32_t* baud_rate) {
     return DAS_OK;
 }
 
+
+das_result_t das_uart_try_write(das_uart_t uart,
+                                const uint8_t* data,
+                                size_t size,
+                                size_t* written) {
+    stm32h755_uart_route_t route;
+    if (written == 0 || (size != 0u && data == 0) ||
+        resolve_uart(uart, &route) != DAS_OK) {
+        return DAS_ERROR_INVALID_ARGUMENT;
+    }
+    *written = 0u;
+    if (size == 0u) {
+        return DAS_OK;
+    }
+    USART_TypeDef* const registers = route.registers;
+    if ((registers->CR1 & USART_CR1_UE) == 0u) {
+        return DAS_ERROR_NOT_READY;
+    }
+
+    const uint32_t mask = application_data_mask(registers);
+    while (*written < size && (registers->ISR & USART_ISR_TXE_TXFNF) != 0u) {
+        registers->TDR = (uint32_t)data[*written] & mask;
+        ++*written;
+    }
+    return DAS_OK;
+}
+
+das_result_t das_uart_try_read(das_uart_t uart,
+                               uint8_t* data,
+                               size_t size,
+                               size_t* received) {
+    stm32h755_uart_route_t route;
+    if (received == 0 || (size != 0u && data == 0) ||
+        resolve_uart(uart, &route) != DAS_OK) {
+        return DAS_ERROR_INVALID_ARGUMENT;
+    }
+    *received = 0u;
+    if (buffered_rx_owned(uart)) {
+        return DAS_ERROR_NOT_READY;
+    }
+    if (size == 0u) {
+        return DAS_OK;
+    }
+    USART_TypeDef* const registers = route.registers;
+    if ((registers->CR1 & USART_CR1_UE) == 0u) {
+        return DAS_ERROR_NOT_READY;
+    }
+
+    const uint32_t mask = application_data_mask(registers);
+    while (*received < size) {
+        const uint32_t status = registers->ISR;
+        if ((status & DAS_STM32H755_UART_ERROR_FLAGS) != 0u) {
+            registers->ICR = DAS_STM32H755_UART_CLEAR_ERRORS;
+            if ((status & USART_ISR_RXNE_RXFNE) != 0u) {
+                registers->RQR = USART_RQR_RXFRQ;
+            }
+            return DAS_ERROR_IO;
+        }
+        if ((status & USART_ISR_RXNE_RXFNE) == 0u) {
+            break;
+        }
+        data[*received] = (uint8_t)(registers->RDR & mask);
+        ++*received;
+    }
+    return DAS_OK;
+}
+
 das_result_t das_uart_write_timeout(das_uart_t uart,
                                     const uint8_t* data,
                                     size_t size,
@@ -357,6 +439,9 @@ das_result_t das_uart_read_timeout(das_uart_t uart,
     stm32h755_uart_route_t route;
     if ((size != 0u && data == 0) || resolve_uart(uart, &route) != DAS_OK) {
         return DAS_ERROR_INVALID_ARGUMENT;
+    }
+    if (buffered_rx_owned(uart)) {
+        return DAS_ERROR_NOT_READY;
     }
     if (size == 0u) {
         return DAS_OK;

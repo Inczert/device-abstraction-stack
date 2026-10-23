@@ -164,15 +164,25 @@ cleanup_openocd() {
 finalize() {
   local rc=$?
   local tar_rc=0
+  local result="PASS"
   trap - EXIT INT TERM
   set +e
   cleanup_openocd
+
+  # A broken build, interrupted campaign or incomplete registration is a
+  # release failure even if no individual physical case recorded FAIL yet.
+  if (( rc != 0 || FAIL_COUNT != 0 || PASS_COUNT != EXPECTED_PASS_COUNT )); then
+    result="FAIL"
+    (( rc != 0 )) || rc=1
+  fi
 
   if [[ -n "${LOG_DIR:-}" && -d "$LOG_DIR" ]]; then
     {
       echo
       echo "PASS: $PASS_COUNT"
       echo "FAIL: $FAIL_COUNT"
+      echo "EXPECTED: $EXPECTED_PASS_COUNT"
+      echo "OVERALL: $result"
       echo "Exit code: $rc"
       echo "Logs: $LOG_DIR"
     } | tee -a "$SUMMARY"

@@ -382,6 +382,15 @@ int main(void) {
     }
 }
 
+/*
+ * Compile/link regression: this firmware uses DAS buffered RX on USART1,
+ * while USART3's IRQ remains application-owned. No duplicate strong ISR
+ * symbols may be introduced by linking the optional RX backend.
+ */
+void USART3_IRQHandler(void) {
+    __NOP();
+}
+
 void HardFault_Handler(void) {
     g_das_uart_test_evidence.error = DAS_UART_TEST_HARDFAULT;
     for (;;) { __NOP(); }

@@ -66,7 +66,7 @@ das_result_t result = das_uart_try_read(uart, rx, sizeof(rx), &received);
 
 `das_uart_try_read` returns immediately with the number of bytes already waiting in the UART hardware (zero if none). `das_uart_try_write` immediately fills available transmit hardware space and reports bytes accepted; it does not wait for the last bit to shift out. An error in the receiver returns `DAS_ERROR_IO` with any earlier successful bytes counted. Both operations use the existing UART config and **do not depend on a monotonic time source**.
 
-**Important limitation:** these are still hardware-FIFO polling operations, **not asynchronous reception**. Polling on a sleeping HardRT task can still lose data between calls. Issue #38 remains open until there is an **IRQ-backed caller-owned bounded RX buffer**, overrun/backpressure/error accounting, explicit IRQ ownership and physical burst/load qualification. No HardRT or COBS handling belongs inside DAS.
+**Important limitation:** these are still hardware-FIFO polling operations, **not asynchronous reception**. Polling on a sleeping HardRT task can still lose data between calls. Issue #38 also tracks **IRQ-backed caller-owned bounded RX buffering**, added below. Sustained physical burst/load qualification and OBC integration acceptance are still pending. No HardRT or COBS handling belongs inside DAS.
 
 ## Optional interrupt-backed buffered RX (v0.2.0 development)
 
@@ -88,9 +88,9 @@ das_uart_rx_buffer_stop(uart);
 ```
 
 The ring is bounded, single ISR producer / single task consumer, and retains
-all \`capacity\` slots. When full, **new** bytes are discarded and counted;
-oldest unread bytes are never overwritten. \`bytes_stored\`,
-\`bytes_dropped\`, \`hardware_errors\` and \`bytes_available\` make data loss
+all `capacity` slots. When full, **new** bytes are discarded and counted;
+oldest unread bytes are never overwritten. `bytes_stored`,
+`bytes_dropped`, `hardware_errors` and `bytes_available` make data loss
 visible. Counters wrap after 2^32 events and reset on start. UART errors
 clear the appropriate peripheral flags and discard malformed RX bytes. The
 IRQ service drains at most 32 characters per interrupt entry to bound
@@ -129,6 +129,6 @@ Fixture:
 Arduino D1 / TX / PB6 <-> Arduino D0 / RX / PB7
 ```
 
-Both CM7 and CM4 verify timeout behavior, semantic route setup, live baud generation, all three advertised framing combinations, exact deterministic byte equality and continued execution.
+Both CM7 and CM4 qualify the original timeout/framing/byte-equality behavior plus development-branch immediate I/O and interrupt-ring loopback, including full-buffer overflow accounting. A physical Pi/host sustained-load test remains pending.
 
 UART is part of the standing **40/40 PASS** STM32H755 regression baseline at DAS commit `737863075dfed78f73f99ae58f6e0ca52ffea93e`.

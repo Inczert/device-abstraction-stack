@@ -309,6 +309,46 @@ int main(void) {
         g_das_uart_test_evidence.error = UINT32_C(0x0864);
         for (;;) { __NOP(); }
     }
+    /*
+     * Keep the IRQ ring full while sending 12 more bytes into an 8-byte
+     * buffer. The first eight must survive; four newer bytes are dropped.
+     */
+    static const uint8_t overflow_pattern[] = {
+        0x10u, 0x21u, 0x32u, 0x43u, 0x54u, 0x65u,
+        0x76u, 0x87u, 0x98u, 0xa9u, 0xbau, 0xcbu
+    };
+    for (size_t index = 0u; index < sizeof(overflow_pattern); ++index) {
+        result = das_uart_write_timeout(timeout_uart, &overflow_pattern[index], 1u, 100u);
+        if (result != DAS_OK) {
+            g_das_uart_test_evidence.error = UINT32_C(0x0866);
+            for (;;) { __NOP(); }
+        }
+    }
+    result = das_uart_flush(timeout_uart);
+    if (result != DAS_OK) {
+        g_das_uart_test_evidence.error = UINT32_C(0x0867);
+        for (;;) { __NOP(); }
+    }
+    stats = (das_uart_rx_stats_t){0};
+    result = das_uart_rx_buffer_stats(timeout_uart, &stats);
+    if (result != DAS_OK || stats.bytes_stored != sizeof(irq_pattern) + sizeof(rx_storage) ||
+        stats.bytes_dropped != sizeof(overflow_pattern) - sizeof(rx_storage) ||
+        stats.hardware_errors != 0u || stats.bytes_available != sizeof(rx_storage)) {
+        g_das_uart_test_evidence.error = UINT32_C(0x0868);
+        for (;;) { __NOP(); }
+    }
+    for (size_t index = 0u; index < sizeof(rx_storage); ++index) {
+        size_t got = 0u;
+        uint8_t byte = 0u;
+        result = das_uart_rx_buffer_read(timeout_uart, &byte, 1u, &got);
+        if (result != DAS_OK || got != 1u || byte != overflow_pattern[index]) {
+            g_das_uart_test_evidence.error = UINT32_C(0x0869);
+            g_das_uart_test_evidence.mismatch_expected = overflow_pattern[index];
+            g_das_uart_test_evidence.mismatch_actual = byte;
+            for (;;) { __NOP(); }
+        }
+        ++g_das_uart_test_evidence.bytes_checked;
+    }
     result = das_uart_rx_buffer_stop(timeout_uart);
     if (result != DAS_OK) {
         g_das_uart_test_evidence.error = UINT32_C(0x0865);

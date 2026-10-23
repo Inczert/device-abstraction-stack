@@ -272,6 +272,20 @@ int main(void) {
         g_das_uart_test_evidence.error = UINT32_C(0x0860);
         for (;;) { __NOP(); }
     }
+    /*
+     * Buffered mode owns USART RX; direct reads/reinit must fail cleanly
+     * instead of racing ISR consumption of the hardware RX data register.
+     */
+    size_t forbidden_received = 77u;
+    uint8_t forbidden_byte = 0u;
+    if (das_uart_try_read(timeout_uart, &forbidden_byte, 1u,
+                          &forbidden_received) != DAS_ERROR_NOT_READY ||
+        forbidden_received != 0u ||
+        das_uart_read_timeout(timeout_uart, &forbidden_byte, 1u, 1u) != DAS_ERROR_NOT_READY ||
+        das_uart_init(timeout_uart, &config_8n1) != DAS_ERROR_NOT_READY) {
+        g_das_uart_test_evidence.error = UINT32_C(0x086a);
+        for (;;) { __NOP(); }
+    }
     static const uint8_t irq_pattern[] = {0x19u, 0xe1u, 0x00u, 0x7fu};
     for (size_t index = 0u; index < sizeof(irq_pattern); ++index) {
         result = das_uart_write_timeout(timeout_uart, &irq_pattern[index], 1u, 100u);

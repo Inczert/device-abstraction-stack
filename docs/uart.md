@@ -97,8 +97,10 @@ IRQ service drains at most 32 characters per interrupt entry to bound
 execution time; a pending source is subsequently serviced again.
 
 Do **not** run polling/timeout/direct RX APIs concurrently with this mode;
-they access the same peripheral RX data register. Stop buffering before
-reinitializing the UART or releasing its storage. The UART IRQ handler lives
+they access the same peripheral RX data register. When buffering is active,
+the backend rejects these direct reads and UART reinitialization with
+`DAS_ERROR_NOT_READY`. Stop buffering before reinitializing the UART or
+releasing its storage. The UART IRQ handler lives
 in a separate archive object: **polling-only clients do not link the buffered
 RX service**. The canonical vector table provides weak USART default handlers
 that dispatch into the buffered service only if it was linked. An application

@@ -98,6 +98,22 @@ void das_stm32h755_uart3_rx_service(void) {
     uart_rx_service(USART3, &g_rx_usart3);
 }
 
+/*
+ * Private weakly-referenced guard for polling UART operations. This symbol
+ * only becomes link-visible when optional UART buffered RX is actually used.
+ */
+bool stm32h755_uart_rx_buffer_active(das_uart_t uart) {
+    USART_TypeDef* registers;
+    IRQn_Type irq;
+    das_uart_rx_context_t* ctx;
+    if (rx_resolve(uart, &registers, &irq, &ctx) != DAS_OK) {
+        return false;
+    }
+    (void)registers;
+    (void)irq;
+    return ctx->active;
+}
+
 das_result_t das_uart_rx_buffer_start(das_uart_t uart,
                                       uint8_t* storage,
                                       size_t capacity) {

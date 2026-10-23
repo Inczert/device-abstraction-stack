@@ -122,11 +122,19 @@ The STM32H755 backend derives the relevant APB peripheral clock from live DAS cl
 
 ## Hardware qualification
 
-Focused qualifier:
+Focused qualifier (for **development/debugging only**):
 
 ```bash
 ./scripts/stm32h755_uart_test.sh /home/dev/STM32Cube/Repository/STM32CubeH7/
 ```
+
+**Release qualification must use one command**, not this focused script:
+
+```bash
+./scripts/stm32h755_test_campaign.sh /path/to/STM32CubeH7 --release --clean
+```
+
+The full campaign invokes the **same** CM7/CM4 UART firmware and GDB verifier as acceptance cases; the verifier checks v0.2.0 try-read/write, IRQ-buffered RX, overflow and ownership guards. Both UART logs are included in the single evidence archive alongside all other peripherals.
 
 Fixture:
 

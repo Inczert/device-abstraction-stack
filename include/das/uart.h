@@ -127,6 +127,65 @@ das_result_t das_uart_try_read(das_uart_t uart,
                                size_t size,
                                size_t* received);
 
+
+/**
+ * Per-UART statistics from interrupt-buffered receive.
+ *
+ * bytes_stored counts all bytes accepted into the ring, including those
+ * subsequently read. bytes_dropped counts bytes discarded because the ring
+ * was full; hardware_errors counts USART parity/framing/noise/overrun events.
+ * These are wrapping 32-bit counters, reset when buffering starts.
+ */
+typedef struct das_uart_rx_stats {
+    uint32_t bytes_stored;
+    uint32_t bytes_dropped;
+    uint32_t hardware_errors;
+    size_t bytes_available;
+    size_t capacity;
+} das_uart_rx_stats_t;
+
+/**
+ * Start interrupt-backed receive with a caller-owned fixed ring buffer.
+ *
+ * The UART must first be initialized with das_uart_init() or a DAS board
+ * UART initialization API. Capacity must be at least 2 and at most 65535
+ * bytes. All capacity slots can be used. The caller must keep storage alive
+ * and must not resize/mutate it until das_uart_rx_buffer_stop() succeeds.
+ *
+ * DAS owns the selected USART1/USART3 IRQ vector while this mode is used.
+ * A firmware that supplies its own strong USART handler must NOT use this
+ * convenience mode; UART IRQ ownership cannot be shared implicitly.
+ * Other UART read methods (blocking, timeout or try_read) MUST NOT run
+ * while buffered RX is active, since those access the hardware RX data
+ * register directly. Only one task may consume buffered bytes.
+ *
+ * The start operation discards any pre-existing unread hardware RX byte.
+ * Hardware IRQ priority is left at its existing controller setting.
+ * The ISR never calls an RTOS or an application callback.
+ * When the operation is not required, no IRQ handler needs to be linked
+ * and existing polling-only firmware may keep its own USART IRQ handler.
+ */
+das_result_t das_uart_rx_buffer_start(das_uart_t uart,
+                                      uint8_t* storage,
+                                      size_t capacity);
+
+/** Stop and disable buffered RX interrupts before storage is reclaimed. */
+das_result_t das_uart_rx_buffer_stop(das_uart_t uart);
+
+/**
+ * Copy up to size buffered bytes without waiting; *received may be zero.
+ * A full ring discards later incoming bytes and increments bytes_dropped,
+ * but does not overwrite earlier unread bytes. Query stats for loss.
+ */
+das_result_t das_uart_rx_buffer_read(das_uart_t uart,
+                                     uint8_t* data,
+                                     size_t size,
+                                     size_t* received);
+
+/** Return an IRQ-consistent snapshot of buffered RX counters and occupancy. */
+das_result_t das_uart_rx_buffer_stats(das_uart_t uart,
+                                      das_uart_rx_stats_t* stats);
+
 /** Wait until the transmitter has completely shifted out the final frame. */
 das_result_t das_uart_flush(das_uart_t uart);
 

@@ -21,7 +21,8 @@
 #define DAS_UART_FLAG_7O1     (UINT32_C(1) << 3u)
 #define DAS_UART_FLAG_HANDLE  (UINT32_C(1) << 4u)
 #define DAS_UART_FLAG_TRY_IO  (UINT32_C(1) << 5u)
-#define DAS_UART_REQUIRED_FLAGS UINT32_C(0x3f)
+#define DAS_UART_FLAG_IRQ_RX (UINT32_C(1) << 6u)
+#define DAS_UART_REQUIRED_FLAGS UINT32_C(0x7f)
 
 typedef struct das_uart_test_evidence {
     uint32_t magic;
@@ -259,6 +260,61 @@ int main(void) {
         ++g_das_uart_test_evidence.bytes_checked;
     }
     g_das_uart_test_evidence.flags |= DAS_UART_FLAG_TRY_IO;
+
+
+    /*
+     * Interrupt RX path: ring storage is caller owned, IRQ is provided by
+     * the optional separate module, and the data path does not poll RDR.
+     */
+    uint8_t rx_storage[8] = {0u};
+    result = das_uart_rx_buffer_start(timeout_uart, rx_storage, sizeof(rx_storage));
+    if (result != DAS_OK) {
+        g_das_uart_test_evidence.error = UINT32_C(0x0860);
+        for (;;) { __NOP(); }
+    }
+    static const uint8_t irq_pattern[] = {0x19u, 0xe1u, 0x00u, 0x7fu};
+    for (size_t index = 0u; index < sizeof(irq_pattern); ++index) {
+        result = das_uart_write_timeout(timeout_uart, &irq_pattern[index], 1u, 100u);
+        if (result != DAS_OK) {
+            g_das_uart_test_evidence.error = UINT32_C(0x0861);
+            for (;;) { __NOP(); }
+        }
+        size_t got = 0u;
+        uint8_t byte = 0u;
+        bool received_byte = false;
+        for (uint32_t attempt = 0u; attempt < UINT32_C(1000000); ++attempt) {
+            result = das_uart_rx_buffer_read(timeout_uart, &byte, 1u, &got);
+            if (result != DAS_OK || got > 1u) {
+                g_das_uart_test_evidence.error = UINT32_C(0x0862);
+                for (;;) { __NOP(); }
+            }
+            if (got == 1u) {
+                received_byte = true;
+                break;
+            }
+        }
+        if (!received_byte || byte != irq_pattern[index]) {
+            g_das_uart_test_evidence.error = UINT32_C(0x0863);
+            g_das_uart_test_evidence.mismatch_expected = irq_pattern[index];
+            g_das_uart_test_evidence.mismatch_actual = byte;
+            for (;;) { __NOP(); }
+        }
+        ++g_das_uart_test_evidence.bytes_checked;
+    }
+    das_uart_rx_stats_t stats = {0};
+    result = das_uart_rx_buffer_stats(timeout_uart, &stats);
+    if (result != DAS_OK || stats.bytes_stored != sizeof(irq_pattern) ||
+        stats.bytes_dropped != 0u || stats.hardware_errors != 0u ||
+        stats.bytes_available != 0u || stats.capacity != sizeof(rx_storage)) {
+        g_das_uart_test_evidence.error = UINT32_C(0x0864);
+        for (;;) { __NOP(); }
+    }
+    result = das_uart_rx_buffer_stop(timeout_uart);
+    if (result != DAS_OK) {
+        g_das_uart_test_evidence.error = UINT32_C(0x0865);
+        for (;;) { __NOP(); }
+    }
+    g_das_uart_test_evidence.flags |= DAS_UART_FLAG_IRQ_RX;
 
     if (g_das_uart_test_evidence.flags != DAS_UART_REQUIRED_FLAGS) {
         g_das_uart_test_evidence.error = UINT32_C(0x0840);

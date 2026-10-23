@@ -68,6 +68,49 @@ das_result_t result = das_uart_try_read(uart, rx, sizeof(rx), &received);
 
 **Important limitation:** these are still hardware-FIFO polling operations, **not asynchronous reception**. Polling on a sleeping HardRT task can still lose data between calls. Issue #38 remains open until there is an **IRQ-backed caller-owned bounded RX buffer**, overrun/backpressure/error accounting, explicit IRQ ownership and physical burst/load qualification. No HardRT or COBS handling belongs inside DAS.
 
+## Optional interrupt-backed buffered RX (v0.2.0 development)
+
+After UART initialization, a firmware can retain bytes in caller-owned storage
+even while its application task is not scheduled:
+
+```c
+uint8_t rx_storage[256];
+das_uart_rx_buffer_start(uart, rx_storage, sizeof(rx_storage));
+
+size_t count = 0u;
+das_uart_rx_buffer_read(uart, rx_chunk, sizeof(rx_chunk), &count);
+
+das_uart_rx_stats_t stats;
+das_uart_rx_buffer_stats(uart, &stats);
+
+/* Before freeing rx_storage, resetting or reinitializing the UART: */
+das_uart_rx_buffer_stop(uart);
+```
+
+The ring is bounded, single ISR producer / single task consumer, and retains
+all \`capacity\` slots. When full, **new** bytes are discarded and counted;
+oldest unread bytes are never overwritten. \`bytes_stored\`,
+\`bytes_dropped\`, \`hardware_errors\` and \`bytes_available\` make data loss
+visible. Counters wrap after 2^32 events and reset on start. UART errors
+clear the appropriate peripheral flags and discard malformed RX bytes. The
+IRQ service drains at most 32 characters per interrupt entry to bound
+execution time; a pending source is subsequently serviced again.
+
+Do **not** run polling/timeout/direct RX APIs concurrently with this mode;
+they access the same peripheral RX data register. Stop buffering before
+reinitializing the UART or releasing its storage. The UART IRQ handler lives
+in a separate archive object so **polling-only clients do not acquire DAS's
+strong USART IRQ handlers**. A buffered RX client delegates the whole USART1
+or USART3 IRQ vector to DAS; it must not also define its own strong handler.
+DAS installs no RTOS callback and does not manipulate the task scheduler.
+Hardware priorities remain configurable through the normal interrupt
+controller but must be set by the owning application as appropriate.
+
+**Qualification boundary:** existing loopback tests are expanded to exercise
+interrupt receive on both CM7 and CM4. Physical burst/overrun/latency
+campaign with a connected Pi/host remains a separate acceptance gate on #38,
+and is not implied by build success or a short loopback.
+
 ## Clocking
 
 The STM32H755 backend derives the relevant APB peripheral clock from live DAS clock state and calculates BRR at runtime. Applications do not assume CPU clock equals UART clock.

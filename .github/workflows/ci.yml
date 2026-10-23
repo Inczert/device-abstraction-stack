@@ -63,6 +63,13 @@ jobs:
             -o /tmp/das-dma-handle-test
           /tmp/das-dma-handle-test
 
+      - name: Run interrupt UART RX ring regression
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -pedantic \
+            -Isrc/device/stm32h755 tests/host/uart_rx_ring_test.c \
+            -o /tmp/das-uart-rx-ring-test
+          /tmp/das-uart-rx-ring-test
+
   stm32-cross-build:
     name: STM32H755 ${{ matrix.core }}
     runs-on: ubuntu-24.04

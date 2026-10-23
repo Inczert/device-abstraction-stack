@@ -2,9 +2,10 @@
 /*
  * Optional interrupt-buffered STM32H755 UART RX.
  *
- * Deliberately separate from uart.c: libdas.a only extracts this object (and
- * its strong USART1/USART3 IRQ handlers) for firmware using the buffered RX
- * API. Polling-only customers retain their existing IRQ/vector ownership.
+ * Deliberately separate from uart.c: libdas.a only extracts this object
+ * when firmware calls the buffered RX API. The canonical weak vector-table
+ * handlers call its linked service hooks, preserving application IRQ handler
+ * overrides on unrelated or polling-only USART instances.
  */
 #include <das/uart.h>
 
@@ -89,11 +90,11 @@ static void uart_rx_service(USART_TypeDef* registers,
     }
 }
 
-void USART1_IRQHandler(void) {
+void das_stm32h755_uart1_rx_service(void) {
     uart_rx_service(USART1, &g_rx_usart1);
 }
 
-void USART3_IRQHandler(void) {
+void das_stm32h755_uart3_rx_service(void) {
     uart_rx_service(USART3, &g_rx_usart3);
 }
 

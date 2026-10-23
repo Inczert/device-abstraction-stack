@@ -17,7 +17,7 @@ extern uint32_t __StackTop;
  * RTOS therefore overrides only the handler symbols it owns and never needs to
  * copy the whole table just to use one interrupt.
  */
-#define DAS_STM32H755_EXTERNAL_VECTOR_LIST(IRQ, RESERVED) \
+#define DAS_STM32H755_EXTERNAL_VECTOR_LIST(IRQ, UART_IRQ, RESERVED) \
     IRQ(WWDG_IRQHandler) \
     IRQ(PVD_AVD_IRQHandler) \
     IRQ(TAMP_STAMP_IRQHandler) \
@@ -55,9 +55,9 @@ extern uint32_t __StackTop;
     IRQ(I2C2_ER_IRQHandler) \
     IRQ(SPI1_IRQHandler) \
     IRQ(SPI2_IRQHandler) \
-    IRQ(USART1_IRQHandler) \
+    UART_IRQ(USART1_IRQHandler) \
     IRQ(USART2_IRQHandler) \
-    IRQ(USART3_IRQHandler) \
+    UART_IRQ(USART3_IRQHandler) \
     IRQ(EXTI15_10_IRQHandler) \
     IRQ(RTC_Alarm_IRQHandler) \
     RESERVED() \
@@ -178,10 +178,44 @@ void das_stm32h755_default_irq_handler(void) {
     void name(void) \
         __attribute__((weak, alias("das_stm32h755_default_irq_handler")));
 #define DAS_STM32H755_DEFINE_RESERVED()
+#define DAS_STM32H755_DEFINE_UART_IRQ(name)
 DAS_STM32H755_EXTERNAL_VECTOR_LIST(DAS_STM32H755_DEFINE_DEFAULT_IRQ,
+                                    DAS_STM32H755_DEFINE_UART_IRQ,
                                     DAS_STM32H755_DEFINE_RESERVED)
 #undef DAS_STM32H755_DEFINE_DEFAULT_IRQ
+#undef DAS_STM32H755_DEFINE_UART_IRQ
 #undef DAS_STM32H755_DEFINE_RESERVED
+
+/*
+ * The optional buffered-RX implementation is linked only when firmware calls
+ * its public API. Weak references do not extract that archive object for
+ * polling-only firmware. Applications may override either USART vector with
+ * their own strong IRQ handler when not using DAS buffering on that UART.
+ */
+void das_stm32h755_uart1_rx_service(void) __attribute__((weak));
+void das_stm32h755_uart3_rx_service(void) __attribute__((weak));
+
+void das_stm32h755_default_usart1_irq(void) {
+    if (das_stm32h755_uart1_rx_service != 0) {
+        das_stm32h755_uart1_rx_service();
+    } else {
+        Default_Handler();
+    }
+}
+
+void das_stm32h755_default_usart3_irq(void) {
+    if (das_stm32h755_uart3_rx_service != 0) {
+        das_stm32h755_uart3_rx_service();
+    } else {
+        Default_Handler();
+    }
+}
+
+void USART1_IRQHandler(void)
+    __attribute__((weak, alias("das_stm32h755_default_usart1_irq")));
+void USART3_IRQHandler(void)
+    __attribute__((weak, alias("das_stm32h755_default_usart3_irq")));
+
 
 /*
  * Default device vector table.
@@ -209,10 +243,13 @@ const uintptr_t g_das_vector_table[] = {
     [14] = (uintptr_t)&PendSV_Handler,
     [15] = (uintptr_t)&SysTick_Handler,
 #define DAS_STM32H755_VECTOR_IRQ(name) (uintptr_t)&name,
+#define DAS_STM32H755_VECTOR_UART_IRQ(name) (uintptr_t)&name,
 #define DAS_STM32H755_VECTOR_RESERVED() UINT32_C(0),
     DAS_STM32H755_EXTERNAL_VECTOR_LIST(DAS_STM32H755_VECTOR_IRQ,
+                                        DAS_STM32H755_VECTOR_UART_IRQ,
                                         DAS_STM32H755_VECTOR_RESERVED)
 #undef DAS_STM32H755_VECTOR_IRQ
+#undef DAS_STM32H755_VECTOR_UART_IRQ
 #undef DAS_STM32H755_VECTOR_RESERVED
 };
 

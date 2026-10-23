@@ -99,9 +99,12 @@ execution time; a pending source is subsequently serviced again.
 Do **not** run polling/timeout/direct RX APIs concurrently with this mode;
 they access the same peripheral RX data register. Stop buffering before
 reinitializing the UART or releasing its storage. The UART IRQ handler lives
-in a separate archive object so **polling-only clients do not acquire DAS's
-strong USART IRQ handlers**. A buffered RX client delegates the whole USART1
-or USART3 IRQ vector to DAS; it must not also define its own strong handler.
+in a separate archive object: **polling-only clients do not link the buffered
+RX service**. The canonical vector table provides weak USART default handlers
+that dispatch into the buffered service only if it was linked. An application
+can override another USART's IRQ without duplicate handlers; for the UART
+using DAS buffered RX, the application must not override the default handler
+without forwarding events to the DAS service.
 DAS installs no RTOS callback and does not manipulate the task scheduler.
 Hardware priorities remain configurable through the normal interrupt
 controller but must be set by the owning application as appropriate.

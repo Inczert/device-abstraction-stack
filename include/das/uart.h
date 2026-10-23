@@ -152,9 +152,11 @@ typedef struct das_uart_rx_stats {
  * bytes. All capacity slots can be used. The caller must keep storage alive
  * and must not resize/mutate it until das_uart_rx_buffer_stop() succeeds.
  *
- * DAS owns the selected USART1/USART3 IRQ vector while this mode is used.
- * A firmware that supplies its own strong USART handler must NOT use this
- * convenience mode; UART IRQ ownership cannot be shared implicitly.
+ * The selected USART interrupt is serviced by DAS's weak default vector.
+ * A firmware with its own strong handler for that same USART must NOT use
+ * this convenience mode unless it explicitly dispatches to the DAS hook;
+ * UART IRQ ownership cannot be shared implicitly. An unrelated UART's own
+ * handler is unaffected.
  * Other UART read methods (blocking, timeout or try_read) MUST NOT run
  * while buffered RX is active, since those access the hardware RX data
  * register directly. Only one task may consume buffered bytes.
@@ -162,7 +164,7 @@ typedef struct das_uart_rx_stats {
  * The start operation discards any pre-existing unread hardware RX byte.
  * Hardware IRQ priority is left at its existing controller setting.
  * The ISR never calls an RTOS or an application callback.
- * When the operation is not required, no IRQ handler needs to be linked
+ * When the operation is not required, its ISR implementation is not linked
  * and existing polling-only firmware may keep its own USART IRQ handler.
  */
 das_result_t das_uart_rx_buffer_start(das_uart_t uart,

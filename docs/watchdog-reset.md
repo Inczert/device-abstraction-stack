@@ -63,12 +63,17 @@ The mandatory command remains:
   --release --clean --eth-iface <wired-linux-interface>
 ```
 
-The single runner now includes an **isolated destructive IWDG1** case:
-a CM7 test clears reset flags, starts IWDG1 for nominal 1200 ms, stops
-feeding and waits for the MCU to reset. On the next boot, AXI SRAM
-`.noinit` state identifies the pending test; RCC must report the IWDG1
-reset, and explicit flag clearing must remove that latch. No extra
-operator script, board jumper or button press is required.
+The single runner includes one **isolated two-reset hardware case**:
+CM7 explicitly clears old flags and triggers a software reset. On the
+second boot it must detect the software-reset flag (but not IWDG1),
+clear it, start IWDG1 for nominal 1200 ms and intentionally stop
+feeding. On the third boot, it must detect IWDG1 (but not the cleared
+software flag), clear it and feed the watchdog while GDB captures the
+result. Two SRAM `.noinit` markers keep the state across both resets.
+
+A PASS therefore distinguishes software and IWDG reset origins on real
+silicon, without manufacturing a reset flag in software. The test
+requires no extra operator script, board jumper or button press.
 
 **Current expected campaign target: 48 PASS / 0 FAIL.** That is a
 requirement, not evidence it has been tested.

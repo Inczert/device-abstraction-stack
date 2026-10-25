@@ -799,6 +799,7 @@ if (( RELEASE_MODE != 0 )); then
   release_host_preflight || exit 1
 fi
 
+if (( WATCHDOG_DEBUG == 0 )); then
 # Host/static qualification. These deliberately do not require the board.
 check_layout "STM32H755 CM7 memory layout" "$LOG_DIR/cm7_memory_layout.log" \
   --core cm7 "$CM7_ELF" "$CM7_MAP" || exit 1
@@ -816,6 +817,7 @@ initial_hardware_setup
 # campaign opens its long-lived debug session. All existing peripheral cases
 # still run afterwards and must pass independently.
 run_fpu_case || exit 1
+fi
 
 echo "Starting dual-core OpenOCD..."
 openocd -s "$OPENOCD_SCRIPTS" \
@@ -841,6 +843,7 @@ if ! grep -q "Listening on port 3333 for gdb connections" "$OPENOCD_LOG" || \
   exit 1
 fi
 
+if (( WATCHDOG_DEBUG == 0 )); then
 probe_core "CM7 OpenOCD probe" "$CM7_ELF" 3333 0xc27 || exit 1
 probe_core "CM4 OpenOCD probe" "$CM4_ELF" 3334 0xc24 || exit 1
 run_simple_case "CM7 monotonic timebase" "$CM7_TIME_ELF" 3333 \
@@ -918,6 +921,8 @@ run_simple_case "CM7 timer/PWM" "$CM7_TIMER_ELF" 3333 \
 run_simple_case "CM4 timer/PWM" "$CM4_TIMER_ELF" 3334 \
   "$ROOT_DIR/scripts/gdb/stm32h755_timer_case.gdb" || exit 1
 
+fi
+
 # A deliberately destructive IWDG test runs AFTER all other debugger tests
 # to avoid resetting peripherals while they are being independently qualified.
 # Both CPU-local watchdog instances must undergo their own genuine resets.
@@ -944,6 +949,8 @@ else
   record "CM4 IWDG2 reset and RCC cause" FAIL
   exit 1
 fi
+
+if (( WATCHDOG_DEBUG != 0 )); then exit 0; fi
 
 # Ethernet reprograms the board after the deliberate IWDG system reset.
 run_ethernet_case || exit 1

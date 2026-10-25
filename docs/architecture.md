@@ -57,7 +57,7 @@ This layer owns STM32H755 silicon behavior implemented by DAS:
 - canonical STM32H755 vector-table layout using CMSIS IRQ numbering;
 - core-aware register views where the device exposes CPU-specific state.
 
-ADC, watchdog and internal-flash/reset-cause services remain separate follow-up work. Basic HSEM and CM4 boot-request primitives are implemented under #20, but autonomous second-core execution is still unqualified. See [Dual-core primitives](dual-core.md).
+ADC and internal flash remain follow-up work. IWDG and explicit reset-cause primitives are in development pending real reboot qualification. Basic HSEM and CM4 boot-request primitives are implemented under #20, but autonomous second-core execution is still unqualified. See [Dual-core primitives](dual-core.md).
 
 ### Board layer
 

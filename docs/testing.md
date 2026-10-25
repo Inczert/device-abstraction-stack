@@ -12,11 +12,11 @@ CPU2:     Cortex-M4
 Debug:    ST-LINK direct DAP + OpenOCD + GDB
 ```
 
-Debugger-driven CM4 execution proves the CM4 image and supported device paths on real CPU2 silicon. It does not yet prove the production CM7-to-CM4 boot/release, HSEM or shared-memory ownership model tracked separately.
+The physical 2026-10-25 campaign verified HSEM on each core and autonomous CM4 execution with the option bit `BOOT_CM4=1`; it did not verify software-controlled release when CM4 autoboot is disabled (#20).
 
 ## Standing regression baseline
 
-The latest completed full campaign is **40/40 PASS**:
+The v0.1.0 baseline was **40/40 PASS**; the latest verified 2026-10-25 v0.2.0 CM4/HSEM increment completed **47/47 PASS** on exact source `edeae55edd643e7c533d76e071d864639ee1998d` and matching checksum `a278a2c6a8098ab0d15fd280d655d393447e2de5c0c276947f7f9532d6937a18`. Historical baseline:
 
 ```text
 DAS commit:       737863075dfed78f73f99ae58f6e0ca52ffea93e
@@ -66,9 +66,9 @@ The **single release qualification command** for v0.2.0 development is:
   --release --clean --eth-iface <linux-interface>
 ```
 
-`--release` fails closed unless the DAS and STM32CubeH7 Git checkouts are clean, and refuses stale ELF reuse via `--no-build`. One invocation performs **four host contracts** (public headers, common time, DMA-handle regression, UART RX-ring regression) **plus the 40 established static/physical acceptance cases**, for **47 expected PASS / 0 FAIL / exit 0** on the current v0.2.0 UART + HSEM feature candidate (40 baseline static/physical cases + 2 physical HSEM cases + 1 autonomous boot/HSEM case + 4 host contracts). Autonomous CM4 boot is **not** yet among those cases. The acceptance count must evolve when other *real* hardware features are added.
+`--release` fails closed unless the DAS and STM32CubeH7 Git checkouts are clean, and refuses stale ELF reuse via `--no-build`. One invocation performs **four host contracts** (public headers, common time, DMA-handle regression, UART RX-ring regression) **plus the 40 established static/physical acceptance cases**, for **48 expected PASS / 0 FAIL / exit 0** on the current v0.2.0 UART + HSEM feature candidate (40 baseline static/physical cases + 2 physical HSEM cases + 1 autonomous boot/HSEM case + 1 CM7 IWDG reset-cause case + 4 host contracts). The integrated autonomous CM4 check is qualified for `BOOT_CM4=1`; startup with disabled CM4 autoboot remains unqualified. The new IWDG reset case is registered but **not yet physically qualified**. The acceptance count must evolve when other *real* hardware features are added.
 
-The original `--clean` without `--release` remains a convenient complete **hardware development** campaign, with its existing 40-case count. All its sub-tests are already included; there is no separate manual UART release test.
+The original `--clean` without `--release` remains a convenient complete **hardware development** campaign, with its updated 44-case count. All its sub-tests are already included; there is no separate manual UART release test.
 
 Run from a clean checkout of the exact final candidate and preserve the commit SHA printed in the evidence archive. For the v0.1.0 baseline, use STM32CubeH7 commit `f5c0b7a2b1f6eb26fde150f72edb2d7deb647066`.
 
@@ -349,7 +349,7 @@ It does not imply production dual-core lifecycle/HSEM/shared-memory coordination
 
 ## Release qualification gate
 
-The **single release-mode campaign** is the manual release authority. Before a v0.2.0 candidate is promoted from `develop` to `main`, run `stm32h755_test_campaign.sh --release --clean` (plus the STM32CubeH7 root and host Ethernet interface). It must finish with **47 passes, zero failures and exit code zero** for the current v0.2.0 feature candidate (40 established hardware/static acceptance cases + 2 new HSEM physical cases + 1 autonomous CM4 boot case + 4 host contracts). Independent CM4 boot is now registered in the single campaign but is **not physically qualified until the exact candidate passes on the board**. The release archive includes all corresponding logs and a SHA-256 file; retain both. A future feature release must update the single campaign's expected count and cases as its scope expands. **v0.1.0 historically passed 40 physical/static cases; it is not retrospectively requalified as 44.**
+The **single release-mode campaign** is the manual release authority. Before a v0.2.0 candidate is promoted from `develop` to `main`, run `stm32h755_test_campaign.sh --release --clean` (plus the STM32CubeH7 root and host Ethernet interface). It must finish with **48 passes, zero failures and exit code zero** for the current v0.2.0 feature candidate (40 established hardware/static acceptance cases + 2 HSEM physical cases + 1 autonomous CM4 boot case + 1 CM7 IWDG reboot/reset-reason case + 4 host contracts). Independent CM4 boot is now registered in the single campaign but is **not physically qualified until the exact candidate passes on the board**. The release archive includes all corresponding logs and a SHA-256 file; retain both. A future feature release must update the single campaign's expected count and cases as its scope expands. **v0.1.0 historically passed 40 physical/static cases; it is not retrospectively requalified as 44.**
 
 Release automation begins only after promotion. Successful `main` CI reads the root `VERSION` file, creates `v<VERSION>` when that tag does not already exist, and launches packaging automatically.
 

@@ -18,14 +18,31 @@ das_result_t das_reset_cause_get(das_reset_cause_t* cause) {
     if ((rsr & RCC_RSR_PORRSTF) != 0u) flags |= DAS_RESET_POWER_ON;
     if ((rsr & RCC_RSR_BORRSTF) != 0u) flags |= DAS_RESET_BROWN_OUT;
     if ((rsr & RCC_RSR_PINRSTF) != 0u) flags |= DAS_RESET_EXTERNAL_PIN;
-    if ((rsr & RCC_RSR_SFTRSTF) != 0u) flags |= DAS_RESET_SOFTWARE;
+    /* Dual-core H755 CMSIS has separate CPU1/CPU2 flags, unlike the
+     * single-core STM32H7 RCC register definition.
+     */
+#if defined(RCC_RSR_SFT1RSTF)
+    if ((rsr & RCC_RSR_SFT1RSTF) != 0u) flags |= DAS_RESET_SOFTWARE;
+#endif
+#if defined(RCC_RSR_SFT2RSTF)
+    if ((rsr & RCC_RSR_SFT2RSTF) != 0u) flags |= DAS_RESET_SOFTWARE;
+#endif
     if ((rsr & RCC_RSR_IWDG1RSTF) != 0u) flags |= DAS_RESET_IWDG1;
     if ((rsr & RCC_RSR_IWDG2RSTF) != 0u) flags |= DAS_RESET_IWDG2;
     if ((rsr & RCC_RSR_WWDG1RSTF) != 0u) flags |= DAS_RESET_WWDG1;
     if ((rsr & RCC_RSR_WWDG2RSTF) != 0u) flags |= DAS_RESET_WWDG2;
-    if ((rsr & RCC_RSR_LPWRRSTF) != 0u) flags |= DAS_RESET_LOW_POWER;
-    if ((rsr & (RCC_RSR_CPURSTF | RCC_RSR_C2RSTF)) != 0u)
-        flags |= DAS_RESET_CORE;
+#if defined(RCC_RSR_LPWR1RSTF)
+    if ((rsr & RCC_RSR_LPWR1RSTF) != 0u) flags |= DAS_RESET_LOW_POWER;
+#endif
+#if defined(RCC_RSR_LPWR2RSTF)
+    if ((rsr & RCC_RSR_LPWR2RSTF) != 0u) flags |= DAS_RESET_LOW_POWER;
+#endif
+#if defined(RCC_RSR_C1RSTF)
+    if ((rsr & RCC_RSR_C1RSTF) != 0u) flags |= DAS_RESET_CORE;
+#endif
+#if defined(RCC_RSR_C2RSTF)
+    if ((rsr & RCC_RSR_C2RSTF) != 0u) flags |= DAS_RESET_CORE;
+#endif
     if ((rsr & (RCC_RSR_D1RSTF | RCC_RSR_D2RSTF)) != 0u)
         flags |= DAS_RESET_DOMAIN;
 

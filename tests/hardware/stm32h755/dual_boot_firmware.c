@@ -33,6 +33,7 @@ typedef struct {
     volatile uint32_t error;
     volatile int32_t boot_request;
     volatile uint32_t boot_gate;
+    volatile uint32_t boot_option_cm4;
     volatile uint32_t domain_ready;
     volatile uint32_t notification;
     volatile uint32_t heartbeat;
@@ -49,6 +50,16 @@ static void fail(uint32_t code) {
 
 int main(void) {
     boot_mailbox_t* const box = BOX;
+    /*
+     * Read the nonvolatile BOOT_CM4 setting without changing option bytes.
+     * It distinguishes factory autoboot from a required software release.
+     */
+    RCC->APB4ENR |= RCC_APB4ENR_SYSCFGEN;
+    (void)RCC->APB4ENR;
+    __DSB();
+    g_das_boot_evidence.boot_option_cm4 =
+        (SYSCFG->UR1 & SYSCFG_UR1_BCM4) != 0u ? 1u : 0u;
+
     box->magic = BOOT_MAGIC;
     box->challenge = 0u;
     box->response = 0u;

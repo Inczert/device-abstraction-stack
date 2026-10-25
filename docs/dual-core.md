@@ -53,7 +53,9 @@ OpenOCD connection, programs and resets the CM7 firmware, and resumes
 challenge in unused shared D2 SRAM3 at 0x30040000; CM4 acknowledges and
 releases HSEM channel 30. CM7 checks the shared response, HSEM
 release-notification, and clock-domain state. There is **no CPU2 GDB
-resume**, no option-byte change and no extra wiring.
+resume**, no option-byte change and no extra wiring. Its GDB evidence logs the
+current `BOOT_CM4` option bit (0 or 1), allowing the results to distinguish
+a software-request-required startup from factory autoboot.
 
 **Qualification is pending until the full campaign passes on real hardware.**
 With BOOT_CM4 enabled at reset, CM4 may already be running before CM7

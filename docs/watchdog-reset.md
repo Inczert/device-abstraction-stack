@@ -91,3 +91,21 @@ cannot independently reset the target at the same time.
 
 Both cases remain **unqualified until the full 49-case physical campaign
 passes on the exact PR head**.
+
+## Reset-fixture diagnostics (October 2026)
+
+The physical fixture distinguishes four persistent `.noinit` phases:
+initial, software-reset requested (`SOFT`), IWDG configuration in progress
+(`CONF`), and successfully armed (`WDG1`). A reset while the driver
+is still configuring is **not** counted as a successful watchdog test.
+It records the observed RCC reset flags, previously confirmed software
+reset flags, restart count and read-only `FLASH_OPTSR_CUR` option status,
+including whether the selected IWDG has hardware automatic start.
+
+Since IWDG may start automatically through option bytes, each boot feeds
+it at application entry before checking reset history. The production
+watchdog start also refreshes before waiting on LSI register updates.
+These changes do not relax the pass criteria: a successful two-reset case
+still needs one software reset, a separate watchdog timeout reset, an
+explicit flag-clear check, and three observed firmware boots. The
+normal campaign never changes option bytes.

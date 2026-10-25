@@ -24,11 +24,15 @@
 
 #define WD_MAGIC UINT32_C(0x44535744)
 #define WD_SOFTWARE_STAGE UINT32_C(0x534F4654)
+#define WD_CONFIGURING_STAGE UINT32_C(0x434F4E46)
 #define WD_ARMED_STAGE UINT32_C(0x57444731)
 #define WD_TIMEOUT_MS UINT32_C(1200)
 
 volatile uint32_t g_das_watchdog_stage __attribute__((section(".noinit")));
 volatile uint32_t g_das_watchdog_saved_software __attribute__((section(".noinit")));
+volatile uint32_t g_das_watchdog_boot_count __attribute__((section(".noinit")));
+volatile uint32_t g_das_watchdog_option_status __attribute__((section(".noinit")));
+volatile uint32_t g_das_watchdog_hw_start __attribute__((section(".noinit")));
 
 typedef struct {
     uint32_t magic;
@@ -53,6 +57,24 @@ static void fail(uint32_t code) {
 }
 
 int main(void) {
+    /* Feed at the earliest application entry: option bytes can enable IWDG
+     * automatically. This must never be mistaken for a DAS software start.
+     * The ARMED stage intentionally stops feeding only AFTER a successful
+     * software configuration.
+     */
+    (void)das_watchdog_feed();
+    ++g_das_watchdog_boot_count;
+    g_das_watchdog_option_status = FLASH->OPTSR_CUR;
+#if defined(CORE_CM7) && defined(FLASH_OPTSR_IWDG1_SW)
+    g_das_watchdog_hw_start =
+        (FLASH->OPTSR_CUR & FLASH_OPTSR_IWDG1_SW) == 0u ? 1u : 0u;
+#elif defined(CORE_CM4) && defined(FLASH_OPTSR_IWDG2_SW)
+    g_das_watchdog_hw_start =
+        (FLASH->OPTSR_CUR & FLASH_OPTSR_IWDG2_SW) == 0u ? 1u : 0u;
+#else
+    g_das_watchdog_hw_start = UINT32_MAX; /* unknown mapping */
+#endif
+    __DMB();
     das_reset_cause_t cause = {0};
     if (das_reset_cause_get(NULL) != DAS_ERROR_INVALID_ARGUMENT ||
         das_reset_cause_get(&cause) != DAS_OK) {
@@ -90,6 +112,15 @@ int main(void) {
         }
     }
 
+    if (g_das_watchdog_stage == WD_CONFIGURING_STAGE) {
+        /* A reset during watchdog_start() must never count as a successful
+         * IWDG timeout test: the API had not returned DAS_OK yet.
+         */
+        g_das_watchdog_evidence.reset_flags = cause.flags;
+        g_das_watchdog_evidence.raw_rsr = cause.raw_status;
+        fail(9u);
+    }
+
     if (g_das_watchdog_stage == WD_SOFTWARE_STAGE) {
         /* Record the actual observed status BEFORE the assertions, so a
          * failure can distinguish a missing RCC flag from wrong mapping.
@@ -119,6 +150,11 @@ int main(void) {
             .lsi_hz = UINT32_C(32000),
             .update_poll_limit = UINT32_C(1000000)
         };
+        /* New persistent phase separates "unexpected watchdog before
+         * configuring" from "watchdog reset during configuration".
+         */
+        g_das_watchdog_stage = WD_CONFIGURING_STAGE;
+        __DMB();
         uint32_t actual = 0u;
         g_das_watchdog_evidence.start_result = das_watchdog_start(&config, &actual);
         if (g_das_watchdog_evidence.start_result != DAS_OK ||

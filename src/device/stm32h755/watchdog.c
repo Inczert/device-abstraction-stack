@@ -60,10 +60,19 @@ das_result_t das_watchdog_start(const das_watchdog_config_t* config,
      * reconfiguration. Timeout here does NOT mean start was rolled back.
      */
     DAS_OWN_IWDG->KR = DAS_WDG_START_KEY;
+    /* The IWDG might already run in hardware-start mode. Refresh before
+     * synchronization polling: the previous reload value may permit much
+     * less time than the newly requested timeout.
+     */
+    DAS_OWN_IWDG->KR = DAS_WDG_FEED_KEY;
     DAS_OWN_IWDG->KR = DAS_WDG_UNLOCK_KEY;
     DAS_OWN_IWDG->PR = prescaler;
     DAS_OWN_IWDG->RLR = reload;
     DAS_OWN_IWDG->WINR = DAS_WDG_RELOAD_MAX; /* Disable window restriction. */
+    /* Do not wait for slow LSI-register synchronization while using an
+     * expiring downcounter. A separate feed follows when sync completes.
+     */
+    DAS_OWN_IWDG->KR = DAS_WDG_FEED_KEY;
     for (uint32_t i = 0u; i < config->update_poll_limit; ++i) {
         if ((DAS_OWN_IWDG->SR &
              (IWDG_SR_PVU | IWDG_SR_RVU | IWDG_SR_WVU)) == 0u) {

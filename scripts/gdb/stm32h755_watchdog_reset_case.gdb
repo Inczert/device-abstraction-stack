@@ -12,6 +12,9 @@ compare-sections
 # No test step manually resets the chip after this point.
 set variable g_das_watchdog_stage = 0
 set variable g_das_watchdog_saved_software = 0
+set variable g_das_watchdog_boot_count = 0
+set variable g_das_watchdog_option_status = 0
+set variable g_das_watchdog_hw_start = 0
 # Run from a fresh whole-device reset with no debugger-assisted restart
 # between the two deliberate firmware-triggered resets.
 monitor reset run
@@ -24,15 +27,20 @@ set $error=(unsigned int)g_das_watchdog_evidence.error
 set $start=(int)g_das_watchdog_evidence.start_result
 set $actual=(unsigned int)g_das_watchdog_evidence.actual_ms
 set $software=(unsigned int)g_das_watchdog_evidence.software_flags
+set $persisted_software=(unsigned int)g_das_watchdog_saved_software
+set $boots=(unsigned int)g_das_watchdog_boot_count
+set $option=(unsigned int)g_das_watchdog_option_status
+set $hardware_started=(unsigned int)g_das_watchdog_hw_start
 set $flags=(unsigned int)g_das_watchdog_evidence.reset_flags
 set $raw=(unsigned int)g_das_watchdog_evidence.raw_rsr
 set $cleared=(unsigned int)g_das_watchdog_evidence.cleared_flags
 set $stage=(unsigned int)g_das_watchdog_stage
 set $heartbeat=(unsigned int)g_das_watchdog_evidence.heartbeat
 printf "WD magic=0x%08x complete=%u error=0x%08x start=%d actual=%u ms\n", $magic, $complete, $error, $start, $actual
-printf "WD software_flags=0x%08x IWDG_flags=0x%08x RCC_RSR=0x%08x cleared_flags=0x%08x stage=0x%08x heartbeat=%u\n", $software, $flags, $raw, $cleared, $stage, $heartbeat
+printf "WD software_flags=0x%08x saved_software=0x%08x IWDG_flags=0x%08x RCC_RSR=0x%08x cleared_flags=0x%08x\n", $software, $persisted_software, $flags, $raw, $cleared
+printf "WD boots=%u stage=0x%08x FLASH_OPTSR_CUR=0x%08x hardware_IWDG=%u heartbeat=%u\n", $boots, $stage, $option, $hardware_started, $heartbeat
 
-if $magic == 0x44535744 && $complete == 1 && $error == 0 && $start == 0 && $actual == 1200 && ($software & 0x08) != 0 && ($software & $das_expected_watchdog_mask) == 0 && ($flags & $das_expected_watchdog_mask) != 0 && ($flags & 0x08) == 0 && ($cleared & ($das_expected_watchdog_mask | 0x08)) == 0 && $stage == 0 && $heartbeat > 0
+if $magic == 0x44535744 && $complete == 1 && $error == 0 && $start == 0 && $actual == 1200 && ($software & 0x08) != 0 && ($software & $das_expected_watchdog_mask) == 0 && ($flags & $das_expected_watchdog_mask) != 0 && ($flags & 0x08) == 0 && ($cleared & ($das_expected_watchdog_mask | 0x08)) == 0 && $stage == 0 && $boots == 3 && $heartbeat > 0
   printf "RESULT: PASS\n"
 else
   printf "RESULT: FAIL\n"

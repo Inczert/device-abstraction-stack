@@ -13,6 +13,7 @@ DEBUG_TIMEOUT=30
 CLEAN=0
 SKIP_BUILD=0
 RELEASE_MODE=0
+WATCHDOG_DEBUG=0
 OPENOCD_PID=""
 GDB_BIN=""
 PASS_COUNT=0
@@ -62,6 +63,7 @@ while [[ $# -gt 0 ]]; do
     --debug-timeout) DEBUG_TIMEOUT="$2"; shift 2 ;;
     --clean) CLEAN=1; shift ;;
     --release) RELEASE_MODE=1; shift ;;
+    --watchdog-debug) WATCHDOG_DEBUG=1; shift ;;
     --no-build) SKIP_BUILD=1; shift ;;
     -h|--help) usage; exit 0 ;;
     --*) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -82,6 +84,11 @@ if (( CLEAN != 0 && SKIP_BUILD != 0 )); then
   echo "--clean and --no-build cannot be used together" >&2
   exit 2
 fi
+if (( WATCHDOG_DEBUG != 0 && RELEASE_MODE != 0 )); then
+  echo '--watchdog-debug is not release qualification' >&2
+  exit 2
+fi
+if (( WATCHDOG_DEBUG != 0 )); then EXPECTED_PASS_COUNT=2; fi
 if (( RELEASE_MODE != 0 )); then
   if (( CLEAN == 0 || SKIP_BUILD != 0 )); then
     echo "Release qualification requires --clean and forbids --no-build" >&2

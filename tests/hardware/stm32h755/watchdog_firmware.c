@@ -60,6 +60,9 @@ int main(void) {
     }
 
     if (g_das_watchdog_stage == WD_ARMED_STAGE) {
+        /* Report raw RCC flags even when an expected bit is missing. */
+        g_das_watchdog_evidence.reset_flags = cause.flags;
+        g_das_watchdog_evidence.raw_rsr = cause.raw_status;
         if ((cause.flags & WD_EXPECTED_FLAG) == 0u ||
             (cause.flags & DAS_RESET_SOFTWARE) != 0u ||
             (g_das_watchdog_saved_software & DAS_RESET_SOFTWARE) == 0u ||
@@ -88,6 +91,11 @@ int main(void) {
     }
 
     if (g_das_watchdog_stage == WD_SOFTWARE_STAGE) {
+        /* Record the actual observed status BEFORE the assertions, so a
+         * failure can distinguish a missing RCC flag from wrong mapping.
+         */
+        g_das_watchdog_evidence.software_flags = cause.flags;
+        g_das_watchdog_evidence.raw_rsr = cause.raw_status;
         if ((cause.flags & DAS_RESET_SOFTWARE) == 0u ||
             (cause.flags & WD_EXPECTED_FLAG) != 0u) {
             fail(4u);

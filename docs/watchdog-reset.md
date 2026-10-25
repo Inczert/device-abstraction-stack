@@ -31,6 +31,10 @@ into a single guessed cause. Both cores see the shared RCC reset flags.
 Applications must establish **one owner at early boot** to capture and,
 later, explicitly clear flags; otherwise CM4 may erase evidence before CM7
 reads it. Startup and board initialization do not clear reset flags.
+The STM32H755 backend pulses `RCC_RSR.RMVF` and then explicitly
+deasserts it, rather than keeping the reset-flags-clear input asserted.
+The test records the raw `RCC_RSR` value even on a failed reset
+assertion to aid diagnosis.
 
 ## Example
 

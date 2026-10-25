@@ -52,7 +52,18 @@ das_result_t das_reset_cause_get(das_reset_cause_t* cause) {
 }
 
 das_result_t das_reset_cause_clear(void) {
-    RCC->RSR |= RCC_RSR_RMVF;
+    /*
+     * RMVF is a software-controlled reset-flags CLEAR input, not an
+     * application-owned sticky status bit. Pulse it and then explicitly
+     * deassert it: leaving RMVF asserted can suppress latching the cause
+     * of a subsequent reset. The other RSR bits are read-only status.
+     * One core/application must own the clear operation.
+     */
+    RCC->RSR = RCC_RSR_RMVF;
     __DSB();
+    (void)RCC->RSR;
+    RCC->RSR = 0u;
+    __DSB();
+    (void)RCC->RSR;
     return DAS_OK;
 }

@@ -7,8 +7,9 @@ monitor reset halt
 printf "Flashing CM7 boot orchestrator; CM4 bank2 image preprogrammed...\n"
 load
 compare-sections
-monitor reset halt
-monitor resume
+# System reset RUN lets hardware autonomously boot either core, according
+# to BOOT_CM4 option bytes and the CM7 RCC software request.
+monitor reset run
 shell sleep 2
 monitor halt
 set $magic=(unsigned int)g_das_boot_evidence.magic

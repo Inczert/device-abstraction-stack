@@ -20,6 +20,14 @@
 
 #define DAS_HSEM_SELF_OWNER ((uint32_t)(DAS_HSEM_CORE_ID) << HSEM_R_COREID_Pos)
 
+/* Local software tracking makes the one-step HSEM fast take nonrecursive.
+ * Without this, a repeated RLR read by the same core can look successful
+ * because the hardware returns the existing owner, not a new acquisition.
+ * Serialized against same-core interrupt handlers with PRIMASK.
+ */
+static uint32_t g_owned_mask;
+
+
 static bool valid(uint32_t channel) {
     return channel < DAS_HSEM_CHANNEL_COUNT;
 }
@@ -38,23 +46,42 @@ das_result_t das_hsem_init(void) {
 das_result_t das_hsem_try_acquire(uint32_t channel) {
     if (!valid(channel)) return DAS_ERROR_INVALID_ARGUMENT;
     if (!clock_enabled()) return DAS_ERROR_NOT_READY;
-    /* RLR read atomically attempts acquisition; only own core and PID 0 win. */
-    const uint32_t result = HSEM->RLR[channel];
-    return result == (HSEM_RLR_LOCK | DAS_HSEM_SELF_OWNER)
-           ? DAS_OK : DAS_ERROR_NOT_READY;
+    const uint32_t flag = UINT32_C(1) << channel;
+    const uint32_t old_primask = __get_PRIMASK();
+    __disable_irq();
+    if ((g_owned_mask & flag) != 0u) {
+        __set_PRIMASK(old_primask);
+        return DAS_ERROR_NOT_READY;
+    }
+    /* RLR read atomically attempts acquisition by this core with PID 0. */
+    const uint32_t value = HSEM->RLR[channel];
+    const bool taken = value == (HSEM_RLR_LOCK | DAS_HSEM_SELF_OWNER);
+    if (taken) {
+        g_owned_mask |= flag;
+        __DMB();
+    }
+    __set_PRIMASK(old_primask);
+    return taken ? DAS_OK : DAS_ERROR_NOT_READY;
 }
 
 das_result_t das_hsem_release(uint32_t channel) {
     if (!valid(channel)) return DAS_ERROR_INVALID_ARGUMENT;
     if (!clock_enabled()) return DAS_ERROR_NOT_READY;
-    const uint32_t value = HSEM->R[channel];
-    if (value != (HSEM_R_LOCK | DAS_HSEM_SELF_OWNER)) {
+    const uint32_t flag = UINT32_C(1) << channel;
+    const uint32_t old_primask = __get_PRIMASK();
+    __disable_irq();
+    if ((g_owned_mask & flag) == 0u ||
+        HSEM->R[channel] != (HSEM_R_LOCK | DAS_HSEM_SELF_OWNER)) {
+        __set_PRIMASK(old_primask);
         return DAS_ERROR_NOT_READY;
     }
     __DMB();
     HSEM->R[channel] = DAS_HSEM_SELF_OWNER;
     __DMB();
-    return (HSEM->R[channel] & HSEM_R_LOCK) == 0u ? DAS_OK : DAS_ERROR_IO;
+    const bool released = (HSEM->R[channel] & HSEM_R_LOCK) == 0u;
+    if (released) g_owned_mask &= ~flag;
+    __set_PRIMASK(old_primask);
+    return released ? DAS_OK : DAS_ERROR_IO;
 }
 
 das_result_t das_hsem_is_locked(uint32_t channel, bool* locked) {

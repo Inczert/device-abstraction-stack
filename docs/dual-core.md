@@ -48,8 +48,8 @@ physical HSEM cases plus one **CM4 autonomous execution** case, for
 **47 expected PASS** including four host contracts.
 
 The autonomous fixture flashes the CM4 ELF into bank 2 using the CM7
-OpenOCD connection, programs and resets the CM7 firmware, and resumes
-**only CM7**. The CM7 firmware requests CM4 boot and publishes a
+OpenOCD connection, programs and resets the CM7 firmware, and issues a **whole-device reset run** (no CM4 debug resume). The
+CM7 firmware requests CM4 boot and publishes a
 challenge in unused shared D2 SRAM3 at 0x30040000; CM4 acknowledges and
 releases HSEM channel 30. CM7 checks the shared response, HSEM
 release-notification, and clock-domain state. There is **no CPU2 GDB

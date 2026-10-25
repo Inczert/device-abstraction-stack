@@ -147,3 +147,16 @@ Explicit destructive recovery remains separate:
 ```
 
 See [`docs/testing.md`](../../../docs/testing.md) and [`docs/memory-layout.md`](../../../docs/memory-layout.md) for the complete acceptance and memory-policy contracts.
+
+
+## CM7-controlled CM4 boot with autoboot disabled
+
+Issue #20 adds a **development-only** qualification profile to the same
+campaign: `--cm4-boot-gated --clean`. It must observe the board's actual
+`BOOT_CM4=0` setting, no secondary core's early-execution marker before
+CM7's request, and CM4 early presence/response/HSEM/heartbeat afterward.
+It does not change option bytes, does not attach to or resume CM4, and
+packages one focused pass/fail with its firmware, GDB trace, and checksum.
+Use the controlled option-byte restore procedure in
+`docs/dual-core.md`; the normal 49-test `--release --clean` command
+remains the only full-release acceptance gate.

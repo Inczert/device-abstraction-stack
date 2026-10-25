@@ -41,26 +41,74 @@ where regions are cacheable, clean/invalidate on ownership transfer or
 an MPU-configured noncacheable shared window. Neither `volatile` nor an
 HSEM alone supplies inter-core cache coherence.
 
-## Qualification
+## Qualification and BOOT_CM4 profiles
 
-The single `stm32h755_test_campaign.sh --release --clean` includes two
-physical HSEM cases plus one **CM4 autonomous execution** case, for
-**47 expected PASS** including four host contracts.
+The complete single-command STM32H755 `--release --clean` campaign
+passed **49/49** on 2026-10-25 at DAS commit
+`4da083a4bfbbdc7959f4c4dd9e96851c45079385`, with the board
+option `BOOT_CM4=1`. It covers the two HSEM cases, autonomous CM4 execution,
+the CM7/CM4 watchdog tests and the previous regressions. This is proof of
+autonomous execution with CM4 *autoboot enabled*, not proof that a CM7
+software request was necessary.
 
-The autonomous fixture flashes the CM4 ELF into bank 2 using the CM7
-OpenOCD connection, programs and resets the CM7 firmware, and issues a **whole-device reset run** (no CM4 debug resume). The
-CM7 firmware requests CM4 boot and publishes a
-challenge in unused shared D2 SRAM3 at 0x30040000; CM4 acknowledges and
-releases HSEM channel 30. CM7 checks the shared response, HSEM
-release-notification, and clock-domain state. There is **no CPU2 GDB
-resume**, no option-byte change and no extra wiring. Its GDB evidence logs the
-current `BOOT_CM4` option bit (0 or 1), allowing the results to distinguish
-a software-request-required startup from factory autoboot.
+### Gated boot: optional focused physical qualification (#20)
 
-**Qualification is pending until the full campaign passes on real hardware.**
-With BOOT_CM4 enabled at reset, CM4 may already be running before CM7
-requests boot; the test proves autonomous CM4 operation but not that the
-software boot-request bit was necessary. With BOOT_CM4 disabled and a
-valid configured bank-2 boot address, the request should release CM4.
-No automatic option-byte programming, core reset/stop, application IPC or
-lifecycle supervision is added.
+The same dual-image firmware and GDB acceptance case now instrument a
+pre-request observation window. The CM4 firmware announces that it reached
+`main()` in a dedicated shared-memory marker before waiting for the
+challenge, while CM7 deliberately withholds the request. If `BOOT_CM4=0`,
+**CM4 must remain absent** during that window. CM7 then issues
+`das_secondary_core_request_boot()` and requires CM4 to appear, answer the
+shared-memory challenge, release HSEM and keep a heartbeat alive.
+
+There are **two explicit, independent proof conditions**: no CM4 execution
+before the boot request and successful CM4 execution after it. The GDB
+script logs both, the actual `SYSCFG.UR1.BCM4` option-bit state, initial
+RCC request state and final heartbeat.
+
+The normal release campaign does **not** change option bytes, and still
+expects **49** test passes. On a controlled bench with `BOOT_CM4=0`
+preconfigured, run **development-only**:
+
+```bash
+./scripts/stm32h755_test_campaign.sh \
+  /home/dev/STM32Cube/Repository/STM32CubeH7 \
+  --cm4-boot-gated --clean --eth-iface enp0s31f6
+```
+
+It reuses the original top-level campaign, builds the two core images,
+flashes CM4 into its expected bank-2 boot address and runs one GDB case.
+It should yield **1 PASS / 0 FAIL** and a self-contained evidence archive.
+It does not require UART/SPI/I2C/Ethernet wiring. It *rejects* the factory
+`BOOT_CM4=1` setting, rather than silently counting autoboot as proof.
+`--cm4-boot-gated` is mutually exclusive with `--release` and
+`--watchdog-debug`, and **cannot substitute for the full release gate**.
+
+### Option-byte safety and restoring the fixture
+
+Changing `BOOT_CM4` is a nonvolatile hardware configuration operation,
+not a routine software test. **The DAS scripts do not change option
+bytes.** Only conduct this focused profile with an intentionally prepared
+bench board and a known valid **CM4 boot address pointing at the CM4 image
+(default `0x08100000`)**.
+
+Use STM32CubeProgrammer or an equivalent supported provisioning method
+to *read and save* the original option-byte configuration before any
+manual changes. Record the original `BOOT_CM4` and CPU2 boot address,
+then explicitly set **only `BOOT_CM4=0`** and apply a device reset or
+power cycle as required by the programmer. Do not change CPU1 boot,
+readout protection, write-protection or other options to satisfy this
+test. The GDB case verifies the measured `BOOT_CM4` state on silicon
+and refuses a false PASS.
+
+After collecting the focused evidence, **restore the original option
+bytes** (`BOOT_CM4=1` on the previously tested NUCLEO), re-read them to
+verify and rerun the complete **49-case `--release --clean` campaign**
+on the unchanged final source tree. Keep both profile archives and
+their SHA-256 checksums. The gated-boot evidence qualifies software-only
+CPU2 release; the full campaign checks there was no regression after
+hardware configuration was restored.
+
+No debugger ever resumes CPU2 to manufacture evidence, and DAS does not
+provide a CM4 scheduler, IPC, shutdown/restart policy or application
+heartbeat API.

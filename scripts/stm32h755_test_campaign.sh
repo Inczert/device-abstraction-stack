@@ -43,6 +43,8 @@ Options:
   --release               Strict single-command release qualification: requires
                           a clean source/dependency checkout and --clean;
                           runs host contracts + the COMPLETE physical suite.
+  --watchdog-debug        Run just the two reset/watchdog cases for debugging;
+                          not a release qualification. No jumper changes.
   --no-build              Reuse existing CM7/CM4 hardware, time, clock, button,
                           UART, SPI, I2C, DMA/cache, timer/PWM, FPU, and custom-link ELFs.
                           The Ethernet installed-package qualifier is still rebuilt.
@@ -216,7 +218,7 @@ trap 'exit 143' TERM
 {
   echo "DAS STM32H755 dual-core hardware campaign"
   echo "Expected acceptance passes: $EXPECTED_PASS_COUNT"
-  echo "Qualification mode: $([[ "$RELEASE_MODE" == 1 ]] && echo RELEASE || echo DEVELOPMENT)"
+  echo "Qualification mode: $([[ "$RELEASE_MODE" == 1 ]] && echo RELEASE || { [[ "$WATCHDOG_DEBUG" == 1 ]] && echo WATCHDOG_DEBUG || echo DEVELOPMENT; })"
   echo "UTC start: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
   echo "Repository: $ROOT_DIR"
   if command -v git >/dev/null 2>&1; then

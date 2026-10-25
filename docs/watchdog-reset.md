@@ -109,3 +109,19 @@ These changes do not relax the pass criteria: a successful two-reset case
 still needs one software reset, a separate watchdog timeout reset, an
 explicit flag-clear check, and three observed firmware boots. The
 normal campaign never changes option bytes.
+
+## Focused fault diagnosis (not release qualification)
+
+The same top-level campaign also supports a development-only fast path:
+
+```bash
+./scripts/stm32h755_test_campaign.sh /path/to/STM32CubeH7 \\
+  --watchdog-debug --clean --eth-iface <existing-host-interface>
+```
+
+This builds both cores and runs **only the two watchdog/reset-cause cases**
+(CM7 then CM4), skipping UART/SPI/I2C/GPIO/Ethernet and interactive wiring.
+It still produces one timestamped evidence archive with per-core debug logs
+and a SHA-256 checksum. **2/2 PASS here is not a release gate:** the normal
+`--release --clean` run still requires all 49 cases at the final SHA.
+The debug mode cannot be combined with `--release`.

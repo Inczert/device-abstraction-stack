@@ -17,7 +17,7 @@ OPENOCD_PID=""
 GDB_BIN=""
 PASS_COUNT=0
 FAIL_COUNT=0
-EXPECTED_PASS_COUNT=40
+EXPECTED_PASS_COUNT=42
 STAMP=""
 CAMPAIGN_ROOT=""
 LOG_DIR=""
@@ -89,7 +89,7 @@ if (( RELEASE_MODE != 0 )); then
   fi
   # The established 40 hardware acceptance points are retained. The release
   # entry point additionally compiles/runs four host API/regression contracts.
-  EXPECTED_PASS_COUNT=44
+  EXPECTED_PASS_COUNT=46
 fi
 
 need() {
@@ -302,6 +302,8 @@ CM7_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.elf"
 CM7_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.map"
 CM7_TIME_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.elf"
 CM7_TIME_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.map"
+CM7_HSEM_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hsem_test.elf"
+CM7_HSEM_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hsem_test.map"
 CM7_UART_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.elf"
 CM7_UART_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.map"
 CM7_SPI_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_spi_test.elf"
@@ -322,6 +324,8 @@ CM4_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.elf"
 CM4_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.map"
 CM4_TIME_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.elf"
 CM4_TIME_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.map"
+CM4_HSEM_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hsem_test.elf"
+CM4_HSEM_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hsem_test.map"
 CM4_UART_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.elf"
 CM4_UART_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.map"
 CM4_SPI_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_spi_test.elf"
@@ -338,6 +342,7 @@ CUSTOM_ELF="$CUSTOM_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.elf"
 CUSTOM_MAP="$CUSTOM_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.map"
 
 ARTIFACTS=(
+  "$CM7_HSEM_ELF" "$CM7_HSEM_MAP" "$CM4_HSEM_ELF" "$CM4_HSEM_MAP"
   "$CM7_ELF" "$CM7_MAP" "$CM7_TIME_ELF" "$CM7_TIME_MAP"
   "$CM7_UART_ELF" "$CM7_UART_MAP" "$CM7_SPI_ELF" "$CM7_SPI_MAP"
   "$CM7_I2C_ELF" "$CM7_I2C_MAP" "$CM7_DMA_ELF" "$CM7_DMA_MAP"
@@ -365,6 +370,7 @@ copy_pair() {
 
 copy_pair "$CM7_ELF" "$CM7_MAP" das_stm32h755_cm7_hw_test
 copy_pair "$CM7_TIME_ELF" "$CM7_TIME_MAP" das_stm32h755_cm7_time_test
+copy_pair "$CM7_HSEM_ELF" "$CM7_HSEM_MAP" das_stm32h755_cm7_hsem_test
 copy_pair "$CM7_UART_ELF" "$CM7_UART_MAP" das_stm32h755_cm7_uart_test
 copy_pair "$CM7_SPI_ELF" "$CM7_SPI_MAP" das_stm32h755_cm7_spi_test
 copy_pair "$CM7_I2C_ELF" "$CM7_I2C_MAP" das_stm32h755_cm7_i2c_test
@@ -375,6 +381,7 @@ copy_pair "$CLOCK_ELF" "$CLOCK_MAP" das_stm32h755_cm7_clock_test
 copy_pair "$BUTTON_ELF" "$BUTTON_MAP" das_stm32h755_cm7_button_test
 copy_pair "$CM4_ELF" "$CM4_MAP" das_stm32h755_cm4_hw_test
 copy_pair "$CM4_TIME_ELF" "$CM4_TIME_MAP" das_stm32h755_cm4_time_test
+copy_pair "$CM4_HSEM_ELF" "$CM4_HSEM_MAP" das_stm32h755_cm4_hsem_test
 copy_pair "$CM4_UART_ELF" "$CM4_UART_MAP" das_stm32h755_cm4_uart_test
 copy_pair "$CM4_SPI_ELF" "$CM4_SPI_MAP" das_stm32h755_cm4_spi_test
 copy_pair "$CM4_I2C_ELF" "$CM4_I2C_MAP" das_stm32h755_cm4_i2c_test
@@ -803,6 +810,8 @@ run_button_case || exit 1
 # Persistent serial fixtures were installed during initial setup and stay connected.
 # The canonical UART GDB case also asserts v0.2.0 try-I/O, IRQ-ring RX,
 # overflow accounting and ownership guards: NO separate UART release script.
+run_gdb "$CM7_HSEM_ELF" 3333 "$LOG_DIR/CM7_HSEM.log" -ex "set \$das_expected_request=0" -x "$ROOT_DIR/scripts/gdb/stm32h755_hsem_case.gdb" && record "CM7 HSEM primitives" PASS || { record "CM7 HSEM primitives" FAIL; exit 1; }
+run_gdb "$CM4_HSEM_ELF" 3334 "$LOG_DIR/CM4_HSEM.log" -ex "set \$das_expected_request=-2" -x "$ROOT_DIR/scripts/gdb/stm32h755_hsem_case.gdb" && record "CM4 HSEM primitives" PASS || { record "CM4 HSEM primitives" FAIL; exit 1; }
 run_simple_case "CM7 UART loopback" "$CM7_UART_ELF" 3333 \
   "$ROOT_DIR/scripts/gdb/stm32h755_uart_case.gdb" || exit 1
 run_simple_case "CM4 UART loopback" "$CM4_UART_ELF" 3334 \

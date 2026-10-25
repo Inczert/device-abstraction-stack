@@ -57,7 +57,7 @@ This layer owns STM32H755 silicon behavior implemented by DAS:
 - canonical STM32H755 vector-table layout using CMSIS IRQ numbering;
 - core-aware register views where the device exposes CPU-specific state.
 
-ADC, watchdog, internal-flash/reset-cause services and production dual-core lifecycle control remain separate follow-up work.
+ADC, watchdog and internal-flash/reset-cause services remain separate follow-up work. Basic HSEM and CM4 boot-request primitives are implemented under #20, but autonomous second-core execution is still unqualified. See [Dual-core primitives](dual-core.md).
 
 ### Board layer
 
@@ -230,10 +230,9 @@ Independent images execute on both physical CPUs and exercise supported peripher
 
 Still separate under #20:
 
-- CM7-to-CM4 boot/release or wake sequencing without debugger assistance;
-- deterministic shared clock/system ownership;
-- HSEM/inter-core synchronization;
-- shared-memory ownership/cache policy.
+- physically qualified autonomous CM7-to-CM4 boot/release or wake without debugger-assisted CPU2 start;
+- cross-core HSEM notification/event signaling;
+- application-defined shared-memory ownership/cache protocol (documented, not implemented by DAS).
 
 Ethernet is explicitly CM7-owned in the current baseline.
 

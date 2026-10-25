@@ -90,17 +90,22 @@ int main(void) {
         .lsi_hz = UINT32_C(32000),
         .update_poll_limit = UINT32_C(1000000)
     };
-    g_das_watchdog_stage = WD_ARMED;
-    __DMB();
-
     uint32_t actual = 0u;
     g_das_watchdog_evidence.start_result = das_watchdog_start(&config, &actual);
     if (g_das_watchdog_evidence.start_result != DAS_OK ||
         actual < UINT32_C(1200) || actual > UINT32_C(1250)) {
+        /* The watchdog might already be started even if start() timed out.
+         * Failure is observable; do not arm the reset-success sentinel.
+         */
         g_das_watchdog_stage = 0u;
         fail(6u);
     }
     g_das_watchdog_evidence.actual_ms = actual;
+    /* Only a successfully configured watchdog may count as a passing
+     * intentional reset; do not accept watchdog reset during config error.
+     */
+    g_das_watchdog_stage = WD_ARMED;
+    __DMB();
 
     /* An actual hardware timeout MUST reset the MCU. If this loop continues,
      * GDB will fail the test instead of reporting success.

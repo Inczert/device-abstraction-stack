@@ -12,7 +12,9 @@ compare-sections
 # No test step manually resets the chip after this point.
 set variable g_das_watchdog_stage = 0
 set variable g_das_watchdog_saved_software = 0
-monitor resume
+# Run from a fresh whole-device reset with no debugger-assisted restart
+# between the two deliberate firmware-triggered resets.
+monitor reset run
 shell sleep 6
 monitor halt
 

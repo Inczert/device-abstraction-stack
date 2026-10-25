@@ -924,6 +924,11 @@ else
   record "CM7 IWDG1 reset and RCC cause" FAIL
   exit 1
 fi
+# Prevent the CM7 watchdog test from running concurrently after CM4's
+# software reset / IWDG2 reset. Reflash a passive, already-qualified CM7
+# image, without recording a separate acceptance case.
+rearm_core_image "CM7" "$CM7_ELF" 3333 || exit 1
+
 if run_gdb "$CM4_WD_ELF" 3334 "$LOG_DIR/CM4_IWDG2_reset_cause.log" \
     -ex "set \$das_expected_watchdog_mask=0x20" \
     -x "$ROOT_DIR/scripts/gdb/stm32h755_watchdog_reset_case.gdb"; then

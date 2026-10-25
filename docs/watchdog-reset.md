@@ -81,5 +81,9 @@ requirement, not evidence it has been tested.
 The CM4 case requires its firmware to restart after each reset. A board
 with `BOOT_CM4=0` cannot pass this fixture unless CM7 explicitly releases
 CPU2; the tested NUCLEO has `BOOT_CM4=1`. No test modifies option bytes.
+The campaign restores its normal CM7 test image after the IWDG1 case
+before executing CM4's IWDG2 case, so the two destructive test images
+cannot independently reset the target at the same time.
+
 Both cases remain **unqualified until the full 49-case physical campaign
 passes on the exact PR head**.

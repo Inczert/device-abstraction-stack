@@ -14,6 +14,7 @@ CLEAN=0
 SKIP_BUILD=0
 RELEASE_MODE=0
 WATCHDOG_DEBUG=0
+CM4_BOOT_DEBUG=0
 OPENOCD_PID=""
 GDB_BIN=""
 PASS_COUNT=0
@@ -45,6 +46,9 @@ Options:
                           runs host contracts + the COMPLETE physical suite.
   --watchdog-debug        Run just the two reset/watchdog cases for debugging;
                           not a release qualification. No jumper changes.
+  --cm4-boot-gated        Development-only CM7-controlled CM4 boot proof.
+                          REQUIRES BOOT_CM4=0 preconfigured by the operator;
+                          refuses autoboot, NEVER writes option bytes.
   --no-build              Reuse existing CM7/CM4 hardware, time, clock, button,
                           UART, SPI, I2C, DMA/cache, timer/PWM, FPU, and custom-link ELFs.
                           The Ethernet installed-package qualifier is still rebuilt.
@@ -66,6 +70,7 @@ while [[ $# -gt 0 ]]; do
     --clean) CLEAN=1; shift ;;
     --release) RELEASE_MODE=1; shift ;;
     --watchdog-debug) WATCHDOG_DEBUG=1; shift ;;
+    --cm4-boot-gated) CM4_BOOT_DEBUG=1; shift ;;
     --no-build) SKIP_BUILD=1; shift ;;
     -h|--help) usage; exit 0 ;;
     --*) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -86,11 +91,13 @@ if (( CLEAN != 0 && SKIP_BUILD != 0 )); then
   echo "--clean and --no-build cannot be used together" >&2
   exit 2
 fi
-if (( WATCHDOG_DEBUG != 0 && RELEASE_MODE != 0 )); then
-  echo '--watchdog-debug is not release qualification' >&2
+if (( WATCHDOG_DEBUG != 0 && (RELEASE_MODE != 0 || CM4_BOOT_DEBUG != 0) )) ||
+   (( CM4_BOOT_DEBUG != 0 && RELEASE_MODE != 0 )); then
+  echo 'Focused CM4 boot and watchdog modes cannot combine with --release or each other' >&2
   exit 2
 fi
 if (( WATCHDOG_DEBUG != 0 )); then EXPECTED_PASS_COUNT=2; fi
+if (( CM4_BOOT_DEBUG != 0 )); then EXPECTED_PASS_COUNT=1; fi
 if (( RELEASE_MODE != 0 )); then
   if (( CLEAN == 0 || SKIP_BUILD != 0 )); then
     echo "Release qualification requires --clean and forbids --no-build" >&2
@@ -218,7 +225,7 @@ trap 'exit 143' TERM
 {
   echo "DAS STM32H755 dual-core hardware campaign"
   echo "Expected acceptance passes: $EXPECTED_PASS_COUNT"
-  echo "Qualification mode: $([[ "$RELEASE_MODE" == 1 ]] && echo RELEASE || { [[ "$WATCHDOG_DEBUG" == 1 ]] && echo WATCHDOG_DEBUG || echo DEVELOPMENT; })"
+  echo "Qualification mode: $([[ "$RELEASE_MODE" == 1 ]] && echo RELEASE || { [[ "$WATCHDOG_DEBUG" == 1 ]] && echo WATCHDOG_DEBUG || { [[ "$CM4_BOOT_DEBUG" == 1 ]] && echo CM4_BOOT_GATED || echo DEVELOPMENT; }; })"
   echo "UTC start: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
   echo "Repository: $ROOT_DIR"
   if command -v git >/dev/null 2>&1; then
@@ -648,9 +655,15 @@ visual_case() {
 # resume ONLY CM7. A CM4 response requires actual secondary-core execution;
 # no debugger attaches to, resets, or resumes CM4 as an individual target.
 run_dual_boot_case() {
+  local required_option="${1:--1}"
   local label="CM7 autonomous CM4 boot / HSEM"
   local log="$LOG_DIR/CM7_CM4_autonomous_boot.log"
+  if (( required_option == 0 )); then
+    label="CM7 gated CM4 boot (BOOT_CM4=0)"
+    log="$LOG_DIR/CM7_CM4_gated_boot.log"
+  fi
   if run_gdb "$CM7_DUAL_BOOT_ELF" 3333 "$log" \
+      -ex "set \$das_required_boot_option=$required_option" \
       -ex "monitor reset halt" \
       -ex "monitor flash write_image erase $CM4_DUAL_BOOT_ELF" \
       -x "$ROOT_DIR/scripts/gdb/stm32h755_dual_boot_case.gdb"; then
@@ -801,7 +814,7 @@ if (( RELEASE_MODE != 0 )); then
   release_host_preflight || exit 1
 fi
 
-if (( WATCHDOG_DEBUG == 0 )); then
+if (( WATCHDOG_DEBUG == 0 && CM4_BOOT_DEBUG == 0 )); then
 # Host/static qualification. These deliberately do not require the board.
 check_layout "STM32H755 CM7 memory layout" "$LOG_DIR/cm7_memory_layout.log" \
   --core cm7 "$CM7_ELF" "$CM7_MAP" || exit 1
@@ -845,6 +858,13 @@ if ! grep -q "Listening on port 3333 for gdb connections" "$OPENOCD_LOG" || \
   exit 1
 fi
 
+if (( CM4_BOOT_DEBUG != 0 )); then
+  # Requires user-prepared BOOT_CM4=0. The GDB case reads SYSCFG->UR1
+  # and refuses to PASS if CPU2 still autoboots. No option-byte writes.
+  run_dual_boot_case 0 || exit 1
+  exit 0
+fi
+
 if (( WATCHDOG_DEBUG != 0 )); then
   # BOOT_CM4=1: CPU2 starts automatically on any system reset.
   # A stale/invalid CPU2 image causes debugger lockup in a focused run,
@@ -853,7 +873,7 @@ if (( WATCHDOG_DEBUG != 0 )); then
   rearm_core_image "CM4" "$CM4_ELF" 3334 || exit 1
 fi
 
-if (( WATCHDOG_DEBUG == 0 )); then
+if (( WATCHDOG_DEBUG == 0 && CM4_BOOT_DEBUG == 0 )); then
 probe_core "CM7 OpenOCD probe" "$CM7_ELF" 3333 0xc27 || exit 1
 probe_core "CM4 OpenOCD probe" "$CM4_ELF" 3334 0xc24 || exit 1
 run_simple_case "CM7 monotonic timebase" "$CM7_TIME_ELF" 3333 \

@@ -87,8 +87,8 @@ if (( RELEASE_MODE != 0 )); then
     echo "Release qualification requires --clean and forbids --no-build" >&2
     exit 2
   fi
-  # The established 40 hardware acceptance points are retained. The release
-  # entry point additionally compiles/runs four host API/regression contracts.
+  # 40 baseline physical/static cases + 2 HSEM cases; additionally run
+  # four host contracts in strict release mode.
   EXPECTED_PASS_COUNT=46
 fi
 
@@ -227,6 +227,7 @@ trap 'exit 143' TERM
   echo "CM4 default linker: $ROOT_DIR/cmake/targets/stm32h755_cm4.ld"
   echo "Custom linker fixture: $ROOT_DIR/tests/link/stm32h755/custom_cm7.ld"
   echo "OpenOCD dual-core config: $ROOT_DIR/scripts/openocd_h755_dual_core.cfg"
+  echo "HSEM qualification: CM7 and CM4 physical lock/release/notification (no new fixture)"
   echo "Persistent UART fixture: Arduino D1/TX/PB6 <-> Arduino D0/RX/PB7"
   echo "Persistent SPI fixture: Arduino D11/MOSI/PB5 <-> Arduino D12/MISO/PA6"
   echo "Persistent I2C SCL fixture: Arduino D15/PB8 <-> Zio D69/PF14 (CN9 pin 19)"
@@ -238,6 +239,7 @@ trap 'exit 143' TERM
     sha256sum "$ROOT_DIR/cmake/targets/stm32h755_cm7.ld" 2>/dev/null || true
     sha256sum "$ROOT_DIR/cmake/targets/stm32h755_cm4.ld" 2>/dev/null || true
     sha256sum "$ROOT_DIR/tests/link/stm32h755/custom_cm7.ld" 2>/dev/null || true
+    sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_hsem_case.gdb" 2>/dev/null || true
     sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_uart_case.gdb" 2>/dev/null || true
     sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_spi_case.gdb" 2>/dev/null || true
     sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_i2c_case.gdb" 2>/dev/null || true

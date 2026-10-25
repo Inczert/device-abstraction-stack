@@ -39,7 +39,9 @@ The same 2026-10-04 run also revalidated the complete Ethernet unplug/replug pat
 Peripheral development uses two physical-test levels:
 
 1. focused qualifier during implementation/debugging;
-2. promotion of the same acceptance path into the full campaign once the focused path passes.
+2. **mandatory registration in the single full campaign** before release qualification, including the same test firmware/acceptance checks.
+
+**A focused PASS is never sufficient for release**, even when it is the only new peripheral. For every release, use only the top-level `stm32h755_test_campaign.sh` entry point. It builds and runs ALL registered backend tests (including UART, both cores, FPU and Ethernet), coordinates fixture prompts, fails on the first failed acceptance condition, and writes one consolidated evidence archive plus SHA-256. Do not prescribe separate UART, Ethernet, FPU or additional commands as release prerequisites.
 
 Focused scripts include:
 
@@ -57,7 +59,18 @@ Ethernet defaults to Linux interface `enp0s31f6`. Use `--iface` for the focused 
 
 ## Running the full campaign
 
-Run the campaign from a clean checkout of the final `develop` release candidate. Check `git status --short` before running, and preserve the commit SHA printed in the resulting evidence archive. For the v0.1.0 baseline, use STM32CubeH7 commit `f5c0b7a2b1f6eb26fde150f72edb2d7deb647066`.
+The **single release qualification command** for v0.2.0 development is:
+
+```bash
+./scripts/stm32h755_test_campaign.sh /path/to/STM32CubeH7 \
+  --release --clean --eth-iface <linux-interface>
+```
+
+`--release` fails closed unless the DAS and STM32CubeH7 Git checkouts are clean, and refuses stale ELF reuse via `--no-build`. One invocation performs **four host contracts** (public headers, common time, DMA-handle regression, UART RX-ring regression) **plus the 40 established static/physical acceptance cases**, for **44 expected PASS / 0 FAIL / exit 0** on the current v0.2.0 UART feature candidate. The acceptance count must evolve when other *real* hardware features are added.
+
+The original `--clean` without `--release` remains a convenient complete **hardware development** campaign, with its existing 40-case count. All its sub-tests are already included; there is no separate manual UART release test.
+
+Run from a clean checkout of the exact final candidate and preserve the commit SHA printed in the evidence archive. For the v0.1.0 baseline, use STM32CubeH7 commit `f5c0b7a2b1f6eb26fde150f72edb2d7deb647066`.
 
 ```bash
 git status --short
@@ -336,7 +349,7 @@ It does not imply production dual-core lifecycle/HSEM/shared-memory coordination
 
 ## Release qualification gate
 
-The full hardware campaign is the manual release authority. Before a release candidate is promoted from `develop` to `main`, it must finish with exactly 40 passes, zero failures and exit code zero. The campaign writes a SHA-256 alongside its evidence archive; preserve both as release evidence.
+The **single release-mode campaign** is the manual release authority. Before a v0.2.0 candidate is promoted from `develop` to `main`, run `stm32h755_test_campaign.sh --release --clean` (plus the STM32CubeH7 root and host Ethernet interface). It must finish with **44 passes, zero failures and exit code zero** for the current v0.2.0 feature candidate (40 established hardware/static acceptance cases + 4 host contracts). The release archive includes all corresponding logs and a SHA-256 file; retain both. A future feature release must update the single campaign's expected count and cases as its scope expands. **v0.1.0 historically passed 40 physical/static cases; it is not retrospectively requalified as 44.**
 
 Release automation begins only after promotion. Successful `main` CI reads the root `VERSION` file, creates `v<VERSION>` when that tag does not already exist, and launches packaging automatically.
 

@@ -34,7 +34,7 @@ printf "magic=0x%08x booted=%u error=0x%08x heartbeat=%u core_hz=%u\n", $magic, 
 printf "clock=%d core_clock=%d time=%d timeout=%d flags=0x%02x bytes=%u\n", $clock, $core_clock, $time, $timeout, $flags, $bytes
 printf "baud115200=%u baud57600=%u baud38400=%u mismatch_expected=0x%02x mismatch_actual=0x%02x\n", $baud1, $baud2, $baud3, $expected, $actual
 
-if $magic == 0x44554152 && $booted == 1 && $error == 0 && $heartbeat > 0 && $clock == 0 && $core_clock == 0 && $time == 0 && $timeout == -3 && $flags == 0x1f && $bytes == 34
+if $magic == 0x44554152 && $booted == 1 && $error == 0 && $heartbeat > 0 && $clock == 0 && $core_clock == 0 && $time == 0 && $timeout == -3 && $flags == 0x7f && $bytes == 50
   printf "RESULT: PASS\n"
 else
   printf "RESULT: FAIL\n"

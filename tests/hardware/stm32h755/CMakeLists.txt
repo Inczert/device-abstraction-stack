@@ -50,6 +50,23 @@ target_link_options(das_stm32h755_dual_boot_test PRIVATE
 set_target_properties(das_stm32h755_dual_boot_test PROPERTIES SUFFIX ".elf")
 add_dependencies(das_stm32h755_hw_test das_stm32h755_dual_boot_test)
 
+
+# One isolated, deliberately destructive CM7 IWDG reset-cause hardware test.
+# The full campaign owns the actual GDB reset/reboot orchestration.
+add_executable(das_stm32h755_watchdog_test watchdog_firmware.c)
+target_link_libraries(das_stm32h755_watchdog_test PRIVATE das::das)
+target_include_directories(das_stm32h755_watchdog_test PRIVATE
+    "${DAS_CMSIS_CORE_INCLUDE}" "${DAS_CMSIS_DEVICE_INCLUDE}")
+target_compile_definitions(das_stm32h755_watchdog_test PRIVATE ${DAS_CORE_DEFINE} STM32H755xx)
+target_compile_features(das_stm32h755_watchdog_test PRIVATE c_std_11)
+target_compile_options(das_stm32h755_watchdog_test PRIVATE -Wall -Wextra -Werror -ffreestanding -fno-builtin)
+target_link_options(das_stm32h755_watchdog_test PRIVATE
+    -nostartfiles --specs=nosys.specs -Wl,--gc-sections
+    -Wl,--unresolved-symbols=report-all
+    -Wl,-Map=${CMAKE_CURRENT_BINARY_DIR}/das_stm32h755_watchdog_test.map)
+set_target_properties(das_stm32h755_watchdog_test PROPERTIES SUFFIX ".elf")
+add_dependencies(das_stm32h755_hw_test das_stm32h755_watchdog_test)
+
 add_executable(das_stm32h755_time_test time_firmware.c)
 target_link_libraries(das_stm32h755_time_test PRIVATE das::das)
 target_include_directories(das_stm32h755_time_test PRIVATE

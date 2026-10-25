@@ -72,6 +72,8 @@ if(DAS_DEVICE STREQUAL "nucleo_h755zi_q")
         src/device/stm32h755/power.c
         src/device/stm32h755/core.c
         src/device/stm32h755/hsem.c
+        src/device/stm32h755/watchdog.c
+        src/device/stm32h755/reset.c
         src/device/stm32h755/timer.c
         src/device/stm32h755/uart.c
         src/device/stm32h755/uart_rx_irq.c

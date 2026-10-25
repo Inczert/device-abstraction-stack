@@ -40,19 +40,19 @@ git -C /path/to/STM32CubeH7 rev-parse HEAD
        --eth-iface <linux-interface>
    ```
 
-   The `--release` mode verifies clean DAS/CubeH7 Git trees and refuses `--no-build`. One command rebuilds CM7/CM4, runs four host/API regression cases and **all 43 registered static/physical acceptance cases** (40 baseline + 2 HSEM + 1 autonomous CM4 boot), including UART interrupt-buffering/overflow, FPU and Ethernet (focused scripts are invoked internally as needed, not manually). For the current v0.2.0 feature candidate:
+   The `--release` mode verifies clean DAS/CubeH7 Git trees and refuses `--no-build`. One command rebuilds CM7/CM4, runs four host/API regression cases and **all 45 registered static/physical acceptance cases** (40 baseline + 2 HSEM + 1 autonomous CM4 boot + 2 CM7/CM4 IWDG reboot/reset-cause), including UART interrupt-buffering/overflow, FPU and Ethernet (focused scripts are invoked internally as needed, not manually). For the current v0.2.0 feature candidate:
 
 5. require exactly:
 
    ```text
-   PASS: 47
+   PASS: 49
    FAIL: 0
-   EXPECTED: 47
+   EXPECTED: 49
    OVERALL: PASS
    Exit code: 0
    ```
 
-   The v0.1.0 historical campaign was 40 PASS, and the UART-only increment passed 44, each on their own exact source tree. The new CM4/HSEM increment must pass 47 on its final source tree including an autonomous CM4 boot + HSEM notification case. Merely compiling the test is not physical acceptance. As new features enter subsequent release candidates, they must be integrated into this **same campaign** and the expected count updated. No separate peripheral script is a substitute for this release gate.
+   The v0.1.0 historical campaign was 40 PASS, and the UART-only increment passed 44, each on their own exact source tree. The CM4/HSEM increment previously passed 47/47 on exact qualified source. The watchdog/reset-cause increment must pass 49/49 on a fresh exact source tree, including separate CM7 IWDG1 and CM4 IWDG2 reboots after software resets. Neither CI nor earlier campaign evidence qualifies that new test. As new features enter subsequent release candidates, they must be integrated into this **same campaign** and the expected count updated. No separate peripheral script is a substitute for this release gate.
 
 6. keep the generated evidence archive and its `.sha256`;
 7. promote the qualified `develop` candidate through a **`develop -> main` pull request** using a normal merge commit, without changing the tested source content. Check the resulting merge against the tested tree; its SHA will differ from the tested `develop` SHA, but its source tree must not differ. Do not use a direct push or an unrelated branch as the release entry point.

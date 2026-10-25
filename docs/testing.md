@@ -79,7 +79,7 @@ git -C /home/dev/STM32Cube/Repository/STM32CubeH7/ rev-parse HEAD
 
 ./scripts/stm32h755_test_campaign.sh \
   /home/dev/STM32Cube/Repository/STM32CubeH7/ \
-  --clean \
+  --release --clean \
   --eth-iface <linux-interface>
 ```
 

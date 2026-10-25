@@ -57,7 +57,7 @@ This layer owns STM32H755 silicon behavior implemented by DAS:
 - canonical STM32H755 vector-table layout using CMSIS IRQ numbering;
 - core-aware register views where the device exposes CPU-specific state.
 
-ADC and internal flash remain follow-up work. IWDG and explicit reset-cause primitives are in development pending real reboot qualification. Basic HSEM and CM4 boot-request primitives are implemented under #20, but autonomous second-core execution is still unqualified. See [Dual-core primitives](dual-core.md).
+ADC and internal flash remain follow-up work. IWDG and explicit reset-cause primitives are implemented but await deliberate-reset physical qualification; see [Watchdog/reset](watchdog-reset.md). HSEM and autonomous CM4 execution have passed the single hardware campaign with factory `BOOT_CM4=1`, while software-controlled CM4 release with `BOOT_CM4=0` remains unqualified (#20); see [Dual-core primitives](dual-core.md).
 
 ### Board layer
 
@@ -230,8 +230,8 @@ Independent images execute on both physical CPUs and exercise supported peripher
 
 Still separate under #20:
 
-- physically qualified autonomous CM7-to-CM4 boot/release or wake without debugger-assisted CPU2 start;
-- cross-core HSEM notification/event signaling;
+- physically qualified CM7 software-request-only CM4 release with `BOOT_CM4=0` (autonomous CM4 execution with factory autoboot is qualified);
+- application-level HSEM coordination/IPC (raw HSEM notification hardware is qualified);
 - application-defined shared-memory ownership/cache protocol (documented, not implemented by DAS).
 
 Ethernet is explicitly CM7-owned in the current baseline.

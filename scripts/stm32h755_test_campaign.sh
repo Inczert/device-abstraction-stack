@@ -17,7 +17,7 @@ OPENOCD_PID=""
 GDB_BIN=""
 PASS_COUNT=0
 FAIL_COUNT=0
-EXPECTED_PASS_COUNT=43
+EXPECTED_PASS_COUNT=44
 STAMP=""
 CAMPAIGN_ROOT=""
 LOG_DIR=""
@@ -87,9 +87,9 @@ if (( RELEASE_MODE != 0 )); then
     echo "Release qualification requires --clean and forbids --no-build" >&2
     exit 2
   fi
-  # 40 baseline static/physical + 2 HSEM + 1 autonomous boot; plus four
-  # host API contracts in release mode.
-  EXPECTED_PASS_COUNT=47
+  # 40 baseline static/physical + 2 HSEM + 1 autonomous boot +
+  # 1 deliberately triggered IWDG reset; plus four host contracts.
+  EXPECTED_PASS_COUNT=48
 fi
 
 need() {
@@ -227,6 +227,7 @@ trap 'exit 143' TERM
   echo "CM4 default linker: $ROOT_DIR/cmake/targets/stm32h755_cm4.ld"
   echo "Custom linker fixture: $ROOT_DIR/tests/link/stm32h755/custom_cm7.ld"
   echo "OpenOCD dual-core config: $ROOT_DIR/scripts/openocd_h755_dual_core.cfg"
+  echo "Safety check: deliberate CM7 IWDG1 reboot/reset-cause verification (no new wiring)"
   echo "Dual-core: autonomous CM4 boot/HSEM notification (no new wiring)"
   echo "HSEM qualification: CM7 and CM4 physical lock/release/notification (no new fixture)"
   echo "Persistent UART fixture: Arduino D1/TX/PB6 <-> Arduino D0/RX/PB7"
@@ -240,6 +241,7 @@ trap 'exit 143' TERM
     sha256sum "$ROOT_DIR/cmake/targets/stm32h755_cm7.ld" 2>/dev/null || true
     sha256sum "$ROOT_DIR/cmake/targets/stm32h755_cm4.ld" 2>/dev/null || true
     sha256sum "$ROOT_DIR/tests/link/stm32h755/custom_cm7.ld" 2>/dev/null || true
+    sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_watchdog_reset_case.gdb" 2>/dev/null || true
     sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_dual_boot_case.gdb" 2>/dev/null || true
     sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_hsem_case.gdb" 2>/dev/null || true
     sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_uart_case.gdb" 2>/dev/null || true
@@ -308,6 +310,8 @@ CM7_TIME_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.elf"
 CM7_TIME_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.map"
 CM7_DUAL_BOOT_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_dual_boot_test.elf"
 CM7_DUAL_BOOT_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_dual_boot_test.map"
+CM7_WD_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_watchdog_test.elf"
+CM7_WD_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_watchdog_test.map"
 CM7_HSEM_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hsem_test.elf"
 CM7_HSEM_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hsem_test.map"
 CM7_UART_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.elf"
@@ -332,6 +336,8 @@ CM4_TIME_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.el
 CM4_TIME_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.map"
 CM4_DUAL_BOOT_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_dual_boot_test.elf"
 CM4_DUAL_BOOT_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_dual_boot_test.map"
+CM4_WD_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_watchdog_test.elf"
+CM4_WD_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_watchdog_test.map"
 CM4_HSEM_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hsem_test.elf"
 CM4_HSEM_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hsem_test.map"
 CM4_UART_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.elf"
@@ -350,6 +356,7 @@ CUSTOM_ELF="$CUSTOM_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.elf"
 CUSTOM_MAP="$CUSTOM_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.map"
 
 ARTIFACTS=(
+  "$CM7_WD_ELF" "$CM7_WD_MAP" "$CM4_WD_ELF" "$CM4_WD_MAP"
   "$CM7_DUAL_BOOT_ELF" "$CM7_DUAL_BOOT_MAP" "$CM4_DUAL_BOOT_ELF" "$CM4_DUAL_BOOT_MAP"
   "$CM7_HSEM_ELF" "$CM7_HSEM_MAP" "$CM4_HSEM_ELF" "$CM4_HSEM_MAP"
   "$CM7_ELF" "$CM7_MAP" "$CM7_TIME_ELF" "$CM7_TIME_MAP"
@@ -380,6 +387,7 @@ copy_pair() {
 copy_pair "$CM7_ELF" "$CM7_MAP" das_stm32h755_cm7_hw_test
 copy_pair "$CM7_TIME_ELF" "$CM7_TIME_MAP" das_stm32h755_cm7_time_test
 copy_pair "$CM7_DUAL_BOOT_ELF" "$CM7_DUAL_BOOT_MAP" das_stm32h755_cm7_dual_boot_test
+copy_pair "$CM7_WD_ELF" "$CM7_WD_MAP" das_stm32h755_cm7_watchdog_test
 copy_pair "$CM7_HSEM_ELF" "$CM7_HSEM_MAP" das_stm32h755_cm7_hsem_test
 copy_pair "$CM7_UART_ELF" "$CM7_UART_MAP" das_stm32h755_cm7_uart_test
 copy_pair "$CM7_SPI_ELF" "$CM7_SPI_MAP" das_stm32h755_cm7_spi_test
@@ -392,6 +400,7 @@ copy_pair "$BUTTON_ELF" "$BUTTON_MAP" das_stm32h755_cm7_button_test
 copy_pair "$CM4_ELF" "$CM4_MAP" das_stm32h755_cm4_hw_test
 copy_pair "$CM4_TIME_ELF" "$CM4_TIME_MAP" das_stm32h755_cm4_time_test
 copy_pair "$CM4_DUAL_BOOT_ELF" "$CM4_DUAL_BOOT_MAP" das_stm32h755_cm4_dual_boot_test
+copy_pair "$CM4_WD_ELF" "$CM4_WD_MAP" das_stm32h755_cm4_watchdog_test
 copy_pair "$CM4_HSEM_ELF" "$CM4_HSEM_MAP" das_stm32h755_cm4_hsem_test
 copy_pair "$CM4_UART_ELF" "$CM4_UART_MAP" das_stm32h755_cm4_uart_test
 copy_pair "$CM4_SPI_ELF" "$CM4_SPI_MAP" das_stm32h755_cm4_spi_test
@@ -902,8 +911,14 @@ run_simple_case "CM7 timer/PWM" "$CM7_TIMER_ELF" 3333 \
 run_simple_case "CM4 timer/PWM" "$CM4_TIMER_ELF" 3334 \
   "$ROOT_DIR/scripts/gdb/stm32h755_timer_case.gdb" || exit 1
 
-# Ethernet owns its own flash/debug session. The cable was installed during the
-# initial fixture setup and stays connected; no mid-campaign network choreography.
+# A deliberately destructive IWDG test runs AFTER all other debugger tests
+# to avoid resetting peripherals while they are being independently qualified.
+# CM4's IWDG2 firmware cross-builds, but is not called physically qualified
+# from the separate CM7 reboot evidence.
+run_simple_case "CM7 IWDG reset and RCC cause" "$CM7_WD_ELF" 3333 \
+  "$ROOT_DIR/scripts/gdb/stm32h755_watchdog_reset_case.gdb" || exit 1
+
+# Ethernet reprograms the board after the deliberate IWDG system reset.
 run_ethernet_case || exit 1
 
 if (( PASS_COUNT != EXPECTED_PASS_COUNT )); then

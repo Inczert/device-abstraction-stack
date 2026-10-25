@@ -8,6 +8,7 @@
 #include <das/watchdog.h>
 #include "stm32h755xx.h"
 #include <stdint.h>
+#include <stddef.h>
 
 #if defined(CORE_CM7)
 #define WD_EXPECTED_FLAG DAS_RESET_IWDG1

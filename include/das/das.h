@@ -13,6 +13,8 @@
 #include <das/clock.h>
 #include <das/time.h>
 #include <das/irq.h>
+#include <das/core.h>
+#include <das/hsem.h>
 #include <das/gpio.h>
 #include <das/cache.h>
 #include <das/dma.h>

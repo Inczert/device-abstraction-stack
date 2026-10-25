@@ -57,7 +57,7 @@ This layer owns STM32H755 silicon behavior implemented by DAS:
 - canonical STM32H755 vector-table layout using CMSIS IRQ numbering;
 - core-aware register views where the device exposes CPU-specific state.
 
-ADC, watchdog, internal-flash/reset-cause services and production dual-core lifecycle control remain separate follow-up work.
+ADC, watchdog and internal-flash/reset-cause services remain separate follow-up work. Basic HSEM and CM4 boot-request primitives are implemented under #20, but autonomous second-core execution is still unqualified. See [Dual-core primitives](dual-core.md).
 
 ### Board layer
 
@@ -230,10 +230,9 @@ Independent images execute on both physical CPUs and exercise supported peripher
 
 Still separate under #20:
 
-- CM7-to-CM4 boot/release or wake sequencing without debugger assistance;
-- deterministic shared clock/system ownership;
-- HSEM/inter-core synchronization;
-- shared-memory ownership/cache policy.
+- physically qualified autonomous CM7-to-CM4 boot/release or wake without debugger-assisted CPU2 start;
+- cross-core HSEM notification/event signaling;
+- application-defined shared-memory ownership/cache protocol (documented, not implemented by DAS).
 
 Ethernet is explicitly CM7-owned in the current baseline.
 
@@ -251,6 +250,6 @@ Ethernet is explicitly CM7-owned in the current baseline.
 
 ## Qualification
 
-The standing STM32H755 campaign is **40/40 PASS** at DAS commit `737863075dfed78f73f99ae58f6e0ca52ffea93e`, qualified on 2026-10-04 against STM32CubeH7 `f5c0b7a2b1f6eb26fde150f72edb2d7deb647066`.
+The historical pre-v0.2.0 STM32H755 campaign was **40/40 PASS** at DAS commit `737863075dfed78f73f99ae58f6e0ca52ffea93e`, qualified on 2026-10-04 against STM32CubeH7 `f5c0b7a2b1f6eb26fde150f72edb2d7deb647066`.
 
 It includes static linker checks and physical qualification of startup/vector ownership, hard-float CP10/CP11 enablement plus real VFP execution on both cores, clock/power, time, board resources/button, GPIO/EXTI/IRQ, UART, SPI, I2C, generic DMA/cache and timer/PWM on both cores where applicable, plus CM7 polling Layer-2 Ethernet MAC/DMA/RMII/LAN8742A raw TX/RX.

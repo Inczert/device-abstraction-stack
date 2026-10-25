@@ -16,8 +16,14 @@
 
 #if defined(CORE_CM7)
 #define WD_EXPECTED_FLAG DAS_RESET_IWDG1
+#define WD_HW IWDG1
+#define WD_DBG_REG DBGMCU->APB4FZ1
+#define WD_DBG_FREEZE DBGMCU_APB4FZ1_DBG_IWDG1
 #elif defined(CORE_CM4)
 #define WD_EXPECTED_FLAG DAS_RESET_IWDG2
+#define WD_HW IWDG2
+#define WD_DBG_REG DBGMCU->APB4FZ2
+#define WD_DBG_FREEZE DBGMCU_APB4FZ2_DBG_IWDG2
 #else
 #error "STM32H755 watchdog fixture requires CORE_CM7 or CORE_CM4"
 #endif
@@ -33,6 +39,13 @@ volatile uint32_t g_das_watchdog_saved_software __attribute__((section(".noinit"
 volatile uint32_t g_das_watchdog_boot_count __attribute__((section(".noinit")));
 volatile uint32_t g_das_watchdog_option_status __attribute__((section(".noinit")));
 volatile uint32_t g_das_watchdog_hw_start __attribute__((section(".noinit")));
+/* Persistent evidence even if reset happens during watchdog programming. */
+volatile uint32_t g_das_wd_dbg_before __attribute__((section(".noinit")));
+volatile uint32_t g_das_wd_dbg_after __attribute__((section(".noinit")));
+volatile uint32_t g_das_wd_clock_csr __attribute__((section(".noinit")));
+volatile uint32_t g_das_wd_pr __attribute__((section(".noinit")));
+volatile uint32_t g_das_wd_rlr __attribute__((section(".noinit")));
+volatile uint32_t g_das_wd_sr __attribute__((section(".noinit")));
 
 typedef struct {
     uint32_t magic;
@@ -64,6 +77,16 @@ int main(void) {
      */
     (void)das_watchdog_feed();
     ++g_das_watchdog_boot_count;
+    /*
+     * An attached OpenOCD/debugger can arrange for IWDG to stop while a
+     * core is halted. That would invalidate a physical timeout qualifier.
+     * Disable watchdog debug freeze for THIS destructive test only, not
+     * in the production DAS driver. Never modify option bytes.
+     */
+    g_das_wd_dbg_before = WD_DBG_REG;
+    WD_DBG_REG &= ~WD_DBG_FREEZE;
+    __DSB();
+    g_das_wd_dbg_after = WD_DBG_REG;
     g_das_watchdog_option_status = FLASH->OPTSR_CUR;
 #if defined(CORE_CM7) && defined(FLASH_OPTSR_IWDG1_SW)
     g_das_watchdog_hw_start =
@@ -157,6 +180,10 @@ int main(void) {
         __DMB();
         uint32_t actual = 0u;
         g_das_watchdog_evidence.start_result = das_watchdog_start(&config, &actual);
+        g_das_wd_clock_csr = RCC->CSR;
+        g_das_wd_pr = WD_HW->PR;
+        g_das_wd_rlr = WD_HW->RLR;
+        g_das_wd_sr = WD_HW->SR;
         if (g_das_watchdog_evidence.start_result != DAS_OK ||
             actual != WD_TIMEOUT_MS) {
             /* Watchdog might be active after an update timeout. Do not

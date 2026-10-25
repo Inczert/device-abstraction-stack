@@ -125,3 +125,14 @@ It still produces one timestamped evidence archive with per-core debug logs
 and a SHA-256 checksum. **2/2 PASS here is not a release gate:** the normal
 `--release --clean` run still requires all 49 cases at the final SHA.
 The debug mode cannot be combined with `--release`.
+
+## Debugger freeze in destructive tests
+
+STM32H755 hardware provides per-core IWDG debugger-freeze controls.
+The destructive hardware test disables the current core's IWDG debug
+freeze on entry and records the freeze register before/after, RCC LSI
+clock status, IWDG prescaler/reload/status and FLASH watchdog option
+bits. No option bytes are changed. This is test-only behavior: a DAS
+production driver must not silently modify the application's debug
+configuration. A timeout under an attached debugger is not considered
+qualified unless actual reboot and hardware reset flags are observed.

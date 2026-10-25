@@ -917,7 +917,7 @@ run_simple_case "CM4 timer/PWM" "$CM4_TIMER_ELF" 3334 \
 # This uses the same case image/script and one top-level campaign; no extra
 # operator commands or wiring. BOOT_CM4 must allow CPU2 to restart.
 if run_gdb "$CM7_WD_ELF" 3333 "$LOG_DIR/CM7_IWDG1_reset_cause.log" \
-    -ex "set \\$das_expected_watchdog_mask=0x10" \
+    -ex "set \$das_expected_watchdog_mask=0x10" \
     -x "$ROOT_DIR/scripts/gdb/stm32h755_watchdog_reset_case.gdb"; then
   record "CM7 IWDG1 reset and RCC cause" PASS
 else
@@ -925,7 +925,7 @@ else
   exit 1
 fi
 if run_gdb "$CM4_WD_ELF" 3334 "$LOG_DIR/CM4_IWDG2_reset_cause.log" \
-    -ex "set \\$das_expected_watchdog_mask=0x20" \
+    -ex "set \$das_expected_watchdog_mask=0x20" \
     -x "$ROOT_DIR/scripts/gdb/stm32h755_watchdog_reset_case.gdb"; then
   record "CM4 IWDG2 reset and RCC cause" PASS
 else

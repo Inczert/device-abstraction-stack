@@ -29,6 +29,11 @@ jobs:
           grep -Fx "## $version" CHANGELOG.md
           test -f "release/v$version.md"
 
+      - name: Release entry point must be executable
+        run: |
+          test -x scripts/stm32h755_test_campaign.sh
+          ./scripts/stm32h755_test_campaign.sh --help >/dev/null
+
       - name: Syntax-check hardware qualification scripts
         run: |
           bash -n scripts/stm32h755_test_campaign.sh

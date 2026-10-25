@@ -43,14 +43,22 @@ HSEM alone supplies inter-core cache coherence.
 
 ## Qualification
 
-The single `stm32h755_test_campaign.sh --release --clean` launches
-both new HSEM physical cases (CM7 and CM4) as part of the unchanged
-campaign workflow; expected accepted points now **46** including 4 host
-contracts. These test HSEM lock, contended same-core acquisition,
-release, event notification, and API argument handling.
+The single `stm32h755_test_campaign.sh --release --clean` includes two
+physical HSEM cases plus one **CM4 autonomous execution** case, for
+**47 expected PASS** including four host contracts.
 
-**Limitation:** these debugger-started core tests do NOT yet qualify
-autonomous CM7-to-CM4 boot or cross-core release signaling. A separate
-physical dual-image fixture must be registered **within the same campaign**
-before #20 can be marked complete. No option-byte modification should
-be silently performed by a general release test.
+The autonomous fixture flashes the CM4 ELF into bank 2 using the CM7
+OpenOCD connection, programs and resets the CM7 firmware, and resumes
+**only CM7**. The CM7 firmware requests CM4 boot and publishes a
+challenge in unused shared D2 SRAM3 at 0x30040000; CM4 acknowledges and
+releases HSEM channel 30. CM7 checks the shared response, HSEM
+release-notification, and clock-domain state. There is **no CPU2 GDB
+resume**, no option-byte change and no extra wiring.
+
+**Qualification is pending until the full campaign passes on real hardware.**
+With BOOT_CM4 enabled at reset, CM4 may already be running before CM7
+requests boot; the test proves autonomous CM4 operation but not that the
+software boot-request bit was necessary. With BOOT_CM4 disabled and a
+valid configured bank-2 boot address, the request should release CM4.
+No automatic option-byte programming, core reset/stop, application IPC or
+lifecycle supervision is added.

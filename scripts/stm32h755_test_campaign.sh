@@ -845,6 +845,14 @@ if ! grep -q "Listening on port 3333 for gdb connections" "$OPENOCD_LOG" || \
   exit 1
 fi
 
+if (( WATCHDOG_DEBUG != 0 )); then
+  # BOOT_CM4=1: CPU2 starts automatically on any system reset.
+  # A stale/invalid CPU2 image causes debugger lockup in a focused run,
+  # so program the known-good passive CPU2 firmware before IWDG testing.
+  # This preparation is not an additional acceptance point.
+  rearm_core_image "CM4" "$CM4_ELF" 3334 || exit 1
+fi
+
 if (( WATCHDOG_DEBUG == 0 )); then
 probe_core "CM7 OpenOCD probe" "$CM7_ELF" 3333 0xc27 || exit 1
 probe_core "CM4 OpenOCD probe" "$CM4_ELF" 3334 0xc24 || exit 1

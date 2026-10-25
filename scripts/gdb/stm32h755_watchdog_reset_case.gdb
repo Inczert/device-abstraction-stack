@@ -4,7 +4,7 @@ set print pretty off
 set mem inaccessible-by-default off
 monitor arm semihosting disable
 monitor reset halt
-printf "Flashing software-reset + watchdog-reset qualification image...\n"
+printf "Flashing software-reset + watchdog-reset qualification image (expected watchdog bit 0x%x)...\n", $das_expected_watchdog_mask
 load
 compare-sections
 
@@ -30,7 +30,7 @@ set $heartbeat=(unsigned int)g_das_watchdog_evidence.heartbeat
 printf "WD magic=0x%08x complete=%u error=0x%08x start=%d actual=%u ms\n", $magic, $complete, $error, $start, $actual
 printf "WD software_flags=0x%08x IWDG_flags=0x%08x RCC_RSR=0x%08x cleared_flags=0x%08x stage=0x%08x heartbeat=%u\n", $software, $flags, $raw, $cleared, $stage, $heartbeat
 
-if $magic == 0x44535744 && $complete == 1 && $error == 0 && $start == 0 && $actual == 1200 && ($software & 0x08) != 0 && ($software & 0x10) == 0 && ($flags & 0x10) != 0 && ($flags & 0x08) == 0 && ($cleared & 0x18) == 0 && $stage == 0 && $heartbeat > 0
+if $magic == 0x44535744 && $complete == 1 && $error == 0 && $start == 0 && $actual == 1200 && ($software & 0x08) != 0 && ($software & $das_expected_watchdog_mask) == 0 && ($flags & $das_expected_watchdog_mask) != 0 && ($flags & 0x08) == 0 && ($cleared & ($das_expected_watchdog_mask | 0x08)) == 0 && $stage == 0 && $heartbeat > 0
   printf "RESULT: PASS\n"
 else
   printf "RESULT: FAIL\n"

@@ -17,7 +17,7 @@ OPENOCD_PID=""
 GDB_BIN=""
 PASS_COUNT=0
 FAIL_COUNT=0
-EXPECTED_PASS_COUNT=44
+EXPECTED_PASS_COUNT=45
 STAMP=""
 CAMPAIGN_ROOT=""
 LOG_DIR=""
@@ -88,8 +88,8 @@ if (( RELEASE_MODE != 0 )); then
     exit 2
   fi
   # 40 baseline static/physical + 2 HSEM + 1 autonomous boot +
-  # 1 deliberately triggered IWDG reset; plus four host contracts.
-  EXPECTED_PASS_COUNT=48
+  # 2 per-core IWDG reset sequences; plus four host contracts.
+  EXPECTED_PASS_COUNT=49
 fi
 
 need() {
@@ -227,7 +227,7 @@ trap 'exit 143' TERM
   echo "CM4 default linker: $ROOT_DIR/cmake/targets/stm32h755_cm4.ld"
   echo "Custom linker fixture: $ROOT_DIR/tests/link/stm32h755/custom_cm7.ld"
   echo "OpenOCD dual-core config: $ROOT_DIR/scripts/openocd_h755_dual_core.cfg"
-  echo "Safety check: deliberate CM7 IWDG1 reboot/reset-cause verification (no new wiring)"
+  echo "Safety: CM7 IWDG1 and CM4 IWDG2 reboot + software reset causes (no new wiring)"
   echo "Dual-core: autonomous CM4 boot/HSEM notification (no new wiring)"
   echo "HSEM qualification: CM7 and CM4 physical lock/release/notification (no new fixture)"
   echo "Persistent UART fixture: Arduino D1/TX/PB6 <-> Arduino D0/RX/PB7"
@@ -913,10 +913,25 @@ run_simple_case "CM4 timer/PWM" "$CM4_TIMER_ELF" 3334 \
 
 # A deliberately destructive IWDG test runs AFTER all other debugger tests
 # to avoid resetting peripherals while they are being independently qualified.
-# CM4's IWDG2 firmware cross-builds, but is not called physically qualified
-# from the separate CM7 reboot evidence.
-run_simple_case "CM7 IWDG reset and RCC cause" "$CM7_WD_ELF" 3333 \
-  "$ROOT_DIR/scripts/gdb/stm32h755_watchdog_reset_case.gdb" || exit 1
+# Both CPU-local watchdog instances must undergo their own genuine resets.
+# This uses the same case image/script and one top-level campaign; no extra
+# operator commands or wiring. BOOT_CM4 must allow CPU2 to restart.
+if run_gdb "$CM7_WD_ELF" 3333 "$LOG_DIR/CM7_IWDG1_reset_cause.log" \
+    -ex "set \\$das_expected_watchdog_mask=0x10" \
+    -x "$ROOT_DIR/scripts/gdb/stm32h755_watchdog_reset_case.gdb"; then
+  record "CM7 IWDG1 reset and RCC cause" PASS
+else
+  record "CM7 IWDG1 reset and RCC cause" FAIL
+  exit 1
+fi
+if run_gdb "$CM4_WD_ELF" 3334 "$LOG_DIR/CM4_IWDG2_reset_cause.log" \
+    -ex "set \\$das_expected_watchdog_mask=0x20" \
+    -x "$ROOT_DIR/scripts/gdb/stm32h755_watchdog_reset_case.gdb"; then
+  record "CM4 IWDG2 reset and RCC cause" PASS
+else
+  record "CM4 IWDG2 reset and RCC cause" FAIL
+  exit 1
+fi
 
 # Ethernet reprograms the board after the deliberate IWDG system reset.
 run_ethernet_case || exit 1

@@ -63,11 +63,11 @@ The mandatory command remains:
   --release --clean --eth-iface <wired-linux-interface>
 ```
 
-The single runner includes one **isolated two-reset hardware case**:
-CM7 explicitly clears old flags and triggers a software reset. On the
+The single runner includes **two isolated two-reset hardware cases**, one on each core:
+Each core explicitly clears old flags and triggers a software reset. On the
 second boot it must detect the software-reset flag (but not IWDG1),
-clear it, start IWDG1 for nominal 1200 ms and intentionally stop
-feeding. On the third boot, it must detect IWDG1 (but not the cleared
+clear it, start its IWDG (IWDG1 on CM7, IWDG2 on CM4) for nominal 1200 ms and intentionally stop
+feeding. On the third boot, it must detect that core's IWDG flag (but not the cleared
 software flag), clear it and feed the watchdog while GDB captures the
 result. Two SRAM `.noinit` markers keep the state across both resets.
 
@@ -75,8 +75,11 @@ A PASS therefore distinguishes software and IWDG reset origins on real
 silicon, without manufacturing a reset flag in software. The test
 requires no extra operator script, board jumper or button press.
 
-**Current expected campaign target: 48 PASS / 0 FAIL.** That is a
+**Current expected campaign target: 49 PASS / 0 FAIL.** That is a
 requirement, not evidence it has been tested.
 
-The CM4 IWDG2 firmware cross-builds, but the CM4 destructive reboot path
-has not yet been physically tested and must not be described as qualified.
+The CM4 case requires its firmware to restart after each reset. A board
+with `BOOT_CM4=0` cannot pass this fixture unless CM7 explicitly releases
+CPU2; the tested NUCLEO has `BOOT_CM4=1`. No test modifies option bytes.
+Both cases remain **unqualified until the full 49-case physical campaign
+passes on the exact PR head**.

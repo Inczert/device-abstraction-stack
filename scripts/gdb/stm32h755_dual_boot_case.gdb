@@ -22,6 +22,9 @@ set $error=(unsigned int)g_das_boot_evidence.error
 set $request=(int)g_das_boot_evidence.boot_request
 set $gate=(unsigned int)g_das_boot_evidence.boot_gate
 set $boot_option=(unsigned int)g_das_boot_evidence.boot_option_cm4
+set $flash_option=(unsigned int)g_das_boot_evidence.flash_boot_option_cm4
+set $flash_optsr=(unsigned int)g_das_boot_evidence.flash_optsr_cur
+set $syscfg_ur1=(unsigned int)g_das_boot_evidence.syscfg_ur1
 set $prequiet=(unsigned int)g_das_boot_evidence.pre_request_quiet
 set $preseen=(unsigned int)g_das_boot_evidence.pre_request_seen
 set $postseen=(unsigned int)g_das_boot_evidence.post_request_seen
@@ -36,13 +39,14 @@ set $cm4done=*(unsigned int*)0x3004000c
 set $cm4hb=*(unsigned int*)0x30040010
 printf "CM7: complete=%u error=%u request=%d gate=%u boot_option_cm4=%u d2ready=%u notify=%u heartbeat=%u\n", $complete, $error, $request, $gate, $boot_option, $domain, $notify, $heartbeat
 printf "CM4: magic=0x%08x challenge=0x%08x response=0x%08x done=%u hb=%u\n", $boxmagic, $challenge, $response, $cm4done, $cm4hb
-printf "CM4 boot gate: required_option=%d measured_option=%d initial_request=%u pre_seen=%u pre_quiet=%u post_seen=%u\n", $das_required_boot_option, $boot_option, $initial_req, $preseen, $prequiet, $postseen
-if $das_required_boot_option == 0 && $boot_option != 0
-  printf "CONFIGURATION FAIL: BOOT_CM4=1. The gated-boot test requires BOOT_CM4=0 applied with a supported programmer and a reset/power cycle; this script NEVER programs option bytes.\n"
+printf "CM4 boot gate: required_option=%d SYSCFG_BCM4=%d FLASH_BCM4=%d SYSCFG_UR1=0x%08x FLASH_OPTSR_CUR=0x%08x\n", $das_required_boot_option, $boot_option, $flash_option, $syscfg_ur1, $flash_optsr
+printf "CM4 execution: initial_request=%u pre_seen=%u pre_quiet=%u post_seen=%u\n", $initial_req, $preseen, $prequiet, $postseen
+if $das_required_boot_option == 0 && ($boot_option != 0 || $flash_option != 0)
+  printf "CONFIGURATION FAIL: gated boot requires both FLASH BCM4=0 and SYSCFG BCM4=0. Verify option-byte programming, readback and reset; DAS does not write option bytes.\n"
   printf "RESULT: FAIL\n"
   quit 1
 end
-if $magic == 0x44424f54 && $complete == 1 && $error == 0 && $request == 0 && $gate == 1 && ($boot_option == 0 || $boot_option == 1) && ($das_required_boot_option == -1 || $boot_option == $das_required_boot_option) && ($boot_option != 0 || ($initial_req == 0 && $preseen == 0 && $prequiet == 1)) && $postseen == 1 && $domain == 1 && $notify == 1 && $heartbeat > 0 && $boxmagic == 0x44424f54 && $challenge == 0x52434d34 && $response == 0x434d344f && $cm4done == 1 && $cm4hb > 0
+if $magic == 0x44424f54 && $complete == 1 && $error == 0 && $request == 0 && $gate == 1 && ($boot_option == 0 || $boot_option == 1) && ($das_required_boot_option == -1 || ($boot_option == $das_required_boot_option && $flash_option == $das_required_boot_option)) && ($boot_option != 0 || ($initial_req == 0 && $preseen == 0 && $prequiet == 1)) && $postseen == 1 && $domain == 1 && $notify == 1 && $heartbeat > 0 && $boxmagic == 0x44424f54 && $challenge == 0x52434d34 && $response == 0x434d344f && $cm4done == 1 && $cm4hb > 0
   printf "RESULT: PASS\n"
 else
   printf "RESULT: FAIL\n"

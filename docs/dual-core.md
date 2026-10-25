@@ -166,3 +166,32 @@ the previous option-byte record before running the full 49-case campaign.
 
 Changing CPU2's boot address, RDP, BOR, watchdog mode, or any unrelated
 option bytes is outside this qualification procedure.
+
+### Readback reliability: FLASH option value versus SYSCFG boot latch
+
+The 2026-10-25 focused attempt `das-stm32h755-campaign-20261025T164204Z.tar.gz`
+passed the complete CM7/CM4 handshake but still found
+`SYSCFG.UR1.BCM4=1`, `pre_seen=1` and `BOOT_CM4=0` required.
+It failed **0/1** correctly; it is not proof of CM7-only gated boot.
+The updated fixture logs both `FLASH.OPTSR_CUR` **bit 22** (the
+persistent BCM4 current value) and `SYSCFG.UR1.BCM4` (the sampled boot
+state). Both must be **0** in the gated boot run, and CPU2 must be absent
+before CM7's request. Readback mismatch must be investigated, not hidden.
+
+**CubeProgrammer warning:** ST publicly acknowledged (2 October 2026,
+internal ticket CDM0065212) a CubeProgrammer **2.23.0 device database
+issue** affecting some STM32H757/H755 dual-core option-byte fields.
+Affected CLI configurations may say a field does not exist but exit with
+code 0. Therefore never interpret the process exit code as proof an option
+byte was programmed. Check stdout/stderr for warnings, reread the complete
+options with `-ob displ`, power-cycle and confirm the firmware's **two
+independent BCM4 observations**. The recommended bench change remains
+`STM32_Programmer_CLI -c port=SWD mode=UR -ob BCM4=0` only if the installed
+programmer recognizes the field. Do NOT use unreviewed raw register writes
+or alter RDP, boot addresses or other unrelated option bytes to work
+around a programmer bug. On persistent disagreement, use a supported
+CubeProgrammer version or GUI and preserve both before/after dumps.
+
+Reference: ST community issue, "CubeProgrammer v2.23.0: STM32H757 dual-core
+option bytes ... do not exist" (posted 30 September 2026); ST moderator
+confirmed a known issue on 2 October 2026.

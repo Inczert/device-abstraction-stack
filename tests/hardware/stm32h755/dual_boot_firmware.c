@@ -35,6 +35,9 @@ typedef struct {
     volatile int32_t boot_request;
     volatile uint32_t boot_gate;
     volatile uint32_t boot_option_cm4;
+    volatile uint32_t flash_boot_option_cm4;
+    volatile uint32_t flash_optsr_cur;
+    volatile uint32_t syscfg_ur1;
     volatile uint32_t domain_ready;
     volatile uint32_t notification;
     volatile uint32_t heartbeat;
@@ -62,8 +65,18 @@ int main(void) {
     RCC->APB4ENR |= RCC_APB4ENR_SYSCFGEN;
     (void)RCC->APB4ENR;
     __DSB();
+    g_das_boot_evidence.syscfg_ur1 = SYSCFG->UR1;
+    g_das_boot_evidence.flash_optsr_cur = FLASH->OPTSR_CUR;
     g_das_boot_evidence.boot_option_cm4 =
-        (SYSCFG->UR1 & SYSCFG_UR1_BCM4) != 0u ? 1u : 0u;
+        (g_das_boot_evidence.syscfg_ur1 & SYSCFG_UR1_BCM4) != 0u ? 1u : 0u;
+    /* Dual-core RM0399 FLASH_OPTSR_CUR.BCM4 is bit 22. Unlike SYSCFG
+     * UR1, it reports the current FLASH option-byte value. Record BOTH:
+     * CubeProgrammer database problems and option-byte load problems have
+     * produced real-world disagreements. No option bytes are written here.
+     */
+    g_das_boot_evidence.flash_boot_option_cm4 =
+        (g_das_boot_evidence.flash_optsr_cur &
+         (UINT32_C(1) << 22u)) != 0u ? 1u : 0u;
 
     /* Publish the mailbox magic LAST, after all volatile fields are reset.
      * A CM4 that autoboots must first see this magic before touching its

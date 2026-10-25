@@ -142,9 +142,15 @@ int main(void) {
      * must stay absent until CPU1 writes RCC BOOT_C2.
      */
     while (box->magic != BOOT_MAGIC) { __NOP(); }
-    box->cm4_early_seen = 1u;
-    __DMB();
-    while (box->challenge != CHALLENGE) { __NOP(); }
+    /* Keep publishing presence while CM7 builds its mailbox. A CM4 that
+     * starts very early may have observed a stale magic from a prior reset;
+     * CM7 can overwrite its first early_seen store during reinitialization.
+     */
+    do {
+        box->cm4_early_seen = 1u;
+        __DMB();
+        __NOP();
+    } while (box->challenge != CHALLENGE);
     if (das_hsem_init() != DAS_OK ||
         das_hsem_try_acquire(HSEM_CHANNEL) != DAS_OK) {
         for (;;) { __NOP(); }

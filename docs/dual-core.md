@@ -131,8 +131,30 @@ configuration mismatch rather than displaying only a generic failure.
 its display-only command (adjust the binary's installed path):
 
 ```bash
+STM32_Programmer_CLI -c port=SWD -ob displ | tee stm32h755-option-bytes-before.txt
+```
+
+Once the full options are safely recorded and only on a bench device,
+ST's CubeProgrammer CLI supports changing this **one** setting:
+
+```bash
+STM32_Programmer_CLI -c port=SWD -ob BCM4=0
 STM32_Programmer_CLI -c port=SWD -ob displ
 ```
+
+Confirm BCM4 actually reads back as 0 and power-cycle the board before
+running the focused physical test. Afterward, **restore the original
+BCM4=1** on this NUCLEO and verify the readback:
+
+```bash
+STM32_Programmer_CLI -c port=SWD -ob BCM4=1
+STM32_Programmer_CLI -c port=SWD -ob displ
+```
+
+Close any active OpenOCD/GDB connection before using CubeProgrammer on
+ST-LINK. The command's executable path depends on your CubeProgrammer
+installation. These are **manual operator commands**, intentionally
+outside the DAS campaign runner.
 
 Save that full display before any change, especially the current CPU1/CPU2
 boot addresses and protection settings. In STM32CubeProgrammer's **Option

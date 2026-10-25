@@ -10,7 +10,11 @@ compare-sections
 # System reset RUN lets hardware autonomously boot either core, according
 # to BOOT_CM4 option bytes and the CM7 RCC software request.
 monitor reset run
-shell sleep 2
+# The CM7 firmware deliberately samples CM4 BEFORE RCC BOOT_C2, then
+# waits for HSEM and CM4's response. The original 2-second sleep could
+# halt inside that pre-request delay at 64 MHz/O0 and report incomplete
+# evidence as a runtime failure. Allow it to complete, including on CM4.
+shell sleep 8
 monitor halt
 set $magic=(unsigned int)g_das_boot_evidence.magic
 set $complete=(unsigned int)g_das_boot_evidence.complete
@@ -33,6 +37,11 @@ set $cm4hb=*(unsigned int*)0x30040010
 printf "CM7: complete=%u error=%u request=%d gate=%u boot_option_cm4=%u d2ready=%u notify=%u heartbeat=%u\n", $complete, $error, $request, $gate, $boot_option, $domain, $notify, $heartbeat
 printf "CM4: magic=0x%08x challenge=0x%08x response=0x%08x done=%u hb=%u\n", $boxmagic, $challenge, $response, $cm4done, $cm4hb
 printf "CM4 boot gate: required_option=%d measured_option=%d initial_request=%u pre_seen=%u pre_quiet=%u post_seen=%u\n", $das_required_boot_option, $boot_option, $initial_req, $preseen, $prequiet, $postseen
+if $das_required_boot_option == 0 && $boot_option != 0
+  printf "CONFIGURATION FAIL: BOOT_CM4=1. The gated-boot test requires BOOT_CM4=0 applied with a supported programmer and a reset/power cycle; this script NEVER programs option bytes.\n"
+  printf "RESULT: FAIL\n"
+  quit 1
+end
 if $magic == 0x44424f54 && $complete == 1 && $error == 0 && $request == 0 && $gate == 1 && ($boot_option == 0 || $boot_option == 1) && ($das_required_boot_option == -1 || $boot_option == $das_required_boot_option) && ($boot_option != 0 || ($initial_req == 0 && $preseen == 0 && $prequiet == 1)) && $postseen == 1 && $domain == 1 && $notify == 1 && $heartbeat > 0 && $boxmagic == 0x44424f54 && $challenge == 0x52434d34 && $response == 0x434d344f && $cm4done == 1 && $cm4hb > 0
   printf "RESULT: PASS\n"
 else

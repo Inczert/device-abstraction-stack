@@ -112,3 +112,35 @@ hardware configuration was restored.
 No debugger ever resumes CPU2 to manufacture evidence, and DAS does not
 provide a CM4 scheduler, IPC, shutdown/restart policy or application
 heartbeat API.
+
+### Failed candidate on BOOT_CM4=1 (2026-10-25)
+
+The first focused candidate archive `das-stm32h755-campaign-20261025T163027Z.tar.gz`
+was checked against its separately uploaded SHA256 and failed 0/1.
+It read **`SYSCFG.UR1.BCM4=1`**, while the focused acceptance required
+0. This does **not** demonstrate a broken CM7 boot-request implementation;
+the board configuration still allows CPU2 to autoboot.
+
+The debugger also stopped at `0x08000386`, disassembled into the fixture's
+12-million-iteration pre-request observation loop. The original two-second
+GDB wait was therefore too short to finish the firmware test on this board.
+The GDB case now waits eight seconds and reports an explicit option-byte
+configuration mismatch rather than displaying only a generic failure.
+
+**To inspect the current option bytes** with STM32CubeProgrammer CLI, use
+its display-only command (adjust the binary's installed path):
+
+```bash
+STM32_Programmer_CLI -c port=SWD -ob displ
+```
+
+Save that full display before any change, especially the current CPU1/CPU2
+boot addresses and protection settings. In STM32CubeProgrammer's **Option
+Bytes** view, confirm that **BCM7 remains enabled**, set **only BCM4 to
+disabled**, apply/verify the write, and power-cycle if needed to load the
+new nonvolatile setting. Read option bytes again and confirm that the
+firmware measures `BOOT_CM4=0`. On completion, restore **BCM4=1** and verify
+the previous option-byte record before running the full 49-case campaign.
+
+Changing CPU2's boot address, RDP, BOR, watchdog mode, or any unrelated
+option bytes is outside this qualification procedure.

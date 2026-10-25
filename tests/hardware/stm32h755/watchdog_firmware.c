@@ -46,6 +46,12 @@ volatile uint32_t g_das_wd_clock_csr __attribute__((section(".noinit")));
 volatile uint32_t g_das_wd_pr __attribute__((section(".noinit")));
 volatile uint32_t g_das_wd_rlr __attribute__((section(".noinit")));
 volatile uint32_t g_das_wd_sr __attribute__((section(".noinit")));
+/* Durable checkpoints distinguish a reset in start() from a reset during
+ * test-side diagnostic register reads. They are not part of the DAS API.
+ */
+volatile int32_t g_das_wd_start_return __attribute__((section(".noinit")));
+volatile uint32_t g_das_wd_start_actual __attribute__((section(".noinit")));
+volatile uint32_t g_das_wd_checkpoint __attribute__((section(".noinit")));
 
 typedef struct {
     uint32_t magic;
@@ -176,26 +182,44 @@ int main(void) {
         /* New persistent phase separates "unexpected watchdog before
          * configuring" from "watchdog reset during configuration".
          */
+        g_das_wd_checkpoint = 0u;
+        g_das_wd_start_return = DAS_ERROR_NOT_READY;
+        g_das_wd_start_actual = 0u;
         g_das_watchdog_stage = WD_CONFIGURING_STAGE;
         __DMB();
         uint32_t actual = 0u;
-        g_das_watchdog_evidence.start_result = das_watchdog_start(&config, &actual);
-        g_das_wd_clock_csr = RCC->CSR;
-        g_das_wd_pr = WD_HW->PR;
-        g_das_wd_rlr = WD_HW->RLR;
-        g_das_wd_sr = WD_HW->SR;
-        if (g_das_watchdog_evidence.start_result != DAS_OK ||
-            actual != WD_TIMEOUT_MS) {
-            /* Watchdog might be active after an update timeout. Do not
-             * mistake a reset during failed configuration for success.
+        const das_result_t started = das_watchdog_start(&config, &actual);
+
+        /* Capture the return before any register diagnostics. They must not
+         * delay the crucial handoff into the intentional no-feed interval.
+         */
+        g_das_wd_start_return = started;
+        g_das_wd_start_actual = actual;
+        g_das_wd_checkpoint = 1u;
+        if (started != DAS_OK || actual != WD_TIMEOUT_MS) {
+            /* A failed start may still leave the watchdog running. Never
+             * accept its reset as a qualified deliberate timeout.
              */
             g_das_watchdog_stage = 0u;
             fail(7u);
         }
 
-        /* Arm success marker ONLY after the driver has returned DAS_OK. */
+        /* The start API has completed successfully. Explicitly refresh the
+         * counter to give the test the entire configured timeout, THEN arm
+         * the persisted success marker. No IWDG feeds occur after arming
+         * until the hardware timeout produces the next system reset.
+         */
+        (void)das_watchdog_feed();
+        g_das_wd_checkpoint = 2u;
         g_das_watchdog_stage = WD_ARMED_STAGE;
-        __DMB();
+        __DSB();
+
+        /* Capture optional diagnostics only after successful handoff. */
+        g_das_wd_clock_csr = RCC->CSR;
+        g_das_wd_pr = WD_HW->PR;
+        g_das_wd_rlr = WD_HW->RLR;
+        g_das_wd_sr = WD_HW->SR;
+        g_das_wd_checkpoint = 3u;
         for (;;) { __NOP(); } /* Deliberately do not feed. */
     }
 

@@ -136,3 +136,17 @@ bits. No option bytes are changed. This is test-only behavior: a DAS
 production driver must not silently modify the application's debug
 configuration. A timeout under an attached debugger is not considered
 qualified unless actual reboot and hardware reset flags are observed.
+
+### Configuration-to-timeout handoff
+
+The watchdog test now commits durable checkpoints immediately after the
+API returns, including its actual result and calculated timeout. After
+successful configuration, it performs **one explicit final refresh** before
+marking the test `ARMED`, then deliberately stops feeding. It records
+register snapshots *after* that marker, not in the small interval between
+successful configuration and arming. A reset during configuration remains
+failure 9; a reset after the final refresh can qualify only if both the
+reported start result and timeout were valid and the later RCC reset-cause
+check succeeds. This directly addresses a previously ambiguous
+`CONFIGURING`-stage reset while preserving the 2-test debug and 49-test
+release gates.

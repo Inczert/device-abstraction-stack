@@ -17,7 +17,7 @@ OPENOCD_PID=""
 GDB_BIN=""
 PASS_COUNT=0
 FAIL_COUNT=0
-EXPECTED_PASS_COUNT=42
+EXPECTED_PASS_COUNT=43
 STAMP=""
 CAMPAIGN_ROOT=""
 LOG_DIR=""
@@ -87,9 +87,9 @@ if (( RELEASE_MODE != 0 )); then
     echo "Release qualification requires --clean and forbids --no-build" >&2
     exit 2
   fi
-  # 40 baseline physical/static cases + 2 HSEM cases; additionally run
-  # four host contracts in strict release mode.
-  EXPECTED_PASS_COUNT=46
+  # 40 baseline static/physical + 2 HSEM + 1 autonomous boot; plus four
+  # host API contracts in release mode.
+  EXPECTED_PASS_COUNT=47
 fi
 
 need() {
@@ -227,6 +227,7 @@ trap 'exit 143' TERM
   echo "CM4 default linker: $ROOT_DIR/cmake/targets/stm32h755_cm4.ld"
   echo "Custom linker fixture: $ROOT_DIR/tests/link/stm32h755/custom_cm7.ld"
   echo "OpenOCD dual-core config: $ROOT_DIR/scripts/openocd_h755_dual_core.cfg"
+  echo "Dual-core: autonomous CM4 boot/HSEM notification (no new wiring)"
   echo "HSEM qualification: CM7 and CM4 physical lock/release/notification (no new fixture)"
   echo "Persistent UART fixture: Arduino D1/TX/PB6 <-> Arduino D0/RX/PB7"
   echo "Persistent SPI fixture: Arduino D11/MOSI/PB5 <-> Arduino D12/MISO/PA6"
@@ -239,6 +240,7 @@ trap 'exit 143' TERM
     sha256sum "$ROOT_DIR/cmake/targets/stm32h755_cm7.ld" 2>/dev/null || true
     sha256sum "$ROOT_DIR/cmake/targets/stm32h755_cm4.ld" 2>/dev/null || true
     sha256sum "$ROOT_DIR/tests/link/stm32h755/custom_cm7.ld" 2>/dev/null || true
+    sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_dual_boot_case.gdb" 2>/dev/null || true
     sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_hsem_case.gdb" 2>/dev/null || true
     sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_uart_case.gdb" 2>/dev/null || true
     sha256sum "$ROOT_DIR/scripts/gdb/stm32h755_spi_case.gdb" 2>/dev/null || true
@@ -304,6 +306,8 @@ CM7_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.elf"
 CM7_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.map"
 CM7_TIME_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.elf"
 CM7_TIME_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.map"
+CM7_DUAL_BOOT_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_dual_boot_test.elf"
+CM7_DUAL_BOOT_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_dual_boot_test.map"
 CM7_HSEM_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hsem_test.elf"
 CM7_HSEM_MAP="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hsem_test.map"
 CM7_UART_ELF="$BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.elf"
@@ -326,6 +330,8 @@ CM4_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.elf"
 CM4_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hw_test.map"
 CM4_TIME_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.elf"
 CM4_TIME_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_time_test.map"
+CM4_DUAL_BOOT_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_dual_boot_test.elf"
+CM4_DUAL_BOOT_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_dual_boot_test.map"
 CM4_HSEM_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hsem_test.elf"
 CM4_HSEM_MAP="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_hsem_test.map"
 CM4_UART_ELF="$CM4_BUILD_DIR/tests/hardware/stm32h755/das_stm32h755_uart_test.elf"
@@ -344,6 +350,7 @@ CUSTOM_ELF="$CUSTOM_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.elf"
 CUSTOM_MAP="$CUSTOM_BUILD_DIR/tests/link/stm32h755/das_stm32h755_link_test.map"
 
 ARTIFACTS=(
+  "$CM7_DUAL_BOOT_ELF" "$CM7_DUAL_BOOT_MAP" "$CM4_DUAL_BOOT_ELF" "$CM4_DUAL_BOOT_MAP"
   "$CM7_HSEM_ELF" "$CM7_HSEM_MAP" "$CM4_HSEM_ELF" "$CM4_HSEM_MAP"
   "$CM7_ELF" "$CM7_MAP" "$CM7_TIME_ELF" "$CM7_TIME_MAP"
   "$CM7_UART_ELF" "$CM7_UART_MAP" "$CM7_SPI_ELF" "$CM7_SPI_MAP"
@@ -372,6 +379,7 @@ copy_pair() {
 
 copy_pair "$CM7_ELF" "$CM7_MAP" das_stm32h755_cm7_hw_test
 copy_pair "$CM7_TIME_ELF" "$CM7_TIME_MAP" das_stm32h755_cm7_time_test
+copy_pair "$CM7_DUAL_BOOT_ELF" "$CM7_DUAL_BOOT_MAP" das_stm32h755_cm7_dual_boot_test
 copy_pair "$CM7_HSEM_ELF" "$CM7_HSEM_MAP" das_stm32h755_cm7_hsem_test
 copy_pair "$CM7_UART_ELF" "$CM7_UART_MAP" das_stm32h755_cm7_uart_test
 copy_pair "$CM7_SPI_ELF" "$CM7_SPI_MAP" das_stm32h755_cm7_spi_test
@@ -383,6 +391,7 @@ copy_pair "$CLOCK_ELF" "$CLOCK_MAP" das_stm32h755_cm7_clock_test
 copy_pair "$BUTTON_ELF" "$BUTTON_MAP" das_stm32h755_cm7_button_test
 copy_pair "$CM4_ELF" "$CM4_MAP" das_stm32h755_cm4_hw_test
 copy_pair "$CM4_TIME_ELF" "$CM4_TIME_MAP" das_stm32h755_cm4_time_test
+copy_pair "$CM4_DUAL_BOOT_ELF" "$CM4_DUAL_BOOT_MAP" das_stm32h755_cm4_dual_boot_test
 copy_pair "$CM4_HSEM_ELF" "$CM4_HSEM_MAP" das_stm32h755_cm4_hsem_test
 copy_pair "$CM4_UART_ELF" "$CM4_UART_MAP" das_stm32h755_cm4_uart_test
 copy_pair "$CM4_SPI_ELF" "$CM4_SPI_MAP" das_stm32h755_cm4_spi_test
@@ -617,6 +626,23 @@ visual_case() {
   fi
 }
 
+# Prepare CM4 flash bank 2 using the CM7 OpenOCD connection, then
+# resume ONLY CM7. A CM4 response requires actual secondary-core execution;
+# no debugger attaches to, resets, or resumes CM4 as an individual target.
+run_dual_boot_case() {
+  local label="CM7 autonomous CM4 boot / HSEM"
+  local log="$LOG_DIR/CM7_CM4_autonomous_boot.log"
+  if run_gdb "$CM7_DUAL_BOOT_ELF" 3333 "$log" \
+      -ex "monitor reset halt" \
+      -ex "monitor flash write_image erase $CM4_DUAL_BOOT_ELF" \
+      -x "$ROOT_DIR/scripts/gdb/stm32h755_dual_boot_case.gdb"; then
+    record "$label" PASS
+  else
+    record "$label" FAIL
+    return 1
+  fi
+}
+
 run_fpu_case() {
   local label="Cortex-M hard-float startup"
   local log="$LOG_DIR/Cortex-M_hard-float_startup.log"
@@ -812,6 +838,7 @@ run_button_case || exit 1
 # Persistent serial fixtures were installed during initial setup and stay connected.
 # The canonical UART GDB case also asserts v0.2.0 try-I/O, IRQ-ring RX,
 # overflow accounting and ownership guards: NO separate UART release script.
+run_dual_boot_case || exit 1
 run_gdb "$CM7_HSEM_ELF" 3333 "$LOG_DIR/CM7_HSEM.log" -ex "set \$das_expected_request=0" -x "$ROOT_DIR/scripts/gdb/stm32h755_hsem_case.gdb" && record "CM7 HSEM primitives" PASS || { record "CM7 HSEM primitives" FAIL; exit 1; }
 run_gdb "$CM4_HSEM_ELF" 3334 "$LOG_DIR/CM4_HSEM.log" -ex "set \$das_expected_request=-2" -x "$ROOT_DIR/scripts/gdb/stm32h755_hsem_case.gdb" && record "CM4 HSEM primitives" PASS || { record "CM4 HSEM primitives" FAIL; exit 1; }
 run_simple_case "CM7 UART loopback" "$CM7_UART_ELF" 3333 \

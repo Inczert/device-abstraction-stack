@@ -22,6 +22,7 @@ typedef struct {
     volatile uint32_t response;
     volatile uint32_t cm4_done;
     volatile uint32_t cm4_heartbeat;
+    volatile uint32_t cm4_early_seen;
 } boot_mailbox_t;
 
 #define BOX ((boot_mailbox_t*)(uintptr_t)UINT32_C(0x30040000))
@@ -34,9 +35,16 @@ typedef struct {
     volatile int32_t boot_request;
     volatile uint32_t boot_gate;
     volatile uint32_t boot_option_cm4;
+    volatile uint32_t flash_boot_option_cm4;
+    volatile uint32_t flash_optsr_cur;
+    volatile uint32_t syscfg_ur1;
     volatile uint32_t domain_ready;
     volatile uint32_t notification;
     volatile uint32_t heartbeat;
+    volatile uint32_t pre_request_quiet;
+    volatile uint32_t pre_request_seen;
+    volatile uint32_t post_request_seen;
+    volatile uint32_t initial_request;
 } boot_evidence_t;
 
 volatile boot_evidence_t g_das_boot_evidence = {
@@ -57,19 +65,54 @@ int main(void) {
     RCC->APB4ENR |= RCC_APB4ENR_SYSCFGEN;
     (void)RCC->APB4ENR;
     __DSB();
+    g_das_boot_evidence.syscfg_ur1 = SYSCFG->UR1;
+    g_das_boot_evidence.flash_optsr_cur = FLASH->OPTSR_CUR;
     g_das_boot_evidence.boot_option_cm4 =
-        (SYSCFG->UR1 & SYSCFG_UR1_BCM4) != 0u ? 1u : 0u;
+        (g_das_boot_evidence.syscfg_ur1 & SYSCFG_UR1_BCM4) != 0u ? 1u : 0u;
+    /* Dual-core RM0399 FLASH_OPTSR_CUR.BCM4 is bit 22. Unlike SYSCFG
+     * UR1, it reports the current FLASH option-byte value. Record BOTH:
+     * CubeProgrammer database problems and option-byte load problems have
+     * produced real-world disagreements. No option bytes are written here.
+     */
+    g_das_boot_evidence.flash_boot_option_cm4 =
+        (g_das_boot_evidence.flash_optsr_cur &
+         (UINT32_C(1) << 22u)) != 0u ? 1u : 0u;
 
-    box->magic = BOOT_MAGIC;
+    /* Publish the mailbox magic LAST, after all volatile fields are reset.
+     * A CM4 that autoboots must first see this magic before touching its
+     * early-execution marker; this avoids an unobservable race at power-up.
+     */
+    box->magic = 0u;
+    __DMB();
     box->challenge = 0u;
     box->response = 0u;
     box->cm4_done = 0u;
     box->cm4_heartbeat = 0u;
+    box->cm4_early_seen = 0u;
+    __DMB();
+    box->magic = BOOT_MAGIC;
     __DMB();
     if (das_hsem_init() != DAS_OK ||
         das_hsem_clear_notification(HSEM_CHANNEL) != DAS_OK ||
         das_hsem_set_notification(HSEM_CHANNEL, true) != DAS_OK) {
         fail(1u);
+    }
+    /*
+     * Distinguish factory BOOT_CM4=1 autoboot from genuine software release.
+     * On BOOT_CM4=0, CM4 MUST NOT enter main() before the CM7 request.
+     * CM4 publishes early_seen after magic but BEFORE the challenge. We
+     * deliberately withhold the challenge during the observation window.
+     */
+    das_secondary_core_state_t before = {0};
+    if (das_secondary_core_get_state(&before) != DAS_OK) fail(7u);
+    g_das_boot_evidence.initial_request = before.boot_requested ? 1u : 0u;
+    for (volatile uint32_t i = 0u; i < UINT32_C(12000000); ++i) {
+        __NOP();
+    }
+    g_das_boot_evidence.pre_request_seen = box->cm4_early_seen;
+    if (g_das_boot_evidence.boot_option_cm4 == 0u) {
+        if (before.boot_requested || box->cm4_early_seen != 0u) fail(8u);
+        g_das_boot_evidence.pre_request_quiet = 1u;
     }
     box->challenge = CHALLENGE;
     __DMB();
@@ -84,6 +127,8 @@ int main(void) {
         }
     }
     if (!answered || box->cm4_heartbeat == 0u) fail(3u);
+    g_das_boot_evidence.post_request_seen = box->cm4_early_seen;
+    if (box->cm4_early_seen != 1u) fail(9u);
     bool pending = false;
     if (das_hsem_notification_pending(HSEM_CHANNEL, &pending) != DAS_OK ||
         !pending) fail(4u);
@@ -104,10 +149,21 @@ void HardFault_Handler(void) { fail(UINT32_C(0xdead)); }
 #elif defined(CORE_CM4)
 int main(void) {
     boot_mailbox_t* const box = BOX;
-    /* If CM4 boots before CM7 (BOOT_CM4 option enabled), wait for CM7. */
-    while (box->magic != BOOT_MAGIC || box->challenge != CHALLENGE) {
+    /* Autostart CPU2 may enter before CM7 publishes its mailbox. Observe
+     * the CM7 initialization marker first, then signal entry into main()
+     * BEFORE checking the application challenge. On BOOT_CM4=0 this marker
+     * must stay absent until CPU1 writes RCC BOOT_C2.
+     */
+    while (box->magic != BOOT_MAGIC) { __NOP(); }
+    /* Keep publishing presence while CM7 builds its mailbox. A CM4 that
+     * starts very early may have observed a stale magic from a prior reset;
+     * CM7 can overwrite its first early_seen store during reinitialization.
+     */
+    do {
+        box->cm4_early_seen = 1u;
+        __DMB();
         __NOP();
-    }
+    } while (box->challenge != CHALLENGE);
     if (das_hsem_init() != DAS_OK ||
         das_hsem_try_acquire(HSEM_CHANNEL) != DAS_OK) {
         for (;;) { __NOP(); }
